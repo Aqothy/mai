@@ -35,7 +35,8 @@ type NewParticipant struct {
 	Session  string                           `json:"session,omitempty"`
 }
 
-// CreateThread is a new chat, or one imported from a native session.
+// CreateThread is a new chat, or, with Participant.Session, one imported from
+// a native session no chat has. An import takes no Prompt.
 type CreateThread struct {
 	Title       string             `json:"title,omitempty"`
 	Workspace   provider.Workspace `json:"workspace"`
@@ -344,6 +345,10 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 		return CommandResult{}, err
 	}
 	imported := create.Participant.Session != ""
+	if imported && create.Prompt != nil {
+		// One command, one outcome: a message goes to the chat once it exists.
+		return CommandResult{}, refused(CodeInvalid, "an imported chat starts without a message")
+	}
 	workspace, err := e.resolveWorkspace(create.Workspace, imported)
 	if err != nil {
 		return CommandResult{}, err
@@ -353,39 +358,29 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 			return CommandResult{}, err
 		}
 	}
-	// Importing a session that is an agent's opens its chat: the one the
-	// agent is on, or one it left (/clear), whose turns that chat still shows.
-	var participant *participantState
-	if imported {
-		if participant, err = e.sessionOwner(create.Participant); err != nil {
-			return CommandResult{}, err
+	if err := e.validateParticipant(create.Participant, workspace); err != nil {
+		return CommandResult{}, err
+	}
+	title := strings.TrimSpace(create.Title)
+	if title == "" && create.Prompt != nil {
+		title = provider.PromptPreviewTitle(create.Prompt.Text)
+		if runes := []rune(title); len(runes) > 80 {
+			title = string(runes[:80])
 		}
 	}
-	if participant == nil {
-		if err := e.validateParticipant(create.Participant, workspace); err != nil {
-			return CommandResult{}, err
-		}
-		title := strings.TrimSpace(create.Title)
-		if title == "" && create.Prompt != nil {
-			title = provider.PromptPreviewTitle(create.Prompt.Text)
-			if runes := []rune(title); len(runes) > 80 {
-				title = string(runes[:80])
-			}
-		}
-		if title == "" {
-			title = "Untitled thread"
-		}
-		if imported && !e.allowsRoot(workspace.Cwd) {
-			e.addProject(s, workspace.Cwd)
-		}
-		thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
-		participant = e.newParticipant(s, thread, create.Participant)
-		thread.Address = participant.ID
-		s.putThread(thread)
+	if title == "" {
+		title = "Untitled thread"
 	}
-	result := CommandResult{Thread: participant.Thread, Participant: participant.ID}
+	if imported && !e.allowsRoot(workspace.Cwd) {
+		e.addProject(s, workspace.Cwd)
+	}
+	thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
+	participant := e.newParticipant(s, thread, create.Participant)
+	thread.Address = participant.ID
+	s.putThread(thread)
+	result := CommandResult{Thread: thread.ID, Participant: participant.ID}
 	if create.Prompt != nil {
-		delivery, err := e.deliver(s, actor, Deliver{Thread: participant.Thread, To: participant.ID, Body: *create.Prompt, Mode: ModeQueue})
+		delivery, err := e.deliver(s, actor, Deliver{Thread: thread.ID, To: participant.ID, Body: *create.Prompt, Mode: ModeQueue})
 		if err != nil {
 			return CommandResult{}, err
 		}
@@ -418,10 +413,41 @@ func (e *Engine) newParticipant(s *step, thread *threadState, new NewParticipant
 	thread.participants = append(thread.participants, participant.ID)
 	s.putParticipant(participant)
 	if new.Session != "" {
-		s.tx.imported = append(s.tx.imported, sessionKey{new.Instance, new.Session})
+		key := sessionKey{new.Instance, new.Session}
+		if closing := e.closing[key]; closing != nil {
+			participant.worker = closing.worker
+			delete(e.closing, key)
+		}
+		s.tx.imported = append(s.tx.imported, key)
 		e.takeSession(s, participant, new.Session)
+		// Read before the session is first opened: once it is live, only what
+		// runs in maiD is recorded, and what it held before would never show.
+		e.reconcile(s, thread, participant)
 	}
 	return participant
+}
+
+// closingWorker is a deleted chat's agent's worker, which may still have
+// calls for the agent's session to run: a Send on its way, the Release that
+// follows it. An agent that takes the session meanwhile (an import) takes the
+// worker, so the provider gets one session's calls in order whoever has it:
+// an Open that overtook the Release would be undone by it.
+type closingWorker struct{ worker *worker }
+
+// closeAfter keeps the worker for the session until it ran what the step
+// queued on it.
+func (e *Engine) closeAfter(s *step, key sessionKey, w *worker) {
+	closing := &closingWorker{worker: w}
+	e.closing[key] = closing
+	s.after(func() {
+		w.enqueue(func() {
+			e.post(func(*step) {
+				if e.closing[key] == closing {
+					delete(e.closing, key)
+				}
+			})
+		})
+	})
 }
 
 // takeSession puts the participant on a native session. The session is its
@@ -436,16 +462,6 @@ func (e *Engine) takeSession(s *step, participant *participantState, session str
 	e.bySession[key] = participant.ID
 	s.tx.sessions[key] = participant.ID
 	s.putParticipant(participant)
-}
-
-// sessionOwner is the agent the native session new names belongs to: the one
-// on it, or one that left it. Nil when it is no chat's.
-func (e *Engine) sessionOwner(new NewParticipant) (*participantState, error) {
-	id, err := e.db.sessionOwner(e.ctx, sessionKey{new.Instance, new.Session})
-	if err != nil {
-		return nil, err
-	}
-	return e.participants[id], nil
 }
 
 func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Workspace) error {
@@ -464,11 +480,11 @@ func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Work
 	}
 	// A native session is one agent's, in one chat: what is kept of it has
 	// one owner, and the ledger holds one participant per session.
-	owner, err := e.sessionOwner(new)
+	id, err := e.db.sessionOwner(e.ctx, sessionKey{new.Instance, new.Session})
 	if err != nil {
 		return err
 	}
-	if owner != nil {
+	if owner := e.participants[id]; owner != nil {
 		return refused(CodeInvalid, "that session is already part of the chat %q", e.threads[owner.Thread].Title)
 	}
 	return nil
@@ -600,7 +616,11 @@ func (e *Engine) deleteThread(s *step, actor Actor, id ThreadID) error {
 				e.dropOrphans(s, participant.Instance)
 			}
 			if participant.Session != "" {
-				delete(e.bySession, sessionKey{participant.Instance, participant.Session})
+				key := sessionKey{participant.Instance, participant.Session}
+				delete(e.bySession, key)
+				if participant.worker != nil {
+					e.closeAfter(s, key, participant.worker)
+				}
 			}
 			delete(e.participants, pid)
 		}

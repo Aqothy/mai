@@ -62,6 +62,9 @@ type Engine struct {
 	seq          uint64
 	subscribers  map[uint64]*subscriber
 	nextSub      uint64
+	// closing are the workers of deleted chats' agents, by the session they
+	// were on, while calls for that session may still be queued on them.
+	closing map[sessionKey]*closingWorker
 	// orphans are events for sessions not known yet, kept while an Open on
 	// their instance is in flight (Opened arrives after the session's first
 	// events can).
@@ -105,7 +108,7 @@ func Open(cfg Config) (*Engine, error) {
 		cfg: cfg, db: database, attachments: attachments, logger: cfg.Logger.With("component", "orchestration"),
 		ctx: ctx, cancel: cancel, inbox: make(chan func(*step), 1024), done: make(chan struct{}),
 		threads: make(map[ThreadID]*threadState), participants: make(map[ParticipantID]*participantState), projects: make(map[string]time.Time),
-		bySession: make(map[sessionKey]ParticipantID), subscribers: make(map[uint64]*subscriber),
+		bySession: make(map[sessionKey]ParticipantID), closing: make(map[sessionKey]*closingWorker), subscribers: make(map[uint64]*subscriber),
 		opening: make(map[provider.InstanceID]int), published: make(map[ThreadID]ThreadSummary),
 		waits: make(map[uint64]*waiter), dispatched: make(map[DeliveryID]bool), noticed: make(map[string]bool),
 	}

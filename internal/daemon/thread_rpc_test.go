@@ -345,9 +345,9 @@ func TestAgentMetadataReachesClients(t *testing.T) {
 	}
 }
 
-// A native session the agent kept opens as a chat once, showing what the
-// agent replays of it, and its folder becomes a project; an agent that can't
-// reopen sessions refuses it.
+// A native session the agent kept is imported as a chat, showing what the
+// agent replays of it, and its folder becomes a project. Importing it again
+// is refused, as is an agent that can't reopen sessions.
 func TestImportedSessionShowsItsHistory(t *testing.T) {
 	s := newTestServer(t)
 	history := t.TempDir()
@@ -360,8 +360,9 @@ func TestImportedSessionShowsItsHistory(t *testing.T) {
 	cwd := canonicalTempDir(t)
 	importing := orchestration.CreateThread{Title: "Imported", Workspace: provider.Workspace{Cwd: cwd}, Participant: orchestration.NewParticipant{Instance: "agent", Session: "external-session"}}
 	imported := client.command(t, wire.CommandParams{CreateThread: &importing})
-	if again := client.command(t, wire.CommandParams{CreateThread: &importing}); again.Thread != imported.Thread {
-		t.Fatalf("importing again made %q, want the chat %q", again.Thread, imported.Thread)
+	_, err := client.commandErr(wire.CommandParams{CreateThread: &importing})
+	if code, reason := commandCode(err); code != invalidParamsCode || reason != orchestration.CodeInvalid {
+		t.Fatalf("importing the session again: code %d reason %q (%v), want it refused as invalid: it is a chat's", code, reason, err)
 	}
 	var projects wire.ProjectList
 	client.call(t, wire.MethodProjectSubscribeList, wire.EmptyParams{}, &projects)
@@ -381,7 +382,7 @@ func TestImportedSessionShowsItsHistory(t *testing.T) {
 	})
 
 	importing.Participant.Instance = "list-only"
-	_, err := client.commandErr(wire.CommandParams{CreateThread: &importing})
+	_, err = client.commandErr(wire.CommandParams{CreateThread: &importing})
 	if code, reason := commandCode(err); code != invalidParamsCode || reason != orchestration.CodeInvalid {
 		t.Fatalf("importing into an agent that can't reopen sessions = %v, want refused invalid", err)
 	}

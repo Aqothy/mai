@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -46,6 +47,16 @@ func moveOn(h *harness, agent *fakeInstance, chat CommandResult, from, to string
 	h.settledTurns(chat.Thread, turns+1)
 }
 
+// engineRead reads engine state as a step.
+func engineRead[T any](h *harness, read func() T) T {
+	h.t.Helper()
+	value, err := call(context.Background(), h.engine, func(*step) (T, error) { return read(), nil })
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return value
+}
+
 func importSession(h *harness, instance provider.InstanceID, session string) CreateThread {
 	return CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance, Session: session}}
 }
@@ -77,29 +88,154 @@ func TestDeletingAChatDeletesEverySessionItWasOn(t *testing.T) {
 	}
 }
 
-// A session a chat's agent left is still that chat's, with its earlier
-// turns: importing it opens the chat. It becomes a chat of its own only once
-// that one is deleted.
-func TestImportingASessionAChatLeftOpensThatChat(t *testing.T) {
+// A native session is in one chat. Importing one a chat's agent is on, or one
+// it left (whose turns the chat still shows), is refused; it can be imported
+// once that chat is deleted.
+func TestImportingASessionOfAChatIsRefused(t *testing.T) {
 	claude := newFakeInstance("claude", "Claude")
 	h := newHarness(t, claude)
 	chat := h.createThread("claude", "one")
 	h.settledTurns(chat.Thread, 1)
-	first := claude.messages()[0].session
-	moveOn(h, claude, chat, first, "claude-session-9")
-	importIt := CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: "claude", Session: first}}
+	first, second := claude.messages()[0].session, "claude-session-9"
+	moveOn(h, claude, chat, first, second)
 
-	if imported := h.do(importIt); imported.Thread != chat.Thread || imported.Participant != chat.Participant {
-		t.Fatalf("importing the session the chat left = %+v, want the chat %s and its agent %s", imported, chat.Thread, chat.Participant)
+	for name, session := range map[string]string{"the session the chat is on": second, "the session the chat left": first} {
+		var refusal *CommandError
+		if _, err := h.doAs(h.device, importSession(h, "claude", session)); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
+			t.Errorf("importing %s: %v, want it refused as invalid", name, err)
+		}
+	}
+	if threads := engineRead(h, func() int { return len(h.engine.threads) }); threads != 1 {
+		t.Fatalf("%d chats after the refused imports, want the one", threads)
 	}
 	h.do(DeleteThread{Thread: chat.Thread})
-	again := h.do(importIt)
-	if again.Thread == chat.Thread {
-		t.Fatal("importing the session after its chat was deleted opened the deleted chat")
-	}
+	again := h.do(importSession(h, "claude", first))
 	if turns := h.settledTurns(again.Thread, 1).Turns; len(turns) != 1 || len(turns[0].Entries) == 0 {
 		t.Fatalf("the imported chat's turns = %#v, want the session's one turn, read from the provider", turns)
 	}
+}
+
+// An import reads the session before the chat first opens it: a live
+// session's record is what runs in maiD, so what it held before would never
+// show in a chat that got a message before anyone looked at it.
+func TestAnImportedChatMessagedBeforeItWasReadShowsTheSessionsTurns(t *testing.T) {
+	agent := newFakeInstance("agent", "Agent")
+	h := newHarness(t, agent)
+	chat := h.createThread("agent", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := agent.messages()[0].session
+	h.do(DeleteThread{Thread: chat.Thread})
+
+	imported := h.do(importSession(h, "agent", session))
+	h.do(Deliver{Thread: imported.Thread, Body: MessageBody{Text: "two"}})
+	h.eventually("the agent's answer", func() bool {
+		agent.mu.Lock()
+		defer agent.mu.Unlock()
+		return len(agent.sessions[session].turns) == 2
+	})
+	var shown []string
+	for _, turn := range h.settledTurns(imported.Thread, 2).Turns {
+		for _, entry := range turn.Entries {
+			if entry.Kind == provider.ItemKindUserMessage {
+				shown = append(shown, entry.Text)
+			}
+		}
+	}
+	if !slices.Equal(shown, []string{"one", "two"}) {
+		t.Fatalf("the imported chat shows the messages %q, want the session's earlier one and the new one", shown)
+	}
+}
+
+// An import is the session as it is: a message is sent to the chat it made.
+func TestAnImportTakesNoMessage(t *testing.T) {
+	agent := newFakeInstance("agent", "Agent")
+	h := newHarness(t, agent)
+	chat := h.createThread("agent", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := agent.messages()[0].session
+	h.do(DeleteThread{Thread: chat.Thread})
+
+	create := importSession(h, "agent", session)
+	create.Prompt = &MessageBody{Text: "two"}
+	var refusal *CommandError
+	if _, err := h.doAs(h.device, create); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
+		t.Fatalf("importing with a message: %v, want it refused as invalid", err)
+	}
+	if threads := engineRead(h, func() int { return len(h.engine.threads) }); threads != 0 {
+		t.Fatalf("%d chats after the refused import, want none", threads)
+	}
+}
+
+// A chat deleted while its agent is slow has calls for its session still to
+// run: the Send that hasn't returned, and the Release behind it. An import of
+// the session meanwhile opens it after them, not before a Release that would
+// close what the import opened.
+func TestAnImportFollowsTheCallsOfTheSessionsDeletedChat(t *testing.T) {
+	agent := newFakeInstance("agent", "Agent")
+	h := newHarness(t, agent)
+	chat := h.createThread("agent", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := agent.messages()[0].session
+
+	held, letGo := make(chan struct{}), make(chan struct{})
+	agent.mu.Lock()
+	agent.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		if lastLine(in.Text) == "slow" {
+			close(held)
+			<-letGo
+			return provider.SendAck{}, errors.New("cancelled")
+		}
+		// As the adapters do (acp/turn.go, codexapp/session.go).
+		f.mu.Lock()
+		live := f.live[session]
+		f.mu.Unlock()
+		if !live {
+			return provider.SendAck{}, errors.New("session " + session + " is not open")
+		}
+		return f.answer(session, in, "answer to "+lastLine(in.Text))
+	}
+	agent.mu.Unlock()
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "slow"}})
+	<-held
+	h.do(DeleteThread{Thread: chat.Thread})
+
+	imported := h.do(importSession(h, "agent", session))
+	h.do(Deliver{Thread: imported.Thread, Body: MessageBody{Text: "two"}})
+	// An Open that doesn't wait for the deleted chat's calls runs at once.
+	for range 20 {
+		agent.mu.Lock()
+		opened := agent.opened
+		agent.mu.Unlock()
+		if opened != 1 {
+			t.Fatal("the import opened the session while the deleted chat's calls for it were still to run")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(letGo)
+	h.eventually("the second message to be answered", func() bool {
+		snapshot := h.snapshot(imported.Thread)
+		for _, delivery := range snapshot.Queue {
+			if delivery.State == DeliveryRefused {
+				t.Fatalf("the imported chat's message was refused: %s", delivery.Reason)
+			}
+		}
+		answered := 0
+		for _, turn := range snapshot.Turns {
+			if turn.State.Settled() {
+				answered++
+			}
+		}
+		return answered >= 2
+	})
+	agent.mu.Lock()
+	released, live := len(agent.released), agent.live[session]
+	agent.mu.Unlock()
+	if released != 1 || !live {
+		t.Fatalf("the session was released %d times and is live: %v; want the deleted chat's one release, then the import's open", released, live)
+	}
+	h.eventually("the worker to be the imported chat's alone", func() bool {
+		return engineRead(h, func() int { return len(h.engine.closing) }) == 0
+	})
 }
 
 // A new session's first frames can reach the mirror before the engine hears
@@ -158,53 +294,6 @@ func TestAnImportDropsWhatWasMirroredWhileNoChatHadTheSession(t *testing.T) {
 	h.do(importSession(h, "agent", session))
 	if _, _, frames := h.kept("agent", session); frames != 0 {
 		t.Fatalf("the imported chat's session has %d frames written while no chat had it, want none", frames)
-	}
-}
-
-// Importing a session that is a chat's opens that chat, and a prompt sent
-// with the import is delivered there, to the agent whose session it is.
-func TestAPromptSentWithAnImportOfAChatsSessionIsDelivered(t *testing.T) {
-	claude := newFakeInstance("claude", "Claude")
-	h := newHarness(t, claude)
-	chat := h.createThread("claude", "one")
-	h.settledTurns(chat.Thread, 1)
-	first := claude.messages()[0].session
-	withPrompt := func(text string) CreateThread {
-		create := importSession(h, "claude", first)
-		create.Prompt = &MessageBody{Text: text}
-		return create
-	}
-
-	if on := h.do(withPrompt("two")); on.Thread != chat.Thread || on.Delivery == "" {
-		t.Fatalf("importing the chat's session with a prompt = %+v, want the chat %s and the prompt's delivery", on, chat.Thread)
-	}
-	h.settledTurns(chat.Thread, 2)
-	moveOn(h, claude, chat, first, "claude-session-9")
-	if left := h.do(withPrompt("three")); left.Thread != chat.Thread || left.Delivery == "" {
-		t.Fatalf("importing the session the chat left with a prompt = %+v, want the chat %s and the prompt's delivery", left, chat.Thread)
-	}
-	h.settledTurns(chat.Thread, 4)
-	got := claude.messages()
-	if last := got[len(got)-1]; len(got) != 3 || !strings.HasSuffix(last.in.Text, "three") || last.session != "claude-session-9" {
-		t.Fatalf("the agent got %d messages, the last %q on %q; want the three prompts, the last on the session it is on now", len(got), last.in.Text, last.session)
-	}
-}
-
-// The agent an import names is the one whose session it is, also among
-// several agents of one provider in a chat.
-func TestImportingASessionNamesTheAgentThatWasOnIt(t *testing.T) {
-	claude := newFakeInstance("claude", "Claude")
-	h := newHarness(t, claude)
-	chat := h.createThread("claude", "one")
-	h.settledTurns(chat.Thread, 1)
-	second := h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "claude"}})
-	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "two"}})
-	h.settledTurns(chat.Thread, 2)
-	its := claude.messages()[1].session
-	moveOn(h, claude, chat, its, "claude-session-9")
-
-	if imported := h.do(importSession(h, "claude", its)); imported.Thread != chat.Thread || imported.Participant != second.Participant {
-		t.Fatalf("importing the session the second agent left = %+v, want the chat %s and that agent %s (the first is %s)", imported, chat.Thread, second.Participant, chat.Participant)
 	}
 }
 
