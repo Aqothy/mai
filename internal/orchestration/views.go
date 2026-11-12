@@ -508,8 +508,8 @@ func (e *Engine) Entry(ctx context.Context, id ThreadID, ref string) (provider.E
 			return entry, nil
 		}
 	}
-	// An entry of a session the participant has since left (/clear, a new
-	// session) is found through its turn.
+	// An entry of a session the participant has since left (for a new one,
+	// when its provider couldn't resume it) is found through its turn.
 	if entry, ok, err := e.db.threadEntry(ctx, id, ref); err != nil || ok {
 		return entry, err
 	}

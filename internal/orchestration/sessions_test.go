@@ -31,20 +31,32 @@ func (h *harness) kept(instance provider.InstanceID, session string) (row bool, 
 
 var testFrame = []json.RawMessage{json.RawMessage(`{"frame":1}`)}
 
-// moveOn has the chat's agent leave its session for a new one, as /clear
-// does, and run a turn of its own there.
-func moveOn(h *harness, agent *fakeInstance, chat CommandResult, from, to string) {
+// moveOn has the chat's agent leave its session for a new one, which it
+// returns: the provider can't resume the session for the chat's next message,
+// whose turn runs in a new one. The provider has the session again after.
+func moveOn(h *harness, agent *fakeInstance, chat CommandResult, from string) string {
 	h.t.Helper()
 	turns := len(h.snapshot(chat.Thread).Turns)
+	// Kept under another name meanwhile: the fake numbers a new session by
+	// how many it has.
+	const aside = "set aside"
 	agent.mu.Lock()
-	agent.sessions[to] = &fakeSession{delivered: make(map[string]bool)}
-	agent.live[to] = true
+	agent.sessions[aside] = agent.sessions[from]
+	delete(agent.sessions, from)
+	delete(agent.live, from)
 	agent.mu.Unlock()
-	agent.send(from, provider.SessionReplaced{New: to})
-	agent.send(to, provider.TurnStarted{Turn: "wake:1", By: provider.TurnByProvider})
-	agent.send(to, provider.EntryUpserted{Entry: provider.Entry{Ref: "wake:1/m1", Turn: "wake:1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "Cleared."}})
-	agent.send(to, provider.TurnSettled{Turn: "wake:1", State: provider.TurnCompleted})
+	agent.send(from, provider.SessionClosed{})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "go on"}})
 	h.settledTurns(chat.Thread, turns+1)
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	agent.sessions[from] = agent.sessions[aside]
+	delete(agent.sessions, aside)
+	received := agent.received[len(agent.received)-1]
+	if received.session == from {
+		h.t.Fatalf("the message went to session %q, want a new one", from)
+	}
+	return received.session
 }
 
 // engineRead reads engine state as a step.
@@ -68,9 +80,9 @@ func TestDeletingAChatDeletesEverySessionItWasOn(t *testing.T) {
 	h := newHarness(t, claude)
 	chat := h.createThread("claude", "one")
 	h.settledTurns(chat.Thread, 1)
-	first, second := claude.messages()[0].session, "claude-session-9"
+	first := claude.messages()[0].session
 	h.engine.Mirror("claude").Append(first, testFrame)
-	moveOn(h, claude, chat, first, second)
+	second := moveOn(h, claude, chat, first)
 	for _, session := range []string{first, second} {
 		if row, entries, _ := h.kept("claude", session); !row || entries == 0 {
 			t.Fatalf("before the delete, session %q: row %v, %d entries; want the chat's turns in it kept", session, row, entries)
@@ -96,8 +108,8 @@ func TestImportingASessionOfAChatIsRefused(t *testing.T) {
 	h := newHarness(t, claude)
 	chat := h.createThread("claude", "one")
 	h.settledTurns(chat.Thread, 1)
-	first, second := claude.messages()[0].session, "claude-session-9"
-	moveOn(h, claude, chat, first, second)
+	first := claude.messages()[0].session
+	second := moveOn(h, claude, chat, first)
 
 	for name, session := range map[string]string{"the session the chat is on": second, "the session the chat left": first} {
 		var refusal *CommandError
@@ -306,7 +318,7 @@ func TestASessionAChatLeftCantBecomeAnotherChats(t *testing.T) {
 	one := h.createThread("claude", "one")
 	h.settledTurns(one.Thread, 1)
 	left := claude.messages()[0].session
-	moveOn(h, claude, one, left, "claude-session-9")
+	moveOn(h, claude, one, left)
 	two := h.createThread("claude", "two")
 	h.settledTurns(two.Thread, 1)
 	_, before, _ := h.kept("claude", left)

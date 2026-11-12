@@ -32,6 +32,9 @@ const (
 	fakeControlLog = "fake-control.log"
 )
 
+// fakeResetSession is the session the fake continues in after a reset.
+const fakeResetSession = "22222222-2222-4222-8222-222222222222"
+
 type fakeCLI struct {
 	session string
 	// transcript is the session's file; chain its last line.
@@ -79,11 +82,15 @@ func fakeCLIMain() {
 		case "user":
 			if !initSent {
 				initSent = true
-				f.out(map[string]any{"type": "system", "subtype": "init", "session_id": f.session, "model": "fake-model", "permissionMode": "default"})
+				f.init()
 			}
 			f.user(message)
 		}
 	}
+}
+
+func (f *fakeCLI) init() {
+	f.out(map[string]any{"type": "system", "subtype": "init", "session_id": f.session, "model": "fake-model", "permissionMode": "default", "terminal_slash_commands": []string{"doctor"}})
 }
 
 func (f *fakeCLI) log(name, line string) {
@@ -355,9 +362,13 @@ func (f *fakeCLI) user(message map[string]any) {
 		uuid := f.line(map[string]any{"type": "assistant", "message": kept})
 		f.out(map[string]any{"type": "assistant", "uuid": uuid, "session_id": f.session, "message": kept})
 		f.result(nil)
-	case strings.Contains(said, "CLEAR"):
-		f.session = "22222222-2222-4222-8222-222222222222"
-		f.out(map[string]any{"type": "conversation_reset", "new_conversation_id": f.session, "session_id": f.session})
+	case strings.Contains(said, "RESET"):
+		// The reset names the session it ends. The next one's ID is on what
+		// follows, and is not new_conversation_id (SDK ConversationResetMessage).
+		f.out(map[string]any{"type": "conversation_reset", "new_conversation_id": "33333333-3333-4333-8333-333333333333", "session_id": f.session})
+		f.session = fakeResetSession
+		f.init()
+		f.say(nil, text("Starting over"))
 		f.result(nil)
 	case strings.Contains(said, "SIGNED_OUT"):
 		message := map[string]any{"id": "msg_err", "role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Invalid API key · Please run /login"}}}
@@ -401,7 +412,11 @@ func (f *fakeCLI) control(message map[string]any) {
 	switch request["subtype"] {
 	case "initialize":
 		respond(map[string]any{
-			"commands": []map[string]any{{"name": "compact", "description": "Compact context", "argumentHint": "[instructions]"}},
+			"commands": []map[string]any{
+				{"name": "compact", "description": "Compact context", "argumentHint": "[instructions]"},
+				{"name": "clear", "description": "Start a new conversation", "aliases": []string{"reset", "new"}},
+				{"name": "doctor", "description": "Check the installation"},
+			},
 			"models": []map[string]any{
 				{"value": "default", "resolvedModel": "fake-model", "displayName": "Default", "description": "Recommended", "supportsEffort": true, "supportedEffortLevels": []string{"low", "high"}},
 				{"value": "fake-model", "resolvedModel": "fake-model", "displayName": "Fake", "description": "Test model"},

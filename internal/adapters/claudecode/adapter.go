@@ -74,6 +74,9 @@ type sessionProcess struct {
 	client  *streamClient
 	done    chan struct{}
 	closing bool
+	// reset: the CLI replaced the session's conversation, so what the process
+	// says from then on is another session's (conversationReset).
+	reset bool
 	// mcpConfig is the file holding the session's MCP servers, removed with
 	// the process.
 	mcpConfig string
@@ -92,6 +95,10 @@ type claudeSession struct {
 	mcp            *provider.MCPServer
 	skills         []provider.Skill
 	options        []provider.ConfigOption
+	// commands are the CLI's commands in the session's cwd; terminalCommands,
+	// those of them bound to the CLI's own terminal, which a chat can't run.
+	commands         []sdkCommand
+	terminalCommands []string
 
 	proc *sessionProcess
 
@@ -168,6 +175,10 @@ type Instance struct {
 	pendingApprovals map[string]*pendingApproval
 	models           []sdkModel
 	commands         []sdkCommand
+	// terminalCommands are the commands the CLI last said are bound to its own
+	// terminal. It says so with a session's first query (system/init), so a
+	// session opens with what the last one heard.
+	terminalCommands []string
 	// defaultPermissionMode is the mode a session starts in without a
 	// selection, from the user's settings.
 	defaultPermissionMode string

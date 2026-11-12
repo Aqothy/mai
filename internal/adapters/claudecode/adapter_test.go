@@ -407,19 +407,102 @@ func TestReleaseAndExit(t *testing.T) {
 	}
 }
 
-func TestClearMovesToTheNewSession(t *testing.T) {
+func commandNames(commands []provider.SlashCommand) []string {
+	names := make([]string, 0, len(commands))
+	for _, command := range commands {
+		names = append(names, command.Name)
+	}
+	return names
+}
+
+// A chat is offered the CLI's commands it can run: not the one that replaces
+// the session, nor those bound to the CLI's own terminal, which the CLI names
+// with a session's first query.
+func TestCommandsAChatCantRunAreNotOffered(t *testing.T) {
+	h := openTest(t)
+	first, err := h.Open(context.Background(), provider.OpenInput{Workspace: provider.Workspace{Cwd: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := commandNames(first.Commands); !slices.Equal(names, []string{"compact", "doctor"}) {
+		t.Fatalf("commands before the CLI named its terminal's = %v, want compact and doctor", names)
+	}
+	h.send(t, first.Session, "COMPACT", false)
+	changed := h.events.WaitFor(t, "the commands to change", func(event provider.Event) bool {
+		config, ok := event.Body.(provider.ConfigChanged)
+		return ok && config.Commands != nil
+	})
+	if names := commandNames(changed.Body.(provider.ConfigChanged).Commands); changed.Session != first.Session || !slices.Equal(names, []string{"compact"}) {
+		t.Fatalf("commands after the first query = %v for %q, want compact alone", names, changed.Session)
+	}
+	second, err := h.Open(context.Background(), provider.OpenInput{Workspace: provider.Workspace{Cwd: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := commandNames(second.Commands); !slices.Equal(names, []string{"compact"}) {
+		t.Fatalf("the next session's commands = %v, want compact alone", names)
+	}
+}
+
+// The command that replaces the session is refused by any of the names the
+// CLI lists for it, and the session took nothing; a message that only
+// mentions it is a message.
+func TestTheCommandThatReplacesTheSessionIsRefused(t *testing.T) {
 	h := openTest(t)
 	session, _ := h.open(t)
-	h.send(t, session, "CLEAR", false)
-	replaced := h.events.WaitFor(t, "the replacement", func(event provider.Event) bool {
-		_, ok := event.Body.(provider.SessionReplaced)
-		return ok
-	})
-	if replaced.Session != session || replaced.Body.(provider.SessionReplaced).New != "22222222-2222-4222-8222-222222222222" {
-		t.Fatalf("replaced = %#v", replaced)
+	for _, text := range []string{"/clear", "  /reset now", "/NEW"} {
+		delivery := newSessionUUID()
+		if _, err := h.Send(context.Background(), session, provider.SendInput{Delivery: delivery, Text: text}); err == nil {
+			t.Fatalf("Send %q succeeded, want it refused", text)
+		}
+		if took, err := h.Delivered(context.Background(), session, provider.DeliveryProbe{Delivery: delivery, Text: text}); err != nil || took != provider.TriNo {
+			t.Fatalf("Delivered after the refused %q = %v, %v; want no", text, took, err)
+		}
 	}
-	if _, err := h.session("22222222-2222-4222-8222-222222222222"); err != nil {
-		t.Fatalf("new session: %v", err)
+	delivery := h.send(t, session, "COMPACT, not /clear", false)
+	if settled := h.events.WaitFor(t, "the settle", providertest.Settled(delivery)).Body.(provider.TurnSettled); settled.State != provider.TurnCompleted {
+		t.Fatalf("the message that mentions the command = %#v, want it run", settled)
+	}
+	for _, event := range h.events.Snapshot() {
+		if _, closed := event.Body.(provider.SessionClosed); closed {
+			t.Fatal("the session closed")
+		}
+	}
+}
+
+// A CLI that replaces the session's conversation some other way ends the
+// session as a process that exited does: the chat shows nothing of the new
+// session, and its next message continues the one it has.
+func TestAConversationTheCLIReplacedEndsTheSession(t *testing.T) {
+	h := openTest(t)
+	session, cwd := h.open(t)
+	delivery := h.send(t, session, "RESET", false)
+	if settled := h.events.WaitFor(t, "the settle", providertest.Settled(delivery)).Body.(provider.TurnSettled); settled.State != provider.TurnFailed || !strings.Contains(settled.Error, "new conversation") {
+		t.Fatalf("the turn the reset came in = %#v, want it failed with the reason", settled)
+	}
+	h.events.WaitFor(t, "the session to close", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.SessionClosed)
+		return ok && event.Session == session
+	})
+	for _, event := range h.events.Snapshot() {
+		if event.Session != session {
+			t.Fatalf("an event of session %q: %#v; want only the chat's session", event.Session, event.Body)
+		}
+		if entry, ok := event.Body.(provider.EntryUpserted); ok && strings.Contains(entry.Entry.Text, "Starting over") {
+			t.Fatalf("the chat shows what the new session said: %#v", entry.Entry)
+		}
+	}
+
+	again, err := h.Open(context.Background(), provider.OpenInput{Session: session, Workspace: provider.Workspace{Cwd: cwd}})
+	if err != nil || again.Session != session {
+		t.Fatalf("opening the session again = %q, %v; want it resumed", again.Session, err)
+	}
+	next := h.send(t, session, "COMPACT", false)
+	if settled := h.events.WaitFor(t, "the next settle", providertest.Settled(next)).Body.(provider.TurnSettled); settled.State != provider.TurnCompleted {
+		t.Fatalf("the next message's turn = %#v, want it completed", settled)
+	}
+	if turns := h.history(t, session).Turns; len(turns) != 2 {
+		t.Fatalf("the session's history has %d turns, want the reset's and the next", len(turns))
 	}
 }
 

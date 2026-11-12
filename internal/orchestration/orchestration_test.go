@@ -93,13 +93,12 @@ func TestAnAgentsOwnTurnWaitsForAnothersTurn(t *testing.T) {
 		turns := h.snapshot(chat.Thread).Turns
 		return len(turns) == 2 && turns[1].State == provider.TurnRunning
 	})
-	// Ending a request it shows, or moving to a new session, doesn't wait.
+	// Ending a request it shows doesn't wait.
 	claude.send(first.session, provider.RequestResolved{Request: "r1"})
 	if requests := h.snapshot(chat.Thread).Requests; len(requests) != 0 {
 		t.Fatalf("requests = %#v while codex runs, want claude's withdrawn one gone", requests)
 	}
-	session := "claude-session-9"
-	claude.send(first.session, provider.SessionReplaced{New: session})
+	session := first.session
 	claude.send(session, provider.TurnStarted{Turn: "wake:1", By: provider.TurnByProvider})
 	claude.send(session, provider.EntryUpserted{Entry: provider.Entry{Ref: "wake:1/m1", Turn: "wake:1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "The build passed."}})
 	claude.send(session, provider.TurnSettled{Turn: "wake:1", State: provider.TurnCompleted})

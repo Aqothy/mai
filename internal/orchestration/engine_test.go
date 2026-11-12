@@ -616,8 +616,6 @@ func TestTextStreamsOntoASettledTurn(t *testing.T) {
 		h.engine.providerEvent(s, "claude", generation, provider.Event{Session: session, Body: provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: " finished"}})
 	})
 	claude.send(session, provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: "."})
-	// What streamed is its turn's session's, though the chat moved on.
-	claude.send(session, provider.SessionReplaced{New: "claude-session-2"})
 	text := func() string {
 		turns := h.snapshot(chat.Thread).Turns
 		return joined(texts(turns[len(turns)-1]))

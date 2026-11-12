@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 // touch its successor's state.
 func (h *Instance) handleMessage(session *claudeSession, proc *sessionProcess, message sdkMessage) {
 	h.mu.Lock()
-	current := session.proc == proc
+	current := session.proc == proc && !proc.reset
 	h.mu.Unlock()
 	if !current {
 		return
@@ -80,7 +81,7 @@ func (h *Instance) handleMessage(session *claudeSession, proc *sessionProcess, m
 	case "result":
 		settled = h.handleResult(session, message, now)
 	case "conversation_reset":
-		h.clearConversation(session, message.NewConversationID, now)
+		h.conversationReset(proc)
 	default:
 		// rate_limit_event, tool_progress, tool_use_summary, auth_status,
 		// prompt_suggestion, and future kinds are intentionally ignored.
@@ -126,7 +127,15 @@ func (h *Instance) handleSystem(session *claudeSession, message sdkMessage, at t
 		}
 		h.mu.Lock()
 		session.activeModel = init.Model
+		var commands []provider.SlashCommand
+		if !slices.Equal(init.TerminalSlashCommands, session.terminalCommands) {
+			session.terminalCommands, h.terminalCommands = init.TerminalSlashCommands, init.TerminalSlashCommands
+			commands = slashCommandsFromSDK(session.commands, session.terminalCommands)
+		}
 		h.mu.Unlock()
+		if commands != nil {
+			h.emitAt(session.id, provider.ConfigChanged{Commands: commands}, at)
+		}
 		h.syncSettings(session, init.PermissionMode, init.Model)
 	case "status":
 		var status systemStatus
@@ -237,24 +246,17 @@ func (h *Instance) syncSettings(session *claudeSession, mode, model string) {
 	}
 }
 
-// clearConversation handles conversation_reset (/clear, or leaving plan mode
-// with a cleared context): the CLI continues in a new session, which the
-// thread follows.
-func (h *Instance) clearConversation(session *claudeSession, next string, at time.Time) {
-	if next == "" || next == session.id {
-		return
-	}
-	previous := session.id
-	session.live.settle(provider.TurnCompleted, "", "", at)
+// conversationReset ends a session whose CLI replaced its conversation with
+// a new session's (conversation_reset: "after /clear or any other flow that
+// discards the transcript mid-session", SDK ConversationResetMessage). Send
+// refuses the command, so this is some other flow. A chat is its session and
+// the process now runs another, so the process ends as one that exited would
+// (waitProcess), and the chat's next message resumes the session it had.
+func (h *Instance) conversationReset(proc *sessionProcess) {
 	h.mu.Lock()
-	if h.sessions[previous] == session {
-		delete(h.sessions, previous)
-	}
-	session.id = next
-	h.sessions[next] = session
+	proc.reset = true
 	h.mu.Unlock()
-	session.live = newMapper(next, func(body provider.EventBody, at time.Time) { h.emitAt(session.id, body, at) })
-	h.emitAt(previous, provider.SessionReplaced{New: next}, at)
+	go proc.process.Stop()
 }
 
 func (h *Instance) handleStreamEvent(session *claudeSession, m *mapper, message sdkMessage, at time.Time) {
@@ -339,7 +341,7 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage, at t
 
 func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, raw json.RawMessage) {
 	h.mu.Lock()
-	current := session.proc == proc
+	current := session.proc == proc && !proc.reset
 	h.mu.Unlock()
 	if !current {
 		_ = proc.client.respondControlError(requestID, "session process was replaced")

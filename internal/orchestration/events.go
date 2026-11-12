@@ -37,9 +37,10 @@ func (e *Engine) InstanceGone(instance provider.InstanceID, generation uint64) {
 // touched. When the provider's delete then fails, the chat is gone and the
 // session is still the provider's, to delete again or import.
 //
-// A session an agent left (/clear) has no chat on it: it is deleted from its
-// provider, and the chat that was on it stays, with the turns it shows from
-// it (the cache is their record then, as for any session a provider deleted).
+// A session an agent left (its provider couldn't resume it, so the agent
+// went on in a new one) has no chat on it: it is deleted from its provider,
+// and the chat that was on it stays, with the turns it shows from it (the
+// cache is their record then, as for any session a provider deleted).
 func (e *Engine) DeleteSession(ctx context.Context, actor Actor, instance provider.InstanceID, session string) error {
 	// A running process says what it can do; before one ran, its driver may
 	// not know.
@@ -121,7 +122,7 @@ func (e *Engine) providerEvent(s *step, instance provider.InstanceID, generation
 // request already shown, doesn't.
 func waits(thread *threadState, participant *participantState, body provider.EventBody) bool {
 	switch body := body.(type) {
-	case provider.ConfigChanged, provider.GoalChanged, provider.UsageChanged, provider.TitleChanged, provider.SessionReplaced, provider.SessionClosed:
+	case provider.ConfigChanged, provider.GoalChanged, provider.UsageChanged, provider.TitleChanged, provider.SessionClosed:
 		return false
 	case provider.RequestResolved:
 		if thread.requests[body.Request] != nil {
@@ -182,8 +183,6 @@ func (e *Engine) applyEvent(s *step, thread *threadState, participant *participa
 			thread.Title = title
 			s.putThread(thread)
 		}
-	case provider.SessionReplaced:
-		e.sessionReplaced(s, thread, participant, body.New)
 	case provider.SessionClosed:
 		reason := "The agent's session ended."
 		if body.Error != "" {
@@ -430,19 +429,6 @@ func (e *Engine) warning(s *step, thread *threadState, participant *participantS
 		s.putEntries(participant.Instance, turn.Session, authoredByMaid, entry)
 	}
 	e.notifyEntry(s, thread, turn, entry)
-}
-
-// sessionReplaced moves the participant to the session its conversation
-// continues in. The user cleared the agent's context on purpose, so no
-// handoff brings it back: it has seen the thread through its last turn.
-func (e *Engine) sessionReplaced(s *step, thread *threadState, participant *participantState, session string) {
-	if session == "" || session == participant.Session {
-		return
-	}
-	if thread.latest != nil {
-		participant.SeenThrough = thread.latest.ID
-	}
-	e.takeSession(s, participant, session)
 }
 
 // sessionClosed: the participant's live session ended. A turn it ran ends

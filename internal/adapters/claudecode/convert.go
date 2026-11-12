@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/adapters/unifieddiff"
@@ -420,10 +421,17 @@ func userContentBlocks(text string, attachments []provider.Attachment) ([]map[st
 	return blocks, nil
 }
 
-func slashCommandsFromSDK(commands []sdkCommand) []provider.SlashCommand {
+// resetCommand is the CLI command that replaces the session with a new one
+// (conversation_reset). A chat is its session, so the adapter neither offers
+// nor runs it: a new conversation is a new chat.
+const resetCommand = "clear"
+
+// slashCommandsFromSDK are the CLI's commands a chat can run: not those bound
+// to the CLI's own terminal, nor resetCommand.
+func slashCommandsFromSDK(commands []sdkCommand, terminal []string) []provider.SlashCommand {
 	result := make([]provider.SlashCommand, 0, len(commands))
 	for _, command := range commands {
-		if strings.TrimSpace(command.Name) == "" {
+		if strings.TrimSpace(command.Name) == "" || command.Name == resetCommand || slices.Contains(terminal, command.Name) {
 			continue
 		}
 		result = append(result, provider.SlashCommand{
@@ -434,6 +442,25 @@ func slashCommandsFromSDK(commands []sdkCommand) []provider.SlashCommand {
 		})
 	}
 	return result
+}
+
+// resets reports whether the CLI would run resetCommand for a message: one
+// that starts with its name or one of the aliases the CLI lists for it.
+func resets(commands []sdkCommand, text string) bool {
+	typed, found := strings.CutPrefix(strings.TrimSpace(text), "/")
+	if !found {
+		return false
+	}
+	if end := strings.IndexFunc(typed, unicode.IsSpace); end >= 0 {
+		typed = typed[:end]
+	}
+	names := []string{resetCommand}
+	for _, command := range commands {
+		if command.Name == resetCommand {
+			names = append(names, command.Aliases...)
+		}
+	}
+	return slices.ContainsFunc(names, func(name string) bool { return strings.EqualFold(name, typed) })
 }
 
 func approvalDetail(request controlRequestBody) string {

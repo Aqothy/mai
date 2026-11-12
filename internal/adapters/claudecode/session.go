@@ -76,7 +76,7 @@ func (h *Instance) openedLocked(session *claudeSession) provider.Opened {
 	return provider.Opened{
 		Session:  session.id,
 		Options:  append([]provider.ConfigOption(nil), session.options...),
-		Commands: slashCommandsFromSDK(h.commands),
+		Commands: slashCommandsFromSDK(session.commands, session.terminalCommands),
 		Skills:   append([]provider.Skill(nil), session.skills...),
 	}
 }
@@ -162,6 +162,7 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 	if len(initResponse.Commands) > 0 {
 		h.commands = initResponse.Commands
 	}
+	session.commands, session.terminalCommands = h.commands, h.terminalCommands
 	if len(initResponse.Models) > 0 {
 		h.models = initResponse.Models
 	}
@@ -227,7 +228,7 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	// error that ends its turn, while it is still the session's process.
 	proc.process.Drain(proc.client.done, drainTimeout)
 	h.mu.Lock()
-	closing := proc.closing
+	closing, reset := proc.closing, proc.reset
 	current := session.proc == proc
 	if current {
 		session.proc = nil
@@ -241,7 +242,11 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	h.cancelApprovalsForClient(proc.client)
 	if current {
 		state, reason := provider.TurnInterrupted, ""
-		if !closing {
+		switch {
+		case closing:
+		case reset:
+			state, reason = provider.TurnFailed, "Claude Code started a new conversation, which this chat can't follow. Its next message continues from before that."
+		default:
 			state, reason = provider.TurnFailed, "Claude Code exited unexpectedly."
 		}
 		session.mapMu.Lock()
@@ -309,6 +314,12 @@ func (h *Instance) Send(_ context.Context, key string, in provider.SendInput) (p
 	h.mu.Unlock()
 	if proc == nil {
 		return provider.SendAck{}, fmt.Errorf("Claude Code session %q: %w", key, provider.ErrSessionNotFound)
+	}
+	h.mu.Lock()
+	reset := resets(session.commands, in.Text)
+	h.mu.Unlock()
+	if reset {
+		return provider.SendAck{}, fmt.Errorf("/%s starts a new Claude Code session, which this chat can't follow. Start a new chat instead.", resetCommand)
 	}
 	session.mapMu.Lock()
 	defer session.mapMu.Unlock()

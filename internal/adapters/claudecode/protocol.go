@@ -31,9 +31,6 @@ type sdkMessage struct {
 	// Error is set on an assistant message the API failed to produce, e.g.
 	// "authentication_failed".
 	Error string `json:"error,omitempty"`
-	// NewConversationID is the session a conversation_reset (/clear)
-	// continues in.
-	NewConversationID string `json:"new_conversation_id,omitempty"`
 	// IsReplay marks a user line that echoes a message the host wrote, sent
 	// when the CLI takes it into a query (--replay-user-messages).
 	IsReplay bool `json:"isReplay,omitempty"`
@@ -123,6 +120,10 @@ type systemInit struct {
 	PermissionMode string `json:"permissionMode,omitempty"`
 	// Model is the resolved model id, e.g. after /model.
 	Model string `json:"model,omitempty"`
+	// TerminalSlashCommands are the commands whose interface is bound to the
+	// CLI's own terminal; present only when there are any (SDK
+	// SystemInitMessage.terminal_slash_commands).
+	TerminalSlashCommands []string `json:"terminal_slash_commands,omitempty"`
 }
 
 type systemStatus struct {
@@ -231,9 +232,10 @@ type initializeResponse struct {
 }
 
 type sdkCommand struct {
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	ArgumentHint string `json:"argumentHint,omitempty"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description,omitempty"`
+	ArgumentHint string   `json:"argumentHint,omitempty"`
+	Aliases      []string `json:"aliases,omitempty"`
 }
 
 type sdkModel struct {

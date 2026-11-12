@@ -99,9 +99,6 @@ type UsageChanged struct{ Usage TokenUsage }
 // in the provider's own tools, or the provider's).
 type TitleChanged struct{ Title string }
 
-// SessionReplaced: the conversation moved to a new session (Claude /clear).
-type SessionReplaced struct{ New string }
-
 // SessionClosed: the live session ended without the host ending it (its
 // process exited, its connection closed, the provider unloaded it). Error
 // says why, when it failed. An end the host asked for (Release, Delete, Close)
@@ -143,7 +140,6 @@ func (PlanChanged) eventBody()     {}
 func (GoalChanged) eventBody()     {}
 func (UsageChanged) eventBody()    {}
 func (TitleChanged) eventBody()    {}
-func (SessionReplaced) eventBody() {}
 func (SessionClosed) eventBody()   {}
 func (SubagentSeen) eventBody()    {}
 func (Warning) eventBody()         {}

@@ -103,12 +103,12 @@ The CLI runs with `--replay-user-messages`, so it echoes each written message
 | `tool_use_result` with `backgroundTaskId` (Bash) or `status: async_launched`/`remote_launched` (Agent, Workflow) | the tool stays running (`item.updated`, `toolCall.background`) until `system/task_notification` completes it in its turn; in replay the `<task-notification>` message does. `system/task_started` names the tool's task, so `StopItem` can send `stop_task` for it (the CLI answers with a `stopped` notification) |
 | `TodoWrite` input; `TaskCreate`/`TaskUpdate`/`TaskList` results | `turn.plan.updated` (no timeline item) |
 | `result` | `thread.token-usage.updated` (live context from the last `usage.iterations` entry, window of the session's model, cost); a local command's zero usage keeps the meter; then `turn.completed` |
-| `system/init` | adopt the CLI's session id; permission mode and model (e.g. after `/model`) → `config.options.updated` |
+| `system/init` | adopt the CLI's session id; permission mode and model (e.g. after `/model`) → `config.options.updated`; `terminal_slash_commands` leave the command list |
 | `system/status` | permission mode; `compacting` → compaction item in progress |
 | `system/compact_boundary` | compaction item completed |
 | `system/api_retry` | `runtime.warning` |
 | `system/informational` (warnings, prompts a hook blocked) | `runtime.warning` |
-| `conversation_reset` (`/clear`) | follow the new session id; "Cleared context" item |
+| `conversation_reset` | the process now runs another session: it is stopped, its turn fails with the reason and the session closes; the next Open resumes the session the chat has. `/clear` (and its aliases) is refused in `Send` and not listed, so this is some other flow |
 | `parent_tool_use_id != null` | dropped — subagent narration; the Agent tool item represents it |
 
 `result.errors` entries prefixed `[ede_diagnostic]` are CLI telemetry and are
@@ -173,8 +173,9 @@ id search every project directory.
 
 - Set `CLAUDE_CONFIG_DIR`, **never override `HOME`** — that breaks macOS
   keychain OAuth and the CLI reports "Not logged in".
-- The CLI is authoritative for the session id (`system/init`,
-  `conversation_reset`); the next StartSession persists it.
+- The CLI is authoritative for the session id (`system/init`). A
+  `conversation_reset`'s `new_conversation_id` is not the next session's id
+  (SDK `ConversationResetMessage`).
 - Every stream callback fences on `session.proc == proc` so a replaced process
   cannot mutate its successor's state.
 - On process exit: settle the active turn and cancel pending approvals.
