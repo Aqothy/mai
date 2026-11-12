@@ -27,20 +27,20 @@ type Command struct {
 // CommandBody is exactly one of the command types below.
 type CommandBody interface{ commandBody() }
 
-// NewParticipant is an agent to add to a thread: an instance with settings,
-// and an existing native session to import.
+// NewParticipant is an agent to add to a thread: an instance with settings.
 type NewParticipant struct {
 	Instance provider.InstanceID              `json:"instance"`
 	Settings []provider.ConfigOptionSelection `json:"settings,omitempty"`
-	Session  string                           `json:"session,omitempty"`
 }
 
-// CreateThread is a new chat, or, with Participant.Session, one imported from
-// a native session no chat has. An import takes no Prompt.
+// CreateThread is a new chat, or, with Session, an import: the chat of that
+// native session of the participant's instance, which no chat has. An import
+// takes no Prompt.
 type CreateThread struct {
 	Title       string             `json:"title,omitempty"`
 	Workspace   provider.Workspace `json:"workspace"`
 	Participant NewParticipant     `json:"participant"`
+	Session     string             `json:"session,omitempty"`
 	Prompt      *MessageBody       `json:"prompt,omitempty"`
 }
 
@@ -344,7 +344,7 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 	if err := e.requireDevice(actor, "create a chat"); err != nil {
 		return CommandResult{}, err
 	}
-	imported := create.Participant.Session != ""
+	imported := create.Session != ""
 	if imported && create.Prompt != nil {
 		// One command, one outcome: a message goes to the chat once it exists.
 		return CommandResult{}, refused(CodeInvalid, "an imported chat starts without a message")
@@ -361,6 +361,11 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 	if err := e.validateParticipant(create.Participant, workspace); err != nil {
 		return CommandResult{}, err
 	}
+	if imported {
+		if err := e.validateImport(create.Participant.Instance, create.Session); err != nil {
+			return CommandResult{}, err
+		}
+	}
 	title := strings.TrimSpace(create.Title)
 	if title == "" && create.Prompt != nil {
 		title = provider.PromptPreviewTitle(create.Prompt.Text)
@@ -375,7 +380,7 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 		e.addProject(s, workspace.Cwd)
 	}
 	thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
-	participant := e.newParticipant(s, thread, create.Participant)
+	participant := e.newParticipant(s, thread, create.Participant, create.Session)
 	thread.Address = participant.ID
 	s.putThread(thread)
 	result := CommandResult{Thread: thread.ID, Participant: participant.ID}
@@ -403,23 +408,24 @@ func (e *Engine) newThread(s *step, title string, workspace provider.Workspace, 
 	return thread
 }
 
-// newParticipant adds an agent to thread; with new.Session, on that native
-// session, which exists already and is no other agent's (validateParticipant).
-func (e *Engine) newParticipant(s *step, thread *threadState, new NewParticipant) *participantState {
+// newParticipant adds an agent to thread; with session, on that native
+// session, which exists already and is no other agent's (an import's, or a
+// provider's subagent's).
+func (e *Engine) newParticipant(s *step, thread *threadState, new NewParticipant, session string) *participantState {
 	participant := &participantState{Participant: Participant{
 		ID: ParticipantID(newID()), Thread: thread.ID, Instance: new.Instance, Settings: slices.Clone(new.Settings),
 	}}
 	e.participants[participant.ID] = participant
 	thread.participants = append(thread.participants, participant.ID)
 	s.putParticipant(participant)
-	if new.Session != "" {
-		key := sessionKey{new.Instance, new.Session}
+	if session != "" {
+		key := sessionKey{new.Instance, session}
 		if closing := e.closing[key]; closing != nil {
 			participant.worker = closing.worker
 			delete(e.closing, key)
 		}
 		s.tx.imported = append(s.tx.imported, key)
-		e.takeSession(s, participant, new.Session)
+		e.takeSession(s, participant, session)
 		// Read before the session is first opened: once it is live, only what
 		// runs in maiD is recorded, and what it held before would never show.
 		e.reconcile(s, thread, participant)
@@ -472,22 +478,38 @@ func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Work
 	if len(workspace.AdditionalDirectories) > 0 && info.Status != provider.InstanceStatusConfigured && !info.Capabilities.AdditionalDirectories {
 		return refused(CodeInvalid, "%s doesn't support additional directories", info.Name)
 	}
-	if new.Session == "" {
-		return nil
-	}
-	if info.Status != provider.InstanceStatusConfigured && !info.Capabilities.Resume {
+	return nil
+}
+
+// validateImport refuses a native session a chat can't be made of: one its
+// agent can't open, or one that is a chat's already.
+func (e *Engine) validateImport(instance provider.InstanceID, session string) error {
+	if info, _ := e.cfg.Providers.Info(instance); info.Status != provider.InstanceStatusConfigured && !info.Capabilities.Resume {
 		return refused(CodeInvalid, "%s can't open an existing session", info.Name)
 	}
 	// A native session is one agent's, in one chat: what is kept of it has
 	// one owner, and the ledger holds one participant per session.
-	id, err := e.db.sessionOwner(e.ctx, sessionKey{new.Instance, new.Session})
+	owner, err := e.sessionThread(sessionKey{instance, session})
 	if err != nil {
 		return err
 	}
-	if owner := e.participants[id]; owner != nil {
-		return refused(CodeInvalid, "that session is already part of the chat %q", e.threads[owner.Thread].Title)
+	if owner != nil {
+		return refused(CodeInvalid, "that session is already part of the chat %q", owner.Title)
 	}
 	return nil
+}
+
+// sessionThread is the chat a native session is part of: the one whose agent
+// is on it, or was (the chat still shows its turns). Nil when it is no chat's.
+func (e *Engine) sessionThread(key sessionKey) (*threadState, error) {
+	id, err := e.db.sessionOwner(e.ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if owner := e.participants[id]; owner != nil {
+		return e.threads[owner.Thread], nil
+	}
+	return nil, nil
 }
 
 // resolveWorkspace applies the daemon's workspace rule once: a new chat
@@ -660,7 +682,7 @@ func (e *Engine) addParticipant(s *step, actor Actor, add AddParticipant) (Comma
 	if err := e.validateParticipant(add.NewParticipant, thread.Workspace); err != nil {
 		return CommandResult{}, err
 	}
-	participant := e.newParticipant(s, thread, add.NewParticipant)
+	participant := e.newParticipant(s, thread, add.NewParticipant, "")
 	thread.Address = participant.ID
 	s.putThread(thread)
 	e.notifyParticipant(s, thread, participant)

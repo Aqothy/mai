@@ -447,7 +447,7 @@ final class DraftPromptModel {
             if let fork, let throughTurnID = fork.throughTurnID {
                 let agent = forksOwnAgent
                     ? nil
-                    : NewParticipant(instance: providerID, session: nil, settings: selections.isEmpty ? nil : selections)
+                    : NewParticipant(instance: providerID, settings: selections.isEmpty ? nil : selections)
                 threadID = try await store.forkThread(
                     key: draftID,
                     sourceThreadID: fork.sourceThreadID,

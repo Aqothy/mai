@@ -212,7 +212,7 @@ func (e *Engine) forksDeleted(s *step) {
 // times; its session saw the chat through its last turn.
 func (e *Engine) forkedParticipant(s *step, thread *threadState, job *forkJob) *participantState {
 	carryOn := job.carryOn
-	participant := e.newParticipant(s, thread, NewParticipant{Instance: carryOn.Instance, Settings: carryOn.Settings})
+	participant := e.newParticipant(s, thread, NewParticipant{Instance: carryOn.Instance, Settings: carryOn.Settings}, "")
 	e.takeSession(s, participant, job.session)
 	var kept []Turn
 	for _, turn := range job.source.kept {
@@ -283,7 +283,7 @@ func (e *Engine) forkThread(s *step, command Command, fork ForkThread) (CommandR
 		if carryOn != nil {
 			agent = e.forkedParticipant(s, thread, job)
 		} else {
-			agent = e.newParticipant(s, thread, *fork.Agent)
+			agent = e.newParticipant(s, thread, *fork.Agent, "")
 		}
 		thread.Address = agent.ID
 		s.putThread(thread)
@@ -425,7 +425,7 @@ func (e *Engine) spawn(s *step, command Command, spawn Spawn) (CommandResult, ch
 		}
 		text := context.String() + spawn.Brief
 		if participant == nil {
-			participant = e.newParticipant(s, child, agent)
+			participant = e.newParticipant(s, child, agent, "")
 		}
 		child.Address = participant.ID
 		s.putThread(child)

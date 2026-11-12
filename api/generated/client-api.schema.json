@@ -260,9 +260,6 @@
             "$ref": "#/$defs/ConfigOptionSelection"
           },
           "type": "array"
-        },
-        "session": {
-          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -754,6 +751,9 @@
         },
         "participant": {
           "$ref": "#/$defs/NewParticipant"
+        },
+        "session": {
+          "type": "string"
         },
         "prompt": {
           "$ref": "#/$defs/MessageBody"
@@ -1280,9 +1280,6 @@
             "$ref": "#/$defs/ConfigOptionSelection"
           },
           "type": "array"
-        },
-        "session": {
-          "type": "string"
         }
       },
       "additionalProperties": false,

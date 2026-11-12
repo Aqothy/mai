@@ -70,7 +70,7 @@ func engineRead[T any](h *harness, read func() T) T {
 }
 
 func importSession(h *harness, instance provider.InstanceID, session string) CreateThread {
-	return CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance, Session: session}}
+	return CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance}, Session: session}
 }
 
 // Deleting a chat deletes what was kept of every session it was on: also of
@@ -306,55 +306,5 @@ func TestAnImportDropsWhatWasMirroredWhileNoChatHadTheSession(t *testing.T) {
 	h.do(importSession(h, "agent", session))
 	if _, _, frames := h.kept("agent", session); frames != 0 {
 		t.Fatalf("the imported chat's session has %d frames written while no chat had it, want none", frames)
-	}
-}
-
-// A native session is one agent's, in one chat, for as long as that chat
-// lives. Naming it as another chat's agent's session would move what is kept
-// of it to that chat, and deleting that chat would take the first one's turns.
-func TestASessionAChatLeftCantBecomeAnotherChats(t *testing.T) {
-	claude := newFakeInstance("claude", "Claude")
-	h := newHarness(t, claude)
-	one := h.createThread("claude", "one")
-	h.settledTurns(one.Thread, 1)
-	left := claude.messages()[0].session
-	moveOn(h, claude, one, left)
-	two := h.createThread("claude", "two")
-	h.settledTurns(two.Thread, 1)
-	_, before, _ := h.kept("claude", left)
-
-	var refusal *CommandError
-	if _, err := h.doAs(h.device, AddParticipant{Thread: two.Thread, NewParticipant: NewParticipant{Instance: "claude", Session: left}}); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
-		t.Errorf("adding the session chat one left as an agent of chat two: %v, want it refused as invalid", err)
-	}
-	h.do(DeleteThread{Thread: two.Thread})
-	if _, entries, _ := h.kept("claude", left); entries != before {
-		t.Fatalf("after deleting chat two, chat one's session has %d entries, had %d", entries, before)
-	}
-}
-
-// Every command that takes an agent with a session refuses one that is
-// another chat's, and the daemon goes on.
-func TestASessionOfAChatIsRefusedToAnotherChat(t *testing.T) {
-	claude := newFakeInstance("claude", "Claude")
-	h := newHarness(t, claude)
-	one := h.createThread("claude", "one")
-	h.settledTurns(one.Thread, 1)
-	two := h.createThread("claude", "two")
-	h.settledTurns(two.Thread, 1)
-	taken := NewParticipant{Instance: "claude", Session: claude.messages()[0].session}
-
-	for name, command := range map[string]CommandBody{
-		"adding it as an agent":     AddParticipant{Thread: two.Thread, NewParticipant: taken},
-		"forking to an agent on it": ForkThread{Thread: two.Thread, Agent: &taken, Prompt: MessageBody{Text: "go on"}},
-		"spawning an agent on it":   Spawn{Parent: two.Thread, Brief: "look into it", Agent: taken},
-	} {
-		var refusal *CommandError
-		if _, err := h.doAs(h.device, command); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
-			t.Errorf("%s: %v, want it refused as invalid", name, err)
-		}
-	}
-	if again := h.createThread("claude", "three"); again.Thread == "" {
-		t.Fatal("the engine stopped")
 	}
 }

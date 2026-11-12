@@ -493,13 +493,11 @@ public extension ActorView {
 // MARK: - AddParticipant
 public struct AddParticipant: Codable {
     public var instance: String
-    public var session: String?
     public var settings: [ConfigOptionSelection]?
     public var thread: String
 
-    public init(instance: String, session: String?, settings: [ConfigOptionSelection]?, thread: String) {
+    public init(instance: String, settings: [ConfigOptionSelection]?, thread: String) {
         self.instance = instance
-        self.session = session
         self.settings = settings
         self.thread = thread
     }
@@ -525,13 +523,11 @@ public extension AddParticipant {
 
     func with(
         instance: String? = nil,
-        session: String?? = nil,
         settings: [ConfigOptionSelection]?? = nil,
         thread: String? = nil
     ) -> AddParticipant {
         return AddParticipant(
             instance: instance ?? self.instance,
-            session: session ?? self.session,
             settings: settings ?? self.settings,
             thread: thread ?? self.thread
         )
@@ -1757,12 +1753,13 @@ public extension Continue {
 public struct CreateThread: Codable {
     public var participant: NewParticipant
     public var prompt: MessageBody?
-    public var title: String?
+    public var session, title: String?
     public var workspace: Workspace
 
-    public init(participant: NewParticipant, prompt: MessageBody?, title: String?, workspace: Workspace) {
+    public init(participant: NewParticipant, prompt: MessageBody?, session: String?, title: String?, workspace: Workspace) {
         self.participant = participant
         self.prompt = prompt
+        self.session = session
         self.title = title
         self.workspace = workspace
     }
@@ -1789,12 +1786,14 @@ public extension CreateThread {
     func with(
         participant: NewParticipant? = nil,
         prompt: MessageBody?? = nil,
+        session: String?? = nil,
         title: String?? = nil,
         workspace: Workspace? = nil
     ) -> CreateThread {
         return CreateThread(
             participant: participant ?? self.participant,
             prompt: prompt ?? self.prompt,
+            session: session ?? self.session,
             title: title ?? self.title,
             workspace: workspace ?? self.workspace
         )
@@ -1812,12 +1811,10 @@ public extension CreateThread {
 // MARK: - NewParticipant
 public struct NewParticipant: Codable {
     public var instance: String
-    public var session: String?
     public var settings: [ConfigOptionSelection]?
 
-    public init(instance: String, session: String?, settings: [ConfigOptionSelection]?) {
+    public init(instance: String, settings: [ConfigOptionSelection]?) {
         self.instance = instance
-        self.session = session
         self.settings = settings
     }
 }
@@ -1842,12 +1839,10 @@ public extension NewParticipant {
 
     func with(
         instance: String? = nil,
-        session: String?? = nil,
         settings: [ConfigOptionSelection]?? = nil
     ) -> NewParticipant {
         return NewParticipant(
             instance: instance ?? self.instance,
-            session: session ?? self.session,
             settings: settings ?? self.settings
         )
     }

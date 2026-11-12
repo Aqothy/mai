@@ -520,8 +520,8 @@ final class ThreadStore {
         )
     }
 
-    /// Opens an agent's session as a chat and returns its thread id. A
-    /// session already open as a chat returns that chat. The chat shows the
+    /// Imports an agent's session as a new chat and returns its thread id.
+    /// maiD refuses a session that is a chat already. The chat shows the
     /// agent's history once it is opened.
     func importProviderSession(agentID: String, session: SessionSummary) async throws -> String {
         let instanceID = try await ensureProviderAvailable(agentID)
@@ -532,8 +532,9 @@ final class ThreadStore {
             throw RPCError("The agent didn't say where this session works")
         }
         let create = CreateThread(
-            participant: NewParticipant(instance: instanceID, session: session.sessionID, settings: nil),
+            participant: NewParticipant(instance: instanceID, settings: nil),
             prompt: nil,
+            session: session.sessionID,
             title: session.title,
             workspace: Workspace(additionalDirectories: session.additionalDirectories, cwd: cwd)
         )
@@ -674,8 +675,9 @@ final class ThreadStore {
         settings: [ConfigOptionSelection]
     ) async throws -> String {
         let create = CreateThread(
-            participant: NewParticipant(instance: providerInstanceID, session: nil, settings: settings.isEmpty ? nil : settings),
+            participant: NewParticipant(instance: providerInstanceID, settings: settings.isEmpty ? nil : settings),
             prompt: try await uploadingAttachmentData(of: body),
+            session: nil,
             title: nil,
             workspace: Workspace(additionalDirectories: additionalDirectories.isEmpty ? nil : additionalDirectories, cwd: cwd)
         )

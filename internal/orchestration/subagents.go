@@ -49,7 +49,7 @@ func (e *Engine) subagentSeen(s *step, thread *threadState, participant *partici
 	parentThread.children = append(parentThread.children, id)
 	s.putThread(child)
 	s.touch(parentThread.ID)
-	agent := e.newParticipant(s, child, NewParticipant{Instance: participant.Instance, Session: seen.Session})
+	agent := e.newParticipant(s, child, NewParticipant{Instance: participant.Instance}, seen.Session)
 	child.Address = agent.ID
 	agent.live = participant.live
 	if seen.Model != "" {

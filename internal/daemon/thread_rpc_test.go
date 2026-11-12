@@ -358,7 +358,7 @@ func TestImportedSessionShowsItsHistory(t *testing.T) {
 	startFakeACPAgent(t, s, "list-only", "-list-only")
 	client := newRecordingClient(t, s)
 	cwd := canonicalTempDir(t)
-	importing := orchestration.CreateThread{Title: "Imported", Workspace: provider.Workspace{Cwd: cwd}, Participant: orchestration.NewParticipant{Instance: "agent", Session: "external-session"}}
+	importing := orchestration.CreateThread{Title: "Imported", Workspace: provider.Workspace{Cwd: cwd}, Participant: orchestration.NewParticipant{Instance: "agent"}, Session: "external-session"}
 	imported := client.command(t, wire.CommandParams{CreateThread: &importing})
 	_, err := client.commandErr(wire.CommandParams{CreateThread: &importing})
 	if code, reason := commandCode(err); code != invalidParamsCode || reason != orchestration.CodeInvalid {
