@@ -93,7 +93,6 @@ type (
 type (
 	InstanceInfo          = provider.InstanceInfo
 	AuthenticationResult  = provider.AuthenticationResult
-	SessionSummary        = provider.SessionSummary
 	Attachment            = provider.Attachment
 	PromptAnnotation      = provider.PromptAnnotation
 	ConfigOption          = provider.ConfigOption
@@ -247,6 +246,14 @@ type ProviderAuthenticateParams struct {
 
 type ProviderInstanceParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
+}
+
+// SessionSummary is a native session an agent lists. Thread is the chat it is
+// part of, when it is one: a client opens that chat, and importing the session
+// is refused.
+type SessionSummary struct {
+	provider.SessionSummary
+	Thread orchestration.ThreadID `json:"thread,omitempty"`
 }
 
 type ProviderListSessionsParams struct {

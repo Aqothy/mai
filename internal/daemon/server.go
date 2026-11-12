@@ -239,6 +239,28 @@ func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.I
 	return result, nil
 }
 
+// listSessions lists an instance's native sessions, each with the chat it is
+// part of, if any.
+func (s *Server) listSessions(ctx context.Context, instanceID provider.InstanceID, cwd string) ([]wire.SessionSummary, error) {
+	listed, err := s.providerService.Sessions(ctx, instanceID, cwd)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(listed))
+	for index, session := range listed {
+		ids[index] = session.SessionID
+	}
+	threads, err := s.engine.SessionThreads(ctx, instanceID, ids)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]wire.SessionSummary, len(listed))
+	for index, session := range listed {
+		sessions[index] = wire.SessionSummary{SessionSummary: session, Thread: threads[session.SessionID]}
+	}
+	return sessions, nil
+}
+
 // logoutProvider signs out of a provider.
 func (s *Server) logoutProvider(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
 	info, err := s.providerService.Logout(ctx, instanceID)

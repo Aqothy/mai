@@ -2001,6 +2001,9 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "thread": {
+          "type": "string"
         }
       },
       "additionalProperties": false,

@@ -6,6 +6,7 @@ struct SessionImportRow: View {
     let isImporting: Bool
     let isDeleting: Bool
     let importSession: () -> Void
+    let openChat: () -> Void
     let deleteSession: () -> Void
 
     @State private var isConfirmingDelete = false
@@ -36,7 +37,11 @@ struct SessionImportRow: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                if capabilities.canImport {
+                if entry.threadID != nil {
+                    Button("Open", action: openChat)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                } else if capabilities.canImport {
                     Button("Import", action: importSession)
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
@@ -50,7 +55,7 @@ struct SessionImportRow: View {
                     }
                     .labelStyle(.iconOnly)
                     .accessibilityLabel("Session Actions")
-                } else if !capabilities.canImport {
+                } else if entry.threadID == nil, !capabilities.canImport {
                     Label("No available actions", systemImage: "nosign")
                         .labelStyle(.iconOnly)
                         .foregroundStyle(.secondary)

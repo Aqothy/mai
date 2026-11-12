@@ -112,7 +112,11 @@ final class SessionImportModel {
         importingSessionIDs.insert(entry.id)
         defer { importingSessionIDs.remove(entry.id) }
         do {
-            return try await store.importProviderSession(agentID: agentID, session: entry.summary)
+            let threadID = try await store.importProviderSession(agentID: agentID, session: entry.summary)
+            if effectiveAgentID == agentID, let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                entries[index] = SessionImportEntry(summary: entry.summary.with(thread: threadID))
+            }
+            return threadID
         } catch is CancellationError {
             return nil
         } catch {

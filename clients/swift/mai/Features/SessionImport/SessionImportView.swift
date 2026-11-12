@@ -34,6 +34,11 @@ struct SessionImportView: View {
                             }
                         }
                     },
+                    openChat: {
+                        if let threadID = entry.threadID {
+                            openThread(threadID)
+                        }
+                    },
                     deleteSession: {
                         Task { await model.deleteSession(entry) }
                     }
@@ -148,6 +153,7 @@ struct SessionImportStatusView: View {
                             additionalDirectories: nil,
                             cwd: "/Users/me/Code/maiD",
                             sessionID: "sess-1",
+                            thread: "thread-1",
                             title: "Fix reconnect loop",
                             updatedAt: "2026-08-01T10:15:30Z"
                         ),
@@ -155,6 +161,7 @@ struct SessionImportStatusView: View {
                             additionalDirectories: nil,
                             cwd: "/Users/me/Code/side-project",
                             sessionID: "sess-2",
+                            thread: nil,
                             title: nil,
                             updatedAt: nil
                         ),

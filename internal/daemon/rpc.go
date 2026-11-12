@@ -611,8 +611,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		sessions, err := h.server.providerService.Sessions(ctx, params.InstanceID, params.Cwd)
-		return append([]provider.SessionSummary{}, sessions...), err
+		return h.server.listSessions(ctx, params.InstanceID, params.Cwd)
 	case wire.MethodProviderDeleteSession:
 		var params wire.ProviderSessionParams
 		if err := decodeRPCParams(req, &params); err != nil {

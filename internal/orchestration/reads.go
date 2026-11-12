@@ -18,6 +18,25 @@ func (e *Engine) Workspace(ctx context.Context, id ThreadID) (provider.Workspace
 	})
 }
 
+// SessionThreads are the chats an instance's native sessions are part of, by
+// session; a session that is no chat's has none. It answers as an import
+// would: a session with a chat here is one CreateThread refuses.
+func (e *Engine) SessionThreads(ctx context.Context, instance provider.InstanceID, sessions []string) (map[string]ThreadID, error) {
+	return call(ctx, e, func(*step) (map[string]ThreadID, error) {
+		threads := make(map[string]ThreadID)
+		for _, session := range sessions {
+			thread, err := e.sessionThread(sessionKey{instance, session})
+			if err != nil {
+				return nil, err
+			}
+			if thread != nil {
+				threads[session] = thread.ID
+			}
+		}
+		return threads, nil
+	})
+}
+
 // ParticipantSession names a thread's participant (its address when empty)
 // for a provider call on its behalf: its instance and its live session, if
 // any.

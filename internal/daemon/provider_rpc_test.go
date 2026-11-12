@@ -205,14 +205,21 @@ func TestProviderSessionManagement(t *testing.T) {
 	client.subscribe(t, thread)
 	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
 
-	var sessions []provider.SessionSummary
+	var sessions []wire.SessionSummary
 	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &sessions)
-	if len(sessions) != 1 || sessions[0].SessionID != "sess-1" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" {
-		t.Fatalf("provider.listSessions = %#v, want the chat's session", sessions)
+	if len(sessions) != 1 || sessions[0].SessionID != "sess-1" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" || sessions[0].Thread != thread {
+		t.Fatalf("provider.listSessions = %#v, want the chat's session, naming the chat", sessions)
 	}
 	err := client.callErr(wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
 	if err == nil || !strings.Contains(err.Error(), provider.ErrUnsupported.Error()) {
 		t.Fatalf("deleting a session the agent can't delete = %v, want unsupported", err)
+	}
+
+	client.command(t, wire.CommandParams{DeleteThread: &orchestration.DeleteThread{Thread: thread}})
+	var after []wire.SessionSummary
+	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &after)
+	if len(after) != 1 || after[0].SessionID != "sess-1" || after[0].Thread != "" {
+		t.Fatalf("provider.listSessions after the chat was deleted = %#v, want its session, no chat's now", after)
 	}
 }
 

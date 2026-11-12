@@ -5476,18 +5476,19 @@ public struct SessionSummary: Codable {
     public var additionalDirectories: [String]?
     public var cwd: String?
     public var sessionID: String
-    public var title, updatedAt: String?
+    public var thread, title, updatedAt: String?
 
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, cwd
         case sessionID = "sessionId"
-        case title, updatedAt
+        case thread, title, updatedAt
     }
 
-    public init(additionalDirectories: [String]?, cwd: String?, sessionID: String, title: String?, updatedAt: String?) {
+    public init(additionalDirectories: [String]?, cwd: String?, sessionID: String, thread: String?, title: String?, updatedAt: String?) {
         self.additionalDirectories = additionalDirectories
         self.cwd = cwd
         self.sessionID = sessionID
+        self.thread = thread
         self.title = title
         self.updatedAt = updatedAt
     }
@@ -5515,6 +5516,7 @@ public extension SessionSummary {
         additionalDirectories: [String]?? = nil,
         cwd: String?? = nil,
         sessionID: String? = nil,
+        thread: String?? = nil,
         title: String?? = nil,
         updatedAt: String?? = nil
     ) -> SessionSummary {
@@ -5522,6 +5524,7 @@ public extension SessionSummary {
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             cwd: cwd ?? self.cwd,
             sessionID: sessionID ?? self.sessionID,
+            thread: thread ?? self.thread,
             title: title ?? self.title,
             updatedAt: updatedAt ?? self.updatedAt
         )
