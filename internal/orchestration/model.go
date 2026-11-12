@@ -136,7 +136,8 @@ type Participant struct {
 	ID       ParticipantID
 	Thread   ThreadID
 	Instance provider.InstanceID
-	// Settings are its config options as last chosen: model, mode, effort.
+	// Settings are its config options as last chosen, by a person or, since,
+	// by the agent itself (followOptions): model, mode, effort.
 	Settings []provider.ConfigOptionSelection
 	// Session is its native session key; empty until a turn opens one.
 	Session string

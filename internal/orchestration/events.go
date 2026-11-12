@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -160,6 +161,7 @@ func (e *Engine) applyEvent(s *step, thread *threadState, participant *participa
 	case provider.ConfigChanged:
 		if body.Options != nil {
 			participant.options = body.Options
+			e.followOptions(s, participant)
 		}
 		if body.Commands != nil {
 			participant.commands = body.Commands
@@ -429,6 +431,32 @@ func (e *Engine) warning(s *step, thread *threadState, participant *participantS
 		s.putEntries(participant.Instance, turn.Session, authoredByMaid, entry)
 	}
 	e.notifyEntry(s, thread, turn, entry)
+}
+
+// followOptions keeps the participant's settings at what its live session
+// has. A setting is what the next Open asks for, and an agent changes some
+// itself (it leaves plan mode once its plan is approved): the choice it
+// replaced would be put back when the session is next opened. A session still
+// being opened reports what it had before its settings were applied, so only a
+// live one is followed.
+func (e *Engine) followOptions(s *step, participant *participantState) {
+	if participant.live == nil {
+		return
+	}
+	// A copy: an Open on its way reads the settings it was given.
+	settings := slices.Clone(participant.Settings)
+	changed := false
+	for index, setting := range settings {
+		for _, option := range participant.options {
+			if option.ID == setting.OptionID && option.CurrentValue != nil && !reflect.DeepEqual(option.CurrentValue, setting.Value) {
+				settings[index].Value, changed = option.CurrentValue, true
+			}
+		}
+	}
+	if changed {
+		participant.Settings = settings
+		s.putParticipant(participant)
+	}
 }
 
 // sessionClosed: the participant's live session ended. A turn it ran ends

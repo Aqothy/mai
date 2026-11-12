@@ -649,3 +649,36 @@ func TestTextStreamsOntoAnOvertakenTurn(t *testing.T) {
 		t.Fatalf("overtaken turn = %s", got)
 	}
 }
+
+// A setting is what the next Open asks for, so one the agent changed itself
+// (it leaves plan mode once its plan is approved) is the chat's from then on:
+// a restart doesn't put the old choice back. An option nobody chose stays the
+// provider's, and so does what a session says before it is open: that is from
+// before its settings were applied.
+func TestASettingTheAgentChangedIsTheChats(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+	h.do(UpdateParticipant{Participant: chat.Participant, Setting: provider.ConfigOptionSelection{OptionID: "mode", Value: "read", Category: provider.ConfigOptionCategoryMode}})
+	claude.send(session, provider.ConfigChanged{Options: []provider.ConfigOption{
+		{ID: "mode", Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryMode, CurrentValue: "edit"},
+		{ID: "model", Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryModel, CurrentValue: "large"},
+	}})
+	want := []provider.ConfigOptionSelection{{OptionID: "mode", Value: "edit", Category: provider.ConfigOptionCategoryMode}}
+	agent := func() ParticipantView { return h.snapshot(chat.Thread).Participants[0] }
+	h.eventually("the chat's settings to follow the agent's change", func() bool { return slices.Equal(agent().Settings, want) })
+
+	h.restart()
+	if got := agent(); !slices.Equal(got.Settings, want) || got.Access != provider.AccessEdit {
+		t.Fatalf("after a restart: settings %v, access %q; want the mode the agent changed to, and no other setting", got.Settings, got.Access)
+	}
+
+	claude.send(session, provider.ConfigChanged{Options: []provider.ConfigOption{{ID: "mode", Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryMode, CurrentValue: "full"}}})
+	claude.send(session, provider.UsageChanged{Usage: provider.TokenUsage{UsedTokens: 7}})
+	h.eventually("the session's events to be taken", func() bool { return agent().Usage != nil })
+	if got := agent().Settings; !slices.Equal(got, want) {
+		t.Fatalf("settings after a session that isn't open reported its options = %v, want them unchanged", got)
+	}
+}
