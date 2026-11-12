@@ -624,7 +624,9 @@ func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOpti
 
 // applySettings applies a session's chosen settings, the model first: a
 // model can change which other options exist. A setting the agent refuses
-// shows as a warning instead of failing the session.
+// shows as a warning instead of failing the session. The options are reported
+// once all are set: an update the agent sent after one of them is older than
+// the rest, and must not be the last the daemon hears.
 func (h *Instance) applySettings(ctx context.Context, sessionID string, settings []provider.ConfigOptionSelection) {
 	categories := make(map[string]provider.ConfigOptionCategory)
 	for _, option := range h.combinedConfigOptions(sessionID) {
@@ -641,14 +643,31 @@ func (h *Instance) applySettings(ctx context.Context, sessionID string, settings
 		}
 		return 0
 	})
+	set := false
 	for _, setting := range ordered {
 		if h.sessionConfigOptionAlreadyCurrent(sessionID, setting.OptionID, setting.Value) {
 			continue
 		}
+		set = true
 		if err := h.setSessionConfigOptionValue(ctx, sessionID, setting.OptionID, setting.Value); err != nil {
 			h.emit(sessionID, provider.Warning{Message: fmt.Sprintf("config option %q not restored: %v", setting.OptionID, err)})
 		}
 	}
+	if set {
+		h.emitConfigOptions(sessionID)
+	}
+}
+
+// afterUpdates runs apply once the updates the agent has sent the session so
+// far are taken. What it sent before answering a request is older than the
+// answer, but is taken on the stream's own goroutine, possibly later: applied
+// straight away, the answer's state would be overwritten by it.
+func (h *Instance) afterUpdates(ctx context.Context, sessionID string, apply func()) error {
+	stream := h.sessionStreamFor(sessionID)
+	if stream == nil {
+		return fmt.Errorf("ACP session %q is not open", sessionID)
+	}
+	return h.awaitSessionBarrier(ctx, stream, apply)
 }
 
 func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID string, optionID string, value any) error {
@@ -676,8 +695,7 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 	if err != nil {
 		return acpRequestError(err)
 	}
-	h.cacheSessionState(sessionID, resp.ConfigOptions, nil)
-	return nil
+	return h.afterUpdates(ctx, sessionID, func() { h.cacheSessionState(sessionID, resp.ConfigOptions, nil) })
 }
 
 // applyCurrentMode records an agent-initiated mode change. Agents that expose
@@ -714,12 +732,13 @@ func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, mo
 	if _, err := h.agentPeer.SetSessionMode(ctx, schema.SetSessionModeRequest{SessionID: schema.SessionId(sessionID), ModeID: modeID}); err != nil {
 		return acpRequestError(err)
 	}
-	h.mu.Lock()
-	if session := h.sessions[sessionID]; session != nil && session.modes != nil {
-		session.modes.CurrentModeID = modeID
-	}
-	h.mu.Unlock()
-	return nil
+	return h.afterUpdates(ctx, sessionID, func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if session := h.sessions[sessionID]; session != nil && session.modes != nil {
+			session.modes.CurrentModeID = modeID
+		}
+	})
 }
 
 func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID string, value any) bool {

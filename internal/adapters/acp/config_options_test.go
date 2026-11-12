@@ -3,7 +3,9 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/maiD/internal/provider"
@@ -222,5 +224,111 @@ func TestCurrentModeUpdateMovesModeConfigOption(t *testing.T) {
 	}).Body.(provider.ConfigChanged)
 	if current, _ := provider.CurrentConfigString(changed.Options, "mode"); current != "acceptEdits" {
 		t.Fatalf("mode option = %q, want acceptEdits", current)
+	}
+}
+
+func lastOptions(t *testing.T, h testInstance, session string) map[string]any {
+	t.Helper()
+	values := map[string]any{}
+	for _, event := range h.events.Snapshot() {
+		if changed, ok := event.Body.(provider.ConfigChanged); ok && event.Session == session && changed.Options != nil {
+			clear(values)
+			for _, option := range changed.Options {
+				values[option.ID] = option.CurrentValue
+			}
+		}
+	}
+	return values
+}
+
+// What the agent sent before it answered a set is older than the answer.
+// The session's updates are taken on their own goroutine, so one can still
+// be waiting when the answer is in: the answer's options are the session's
+// all the same, and the last the daemon hears.
+func TestAnOptionSetsAnswerOutlastsTheUpdatesSentBeforeIt(t *testing.T) {
+	stale := map[string]any{"sessionUpdate": "config_option_update", "configOptions": wireModelAndReasoningOptions("model-a", "low")}
+	agent := &fakeWireAgent{
+		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModelAndReasoningOptions("model-a", "low")})
+		},
+		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.sendUpdate("sess", stale)
+			a.sendUpdate("sess", stale)
+			a.respond(id, map[string]any{"configOptions": wireModelAndReasoningOptions("model-b", "low")})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	// The first update is held as it is reported, the second behind it, until
+	// the set has returned or would have.
+	configured := make(chan struct{})
+	var held sync.Once
+	h.host.Emit = func(event provider.Event) {
+		if changed, ok := event.Body.(provider.ConfigChanged); ok && changed.Options[0].CurrentValue == "model-a" {
+			held.Do(func() {
+				select {
+				case <-configured:
+				case <-time.After(200 * time.Millisecond):
+				}
+			})
+		}
+		h.events.Emit(event)
+	}
+	opened := openSession(t, h, provider.OpenInput{})
+	if err := h.Configure(testContext(t), opened.Session, provider.ConfigOptionSelection{OptionID: "z-model", Value: "model-b"}); err != nil {
+		t.Fatal(err)
+	}
+	close(configured)
+	// The two updates and the set are each reported.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		reports := 0
+		for _, event := range h.events.Snapshot() {
+			if _, ok := event.Body.(provider.ConfigChanged); ok {
+				reports++
+			}
+		}
+		if reports == 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d option reports, want the two updates' and the set's", reports)
+		}
+	}
+	if last := lastOptions(t, h, opened.Session); last["z-model"] != "model-b" {
+		t.Fatalf("the last options reported = %v, want the set's answer, model-b", last)
+	}
+	again := openSession(t, h, provider.OpenInput{Session: opened.Session})
+	if model, _ := provider.CurrentConfigString(again.Options, "z-model"); model != "model-b" {
+		t.Fatalf("the session's model = %q, want the set's answer, model-b", model)
+	}
+}
+
+// A session opens with its settings applied, and says so last: an update the
+// agent sent while one of several was set is older than the others.
+func TestASessionOpenedWithSettingsReportsThemLast(t *testing.T) {
+	model, reasoning := "model-a", "low"
+	agent := &fakeWireAgent{
+		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModelAndReasoningOptions(model, reasoning)})
+		},
+		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			switch params.ConfigID {
+			case "z-model":
+				model = params.stringValue()
+				// A model changes which other options exist, so the agent says
+				// what they are now.
+				a.sendUpdate("sess", map[string]any{"sessionUpdate": "config_option_update", "configOptions": wireModelAndReasoningOptions(model, reasoning)})
+			case "a-reasoning":
+				reasoning = params.stringValue()
+			}
+			a.respond(id, map[string]any{"configOptions": wireModelAndReasoningOptions(model, reasoning)})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	opened := openSession(t, h, provider.OpenInput{Settings: []provider.ConfigOptionSelection{
+		{OptionID: "z-model", Value: "model-b"},
+		{OptionID: "a-reasoning", Value: "high"},
+	}})
+	if last := lastOptions(t, h, opened.Session); last["z-model"] != "model-b" || last["a-reasoning"] != "high" {
+		t.Fatalf("the last options reported = %v, want the settings the session opened with", last)
 	}
 }
