@@ -10,7 +10,7 @@ struct ChatMarkdownFastPathTests {
     @Test @MainActor
     func segmentPrefilterMatchesTheFullParser() {
         let sources =
-            MockChatMessage.variableHeightStressConversation(count: 1_000).map(\.text) + [
+            ChatMarkdownFixtures.variableHeightStressTexts(count: 1_000) + [
                 "Plain paragraph with **bold** and a [link](https://example.com).",
                 "# Heading\n\n- list\n- items\n\n> quote\n\n---\n\nTail",
                 "Setext heading\n===\n\n1. ordered\n2. list\n\n* * *",
@@ -33,7 +33,7 @@ struct ChatMarkdownFastPathTests {
     func planProseRunsMatchWholeSourceRendering() {
         var proseRuns = 0
         for case .prose(let prose) in ChatMarkdownRenderPlanner.plan(
-            from: MockChatMarkdownFixtures.componentCatalog
+            from: ChatMarkdownFixtures.componentCatalog
         ).blocks {
             proseRuns += 1
             #expect(
@@ -49,7 +49,7 @@ struct ChatMarkdownFastPathTests {
     /// converge on the settled full parse.
     @Test @MainActor
     func streamedPrefixesConvergeOnTheSettledPlan() throws {
-        let source = MockChatMessage.essay(wordCount: 10_000)
+        let source = ChatMarkdownFixtures.essay(wordCount: 10_000)
         let characters = Array(source)
         let chunkSize = (characters.count + 239) / 240
         var planner = ChatIncrementalMarkdownRenderPlanner()

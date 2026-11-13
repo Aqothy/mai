@@ -53,8 +53,7 @@ struct DesktopAppContainer: View {
         }
         #if DEBUG
             .modifier(
-                ChatBenchmarkHarness(
-                    store: store, selectThread: { store.selectThread($0) }, showsLabButton: true)
+                ChatRealThreadBenchmarkRunner(store: store, selectThread: { store.selectThread($0) })
             )
         #endif
     }

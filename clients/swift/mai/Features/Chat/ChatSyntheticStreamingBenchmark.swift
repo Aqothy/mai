@@ -31,7 +31,7 @@
             self.store = store
             self.includesActivity = includesActivity
             characters = Array(
-                (MockChatMarkdownFixtures.codeHeavy + "\n\n" + MockChatMarkdownFixtures.longMarkdown)
+                (ChatMarkdownFixtures.codeHeavy + "\n\n" + ChatMarkdownFixtures.longMarkdown)
                     .prefix(20_000))
         }
 

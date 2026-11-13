@@ -206,7 +206,7 @@ final class ChatFramePacingMonitor: NSObject {
 /// Runs frame-pacing benchmarks against the live chat surface: a constant
 /// velocity scroll sweep that realizes rows exactly like a user flick, and a
 /// passive monitor for streaming runs. Results are logged for headless
-/// harvesting and kept for in-app display.
+/// harvesting.
 @Observable
 final class ChatBenchmarkModel {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -218,8 +218,6 @@ final class ChatBenchmarkModel {
     )
 
     private(set) var isRunning = false
-    private(set) var reports: [ChatFramePacingReport] = []
-    var latestReport: ChatFramePacingReport?
 
     private static func note(_ message: String) {
         logger.notice("\(message, privacy: .public)")
@@ -452,8 +450,6 @@ final class ChatBenchmarkModel {
         label: String
     ) -> ChatFramePacingReport? {
         guard let report = monitor.stop(label: label) else { return nil }
-        reports.append(report)
-        latestReport = report
         Self.logger.notice("\(report.summary, privacy: .public)")
         Self.logger.notice(
             "CHAT_BENCHMARK_RESULT \(report.machineReadable, privacy: .public)"
@@ -583,8 +579,8 @@ final class ChatBenchmarkModel {
 }
 
 /// Headless benchmarking: launching a Debug build with
-/// `-ChatAutoBenchmark <plan>` opens the lab directly and runs
-/// the selected passes, printing one `CHAT_BENCHMARK_RESULT` JSON line per
+/// `-ChatAutoBenchmark <plan>` with a benchmark thread runs the selected
+/// passes against the production timeline, printing one `CHAT_BENCHMARK_RESULT` JSON line per
 /// pass and `CHAT_BENCHMARK_COMPLETE` at the end.
 nonisolated enum ChatBenchmarkAutoRun {
     static let logger = Logger(
@@ -597,8 +593,8 @@ nonisolated enum ChatBenchmarkAutoRun {
     }
 
     /// `-ChatBenchmarkThread <title substring>` benchmarks a real thread from
-    /// the connected daemon instead of the mock lab. A synthetic transcript
-    /// (below) is selected the same way, by its fixed title.
+    /// the connected daemon. A synthetic transcript (below) is selected the
+    /// same way, by its fixed title.
     static var threadTitleQuery: String? {
         if let value = UserDefaults.standard.string(
             forKey: "ChatBenchmarkThread"
@@ -616,7 +612,7 @@ nonisolated enum ChatBenchmarkAutoRun {
         return turns > 0 ? turns : nil
     }
 
-    /// Whether the lab has finished priming caches and layouts for the whole
+    /// Whether the timeline has finished priming caches and layouts for the whole
     /// loaded transcript. The scroll benchmark waits for this so it measures
     /// the production steady state — production always prepares a page off
     /// the main actor before inserting it into the timeline.

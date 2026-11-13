@@ -1,13 +1,8 @@
 #if DEBUG
-/// Deterministic Markdown content used by `MockChatView` to exercise the
-/// production renderer without coupling fixture construction to view code.
-enum MockChatMarkdownFixtures {
-    struct Sample: Hashable, Identifiable, Sendable {
-        let id: String
-        let label: String
-        let markdown: String
-    }
+import Foundation
 
+/// Deterministic Markdown content for the chat benchmarks and renderer tests.
+enum ChatMarkdownFixtures {
     static let componentCatalog: String = [
         prose,
         headings,
@@ -74,131 +69,6 @@ enum MockChatMarkdownFixtures {
         codeHeavyConclusion,
     ].joined(separator: "\n\n")
 
-    static let swiftHighlighting = codeHeavySwift
-
-    static let malformedSamples: [Sample] = [
-        Sample(
-            id: "unclosed-fence",
-            label: "Unclosed code fence",
-            markdown: #"""
-                The provider has started a Swift example, but the closing fence has not arrived.
-
-                ```swift
-                struct PendingReply: Sendable {
-                    let id: String
-                    var markdown: String
-
-                    mutating func append(_ chunk: String) {
-                        markdown.append(contentsOf: chunk)
-                    }
-                }
-                """#
-        ),
-        Sample(
-            id: "incomplete-link",
-            label: "Incomplete link",
-            markdown: """
-                The documentation is still arriving: [Markdown reference](https://example.com/docs/mark
-                """
-        ),
-        Sample(
-            id: "unclosed-emphasis",
-            label: "Unclosed emphasis",
-            markdown: """
-                This response ends with **strong text that is not finished and _nested emphasis
-                """
-        ),
-        Sample(
-            id: "partial-table",
-            label: "Partial table",
-            markdown: """
-                | Renderer | Streaming | Tables |
-                | --- | :---: |
-                | Native | yes
-                """
-        ),
-    ]
-
-    static let unsupportedSamples: [Sample] = [
-        Sample(
-            id: "raw-html",
-            label: "Raw HTML",
-            markdown: #"""
-                Raw HTML is displayed as an inert HTML code block:
-
-                <section><strong>This stays code.</strong></section>
-                <script>alert("never executed")</script>
-                """#
-        ),
-        Sample(
-            id: "inline-html",
-            label: "Inline HTML",
-            markdown: """
-                Inline HTML must remain inert and readable:
-                press <kbd>Command</kbd> + <kbd>Return</kbd> to continue.
-                """
-        ),
-        Sample(
-            id: "image",
-            label: "Image syntax",
-            markdown: """
-                Embedded media is outside this renderer's scope:
-
-                ![A deliberately unavailable fixture image](https://example.invalid/mock-chat.png)
-                """
-        ),
-        Sample(
-            id: "links",
-            label: "Non-navigating links",
-            markdown: """
-                Link labels still render: [Unsafe destination](javascript:alert%281%29)
-
-                HTTPS links open interactively: [Documentation](https://example.com/safe)
-                """
-        ),
-        Sample(
-            id: "mixed-extensions",
-            label: "Math and read-only extensions",
-            markdown: #"""
-                Unsupported math remains selectable literal source:
-
-                $$
-                \int_0^1 x^2\,dx = \frac{1}{3}
-                $$
-
-                Mermaid remains a selectable fenced code block and is never executed:
-
-                ```mermaid
-                graph TD
-                    Input --> Parser
-                    Parser --> SwiftUI
-                ```
-
-                Task markers render as read-only status icons:
-
-                - [x] Parsed
-                - [ ] Never interactive
-                """#
-        ),
-        Sample(
-            id: "iframe",
-            label: "Iframe HTML",
-            markdown: #"""
-                Iframes remain inert and display as HTML code:
-
-                <iframe src="https://example.com/embed"></iframe>
-                """#
-        ),
-    ]
-
-    static let unclosedFence =
-        malformedSamples.first { $0.id == "unclosed-fence" }?.markdown ?? ""
-
-    static let unsupportedMarkdown = catalog(
-        title: "Inert Markdown sources",
-        samples: unsupportedSamples
-    )
-
     /// A realistically large response assembled once from bounded sections.
     /// Joining an array avoids repeated copies from a long `+` chain.
     static let longMarkdown: String = {
@@ -254,72 +124,92 @@ enum MockChatMarkdownFixtures {
         return sections.joined(separator: "\n\n")
     }()
 
-    /// A complete response whose early prefixes are deliberately invalid
-    /// Markdown while chunks are arriving.
-    static func streamedReply(prompt: String) -> String {
-        #"""
-        ## Mock streamed reply
+    /// Deterministic long-form prose: one string of sectioned paragraphs
+    /// totaling roughly `wordCount` words, with no randomness so runs are
+    /// comparable.
+    static func essay(wordCount: Int) -> String {
+        let vocabulary: [String] = [
+            "timeline", "renderer", "layout", "scrolling", "message",
+            "row", "virtualization", "streaming", "throughput", "latency",
+            "profile", "measurement", "viewport", "buffer", "cadence",
+            "identity", "invalidation", "diffing", "anchor", "composer",
+            "transcript", "gesture", "frame", "budget",
+        ]
 
-        You asked: “\#(prompt)”
+        var paragraphs: [String] = []
+        var wordsEmitted = 0
+        var wordIndex = 0
+        var paragraphIndex = 0
 
-        This response mixes **strong text**, *emphasis*, ~~a revised phrase~~, and
-        `inline code` so delimiter boundaries are exercised during streaming.
-
-        ### Proposed approach
-
-        1. Preserve each incoming chunk exactly.
-        2. Coalesce only rendering work during rapid bursts.
-           - Keep the message identifier stable.
-           - Keep transcript scrolling outside the Markdown renderer.
-        3. Render the final source with the same path used for stored messages.
-
-        > Partial Markdown is normal while a provider is streaming.
-        > A readable temporary fallback is better than dropping content.
-
-        ```swift
-        struct StreamAccumulator {
-            private(set) var source = ""
-
-            mutating func receive(_ chunk: String) {
-                source.append(contentsOf: chunk)
+        while wordsEmitted < wordCount {
+            paragraphIndex += 1
+            if paragraphIndex % 6 == 1 {
+                paragraphs.append("## Section \(1 + paragraphIndex / 6)")
             }
+
+            var sentences: [String] = []
+            for sentenceIndex in 0..<5 {
+                let length = 9 + (paragraphIndex + sentenceIndex) % 7
+                var words: [String] = []
+                words.reserveCapacity(length)
+                for _ in 0..<length {
+                    words.append(vocabulary[wordIndex % vocabulary.count])
+                    wordIndex += 1
+                }
+                words[0] = words[0].capitalized
+                sentences.append(words.joined(separator: " ") + ".")
+                wordsEmitted += length
+            }
+            paragraphs.append(sentences.joined(separator: " "))
         }
-        ```
 
-        A fence without a language should remain useful:
-
-        ```
-        GET /v1/mock-chat
-        x-stream-profile: deterministic
-        ```
-
-        | Stage | Input | Expected result |
-        | :--- | :--- | :--- |
-        | Prefix | `**par` | readable incomplete content |
-        | Update | `tial**` | completed strong emphasis |
-        | Finish | full source | stable final rendering |
-
-        Safe links such as [the example documentation](https://example.com/docs) should be
-        visibly interactive, while URL policy remains outside parsing.
-
-        ---
-
-        The reply is complete. A final soft
-        line break and a hard break follow.\
-        This sentence begins after the hard break.
-        """#
+        return paragraphs.joined(separator: "\n\n")
     }
 
-    private static func catalog(title: String, samples: [Sample]) -> String {
-        var sections = [String]()
-        sections.reserveCapacity(samples.count + 1)
-        sections.append("# \(title)")
-        sections.append(
-            contentsOf: samples.map { sample in
-                "## \(sample.label)\n\n\(sample.markdown)"
+    /// Message sources whose lengths follow a deterministic, deliberately
+    /// uneven pattern, with occasional lists and code blocks.
+    static func variableHeightStressTexts(count: Int) -> [String] {
+        let messageCount = max(0, count)
+        let paragraphCounts = [1, 2, 4, 8, 3, 12, 5, 16, 6, 10]
+
+        return (0..<messageCount).map { offset in
+            let index = offset + 1
+            let paragraphCount = paragraphCounts[offset % paragraphCounts.count]
+            var sections = [
+                "**Variable-height message \(index)** — \(paragraphCount) paragraph workload."
+            ]
+            sections.reserveCapacity(paragraphCount + 2)
+
+            for paragraphIndex in 1...paragraphCount {
+                sections.append(
+                    "Paragraph \(paragraphIndex) for row \(index) has deterministic wrapping "
+                        + "content, `inline-code-\(index)-\(paragraphIndex)`, and enough words "
+                        + "to produce a useful range of measured row heights at compact and "
+                        + "regular widths."
+                )
             }
-        )
-        return sections.joined(separator: "\n\n")
+
+            if index.isMultiple(of: 11) {
+                sections.append(
+                    "- Stable identity: `\(index)`\n"
+                        + "- Paragraphs: `\(paragraphCount)`\n"
+                        + "- Renderer: transcript"
+                )
+            }
+
+            if index.isMultiple(of: 29) {
+                sections.append(
+                    "```swift\n"
+                        + "struct StressRow\(index) {\n"
+                        + "    let index = \(index)\n"
+                        + "    let paragraphCount = \(paragraphCount)\n"
+                        + "}\n"
+                        + "```"
+                )
+            }
+
+            return sections.joined(separator: "\n\n")
+        }
     }
 
     private static let prose = """
@@ -720,102 +610,5 @@ enum MockChatMarkdownFixtures {
         Prose after the final fence confirms that the renderer closes code-block presentation and
         returns to the normal text style.
         """
-}
-
-enum MockChatStreamProfile: String, CaseIterable, Identifiable, Sendable {
-    case rapidBurst
-    case readableTokens
-    case daemonCadence
-    case slowInspection
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .rapidBurst:
-            "Rapid burst"
-        case .readableTokens:
-            "Readable tokens"
-        case .daemonCadence:
-            "Daemon cadence"
-        case .slowInspection:
-            "Slow inspection"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .rapidBurst:
-            "3 ms chunks, rendered at most every 50 ms"
-        case .readableTokens:
-            "55 ms token-like chunks for normal visual checks"
-        case .daemonCadence:
-            "200 ms event-sized chunks matching a slower provider"
-        case .slowInspection:
-            "700 ms chunks for inspecting incomplete Markdown states"
-        }
-    }
-
-    var delay: Duration {
-        switch self {
-        case .rapidBurst:
-            .milliseconds(3)
-        case .readableTokens:
-            .milliseconds(55)
-        case .daemonCadence:
-            .milliseconds(200)
-        case .slowInspection:
-            .milliseconds(700)
-        }
-    }
-
-    /// Repeating character counts. Every pattern starts with one character
-    /// so a source beginning with `##`, `**`, or ``` enters an incomplete
-    /// delimiter state before its next chunk arrives.
-    var chunkPattern: [Int] {
-        switch self {
-        case .rapidBurst:
-            [1, 2, 5, 3, 8, 13, 4, 21]
-        case .readableTokens:
-            [1, 3, 2, 7, 5, 11, 4, 17]
-        case .daemonCadence:
-            [1, 19, 7, 31, 13, 43, 5, 23]
-        case .slowInspection:
-            [1, 8, 13, 21, 34, 5, 55]
-        }
-    }
-}
-
-enum MockChatMarkdownStream {
-    /// Splits at extended-grapheme boundaries, never normalizes whitespace,
-    /// and intentionally ignores Markdown token boundaries.
-    static func chunks(
-        source: String,
-        profile: MockChatStreamProfile
-    ) -> [String] {
-        guard !source.isEmpty else { return [] }
-
-        let pattern = profile.chunkPattern
-        let averageChunkSize = pattern.reduce(0, +) / pattern.count
-        var result = [String]()
-        result.reserveCapacity(source.count / averageChunkSize + 1)
-
-        var lowerBound = source.startIndex
-        var patternIndex = 0
-        while lowerBound < source.endIndex {
-            let chunkSize = pattern[patternIndex % pattern.count]
-            let upperBound =
-                source.index(
-                    lowerBound,
-                    offsetBy: chunkSize,
-                    limitedBy: source.endIndex
-                ) ?? source.endIndex
-            result.append(String(source[lowerBound..<upperBound]))
-            lowerBound = upperBound
-            patternIndex += 1
-        }
-        return result
-    }
-
 }
 #endif

@@ -25,7 +25,7 @@ python3 clients/swift/scripts/benchmark-containers.py path/to/mai.app /tmp/chat-
 
 | Flag | Meaning |
 |---|---|
-| `--turns N` | Synthetic turn count, default 300. `0` runs the mock chat lab instead of the production transcript. |
+| `--turns N` | Synthetic turn count, default 300. |
 | `--runs N` | Fresh app launches, default 3. |
 | `--paginated` | Load the normal recent page initially instead of the whole fixture. |
 | `--timeout N` | Seconds per launch before failure, default 300. |
@@ -60,7 +60,7 @@ The same launch arguments work from Xcode (Edit Scheme → Run → Arguments):
 | `-ChatBenchmarkScrubPeriod N` | Seconds per one-way traversal for `scrub`. |
 | `-ChatBenchmarkStreamActivity YES/NO` | Include thought/tool activity in the `stream` plan. |
 
-Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resizing and selection without any automation; it does not connect to the daemon. macOS Debug builds also show a "Mock Chat" toolbar button that opens the mock chat lab.
+Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resizing and selection without any automation; it does not connect to the daemon.
 
 ## Reading results
 

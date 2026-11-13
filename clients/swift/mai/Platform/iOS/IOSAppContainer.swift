@@ -73,7 +73,7 @@ struct IOSAppContainer: View {
         }
         #if DEBUG
             .modifier(
-                ChatBenchmarkHarness(
+                ChatRealThreadBenchmarkRunner(
                     store: store,
                     selectThread: { threadID in
                         store.selectThread(threadID)

@@ -2,8 +2,7 @@
     import Foundation
 
     /// A deterministic, daemon-free transcript for benchmarking the production
-    /// chat timeline (`ChatView` → `ChatTimeline`), as opposed to the mock lab
-    /// which drives only the row renderers.
+    /// chat timeline (`ChatView` → `ChatTimeline`).
     ///
     ///     -ChatAutoBenchmark scroll -ChatBenchmarkSyntheticTurns 400
     ///
@@ -66,11 +65,11 @@
         /// a sweep contains tables and fenced code.
         private static func assistantAnswer(turn: Int) -> String {
             switch turn % 6 {
-            case 0: MockChatMarkdownFixtures.richBlocks
-            case 1: MockChatMarkdownFixtures.codeHeavy
-            case 2: MockChatMarkdownFixtures.componentCatalog
-            case 3: MockChatMessage.essay(wordCount: 600)
-            case 4: MockChatMarkdownFixtures.longMarkdown
+            case 0: ChatMarkdownFixtures.richBlocks
+            case 1: ChatMarkdownFixtures.codeHeavy
+            case 2: ChatMarkdownFixtures.componentCatalog
+            case 3: ChatMarkdownFixtures.essay(wordCount: 600)
+            case 4: ChatMarkdownFixtures.longMarkdown
             default:
                 "Short answer for turn \(turn + 1): the fix lands in "
                     + "`ThreadStore.applyThreadEvent` and keeps the timeline "

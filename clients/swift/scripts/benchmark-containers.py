@@ -39,8 +39,8 @@ def main():
     args = parser.parse_args()
     if args.plan == "scrub" and args.scrub_period <= 0:
         parser.error("The scrub plan requires a positive --scrub-period.")
-    if args.runs < 1 or args.timeout <= 0 or args.turns < 0:
-        parser.error("Runs and timeout must be positive; turns must be nonnegative.")
+    if min(args.runs, args.turns, args.timeout) <= 0:
+        parser.error("Runs, turns and timeout must be positive.")
     if args.float_window and not shutil.which("aerospace"):
         parser.error("--float-window requires the AeroSpace CLI.")
     if args.float_window:
@@ -84,9 +84,8 @@ def main():
                    "-ChatAutoBenchmark", args.plan,
                    "-ChatBenchmarkAnchorRow", "4800",
                    "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO",
-                   "-ChatBenchmarkScrubPeriod", str(args.scrub_period)]
-        if args.turns > 0:
-            command += ["-ChatBenchmarkSyntheticTurns", str(args.turns)]
+                   "-ChatBenchmarkScrubPeriod", str(args.scrub_period),
+                   "-ChatBenchmarkSyntheticTurns", str(args.turns)]
         subprocess.run(command, check=True)
         started = time.monotonic()
         woke = False
