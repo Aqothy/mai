@@ -1,46 +1,6 @@
 import Foundation
 import Observation
 
-struct ProviderChoice: Identifiable, Equatable {
-    let id: String
-    let name: String
-    /// Where the provider runtime comes from. Several instances can share a
-    /// display name, such as the built-in Codex and Codex ACP agents.
-    let kind: String
-    /// `name`, qualified with `kind` only when another provider shares it.
-    var title: String
-
-    init(id: String, name: String, kind: String) {
-        self.id = id
-        self.name = name
-        self.kind = kind
-        title = name
-    }
-}
-
-/// Stable text storage for one actively streaming entry. The thread detail
-/// still records every chunk, while the visible leaf row observes this
-/// reference directly.
-@Observable
-final class ThreadStreamingText {
-    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
-    nonisolated deinit {}
-
-    private(set) var text: String
-    /// Cheap task identity that avoids hashing the growing text on every chunk.
-    private(set) var revision = 0
-
-    init(text: String) {
-        self.text = text
-    }
-
-    func append(_ delta: String) {
-        guard !delta.isEmpty else { return }
-        text += delta
-        revision += 1
-    }
-}
-
 @Observable
 final class ThreadStore {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
