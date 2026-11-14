@@ -115,14 +115,5 @@ struct ChatTimelineRenderRowView: View {
             alignment: .leading
         )
         .frame(maxWidth: .infinity)
-        .listRowInsets(
-            .init(
-                top: 0,
-                leading: ChatTimelineMetrics.rowHorizontalInset,
-                bottom: 0,
-                trailing: ChatTimelineMetrics.rowHorizontalInset
-            )
-        )
-        .listRowSeparator(.hidden)
     }
 }

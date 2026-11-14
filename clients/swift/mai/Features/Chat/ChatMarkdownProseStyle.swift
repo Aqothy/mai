@@ -4,10 +4,16 @@ import Foundation
     import AppKit
 
     typealias ChatPlatformTextStyle = NSFont.TextStyle
+    typealias ChatPlatformColor = NSColor
+    typealias ChatPlatformFont = NSFont
+    typealias ChatPlatformView = NSView
 #else
     import UIKit
 
     typealias ChatPlatformTextStyle = UIFont.TextStyle
+    typealias ChatPlatformColor = UIColor
+    typealias ChatPlatformFont = UIFont
+    typealias ChatPlatformView = UIView
 #endif
 
 /// The typography and spacing for chat prose and the hosts that decorate it.

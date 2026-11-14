@@ -1,6 +1,6 @@
 # Chat benchmarks
 
-macOS renders chat with a custom AppKit transcript (an `NSScrollView` with a virtualized document, native prepared rows and SwiftUI interactive/live rows). iOS uses SwiftUI `List`.
+Both platforms render chat with a custom native transcript: a virtualized document (an `NSScrollView` document view on macOS, a `UIScrollView` that tiles its rows on iOS) showing native prepared rows for settled prose, code and tables, and hosted SwiftUI rows for interactive and live content.
 
 The benchmark fixtures and auto-run plans exist only in Debug builds. Build a signed Debug app in Xcode, then pass its product path (Products → mai.app → Show in Finder) to the scripts. Results are only comparable between builds with the same optimization settings.
 
@@ -65,3 +65,5 @@ Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resiz
 ## Reading results
 
 `averageFPS` counts `CADisplayLink` callbacks per second, not verified presented frames. At 120 Hz the interval target is 8.33 ms; read p99 and maximum intervals alongside the average. RSS is whole-process memory. Discard hidden-window, incomplete or source-mismatch runs.
+
+The `…MainThreadMilliseconds` fields are the time the main run loop spent working between two display-link callbacks, and `framesOver120HzBudget` / `framesOver60HzBudget` count the frames whose work exceeded 8.33 ms / 16.67 ms. They measure headroom where the display caps the callback rate: a simulator or a 60 Hz phone reports 60 FPS whether a frame's work took 2 ms or 15 ms, and only the first would also hold 120 Hz. Work that yields between steps (measuring a page of rows) is summed into the frame it ran in, so read p50 and p95 for scrolling cost and the tail for pagination.

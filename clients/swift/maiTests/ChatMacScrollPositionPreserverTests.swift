@@ -21,10 +21,10 @@
         @Test
         func onlyAScrollEndingDownwardAtTheBottomRestoresFollowing() {
             #expect(
-                !ChatMacScrollPositionPreserver.shouldRestoreFollowingAfterUserScroll(
+                !ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
                     startY: 10_000, endY: 9_000, isNearBottom: true))
             #expect(
-                ChatMacScrollPositionPreserver.shouldRestoreFollowingAfterUserScroll(
+                ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
                     startY: 9_000, endY: 10_000, isNearBottom: true))
         }
 

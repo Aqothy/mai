@@ -9,70 +9,9 @@
 
     // MARK: - Code blocks
 
-    /// Typography for fenced code on macOS. Mirrors the SwiftUI presentation
-    /// (`.callout.monospaced()` with 4 pt line spacing) used on iOS.
-    nonisolated enum ChatMacCodeStyle {
-        static let horizontalInset: CGFloat = 16
-        static let bottomInset: CGFloat = 16
-        static let lineSpacing: CGFloat = 4
-
-        static var font: NSFont {
-            NSFont.monospacedSystemFont(
-                ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize,
-                weight: .regular
-            )
-        }
-
-        static func attributedString(code: String) -> NSMutableAttributedString {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = lineSpacing
-            return NSMutableAttributedString(
-                string: code,
-                attributes: [
-                    .font: font,
-                    .foregroundColor: NSColor.labelColor,
-                    .paragraphStyle: paragraph,
-                ]
-            )
-        }
-
-        /// Overlays syntax colors on `code`'s plain attributed form. The
-        /// highlighter only contributes foreground colors, so line metrics
-        /// (and therefore the prepared row height) are unchanged. A
-        /// highlighter result whose text differs from the source is ignored
-        /// rather than risking mismatched ranges.
-        static func highlightedAttributedString(
-            block: ChatMarkdownCodeBlock,
-            theme: ChatCodeHighlightTheme
-        ) async -> NSMutableAttributedString {
-            let base = attributedString(code: block.code)
-            guard
-                let highlighted = await ChatCodeHighlighter.shared.highlight(
-                    code: block.code,
-                    language: block.language,
-                    theme: theme
-                ),
-                let colored = try? NSAttributedString(
-                    highlighted,
-                    including: \.appKit
-                ),
-                colored.string == base.string
-            else { return base }
-
-            colored.enumerateAttribute(
-                .foregroundColor,
-                in: NSRange(location: 0, length: colored.length)
-            ) { value, range, _ in
-                guard let color = value as? NSColor else { return }
-                base.addAttribute(.foregroundColor, value: color, range: range)
-            }
-            return base
-        }
-    }
-
     /// A fenced code block as one selectable, horizontally scrolling
     /// `NSTextView` whose text and size were prepared off the main actor.
-    struct ChatMacCodeBlockText: NSViewRepresentable {
+    struct ChatCodeBlockText: NSViewRepresentable {
         @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
         let block: ChatMarkdownCodeBlock
@@ -116,7 +55,7 @@
             ).layout
             return CGSize(
                 width: width,
-                height: layout.height + ChatMacCodeStyle.bottomInset
+                height: layout.height + ChatCodeBlockStyle.bottomInset
             )
         }
     }
@@ -137,7 +76,7 @@
             textView = ChatSelectableTextViewConfiguration.makeTextView()
             super.init(frame: frameRect)
             textView.textContainerInset = NSSize(
-                width: ChatMacCodeStyle.horizontalInset,
+                width: ChatCodeBlockStyle.horizontalInset,
                 height: 0
             )
             // Code never wraps; the container scrolls horizontally instead.
@@ -218,156 +157,18 @@
             textView.setSelectedRange(NSRange(location: 0, length: 0))
             presentedLayout = layout
             documentSize = NSSize(
-                width: layout.contentWidth + 2 * ChatMacCodeStyle.horizontalInset,
-                height: layout.height + ChatMacCodeStyle.bottomInset
+                width: layout.contentWidth + 2 * ChatCodeBlockStyle.horizontalInset,
+                height: layout.height + ChatCodeBlockStyle.bottomInset
             )
         }
     }
 
     // MARK: - Tables
 
-    /// Cell text, cell frames, and dividers for one Markdown table, measured
-    /// off the main actor. Matches the SwiftUI grid: columns sized to
-    /// content between 96 and 280 points, 24 points between columns, 12
-    /// points above and below each row, and a hairline between rows.
-    nonisolated final class ChatTableLayout: @unchecked Sendable {
-        struct Cell {
-            let text: NSAttributedString
-            let frame: NSRect
-        }
-
-        static let minimumColumnWidth: CGFloat = 96
-        static let maximumColumnWidth: CGFloat = 280
-        static let columnSpacing: CGFloat = 24
-        static let verticalPadding: CGFloat = 12
-        static let dividerHeight: CGFloat = 1
-
-        let size: NSSize
-        let cells: [Cell]
-        let dividerRects: [NSRect]
-
-        init(table: ChatMarkdownTable) {
-            let columnCount = table.columnCount
-            let rows = [table.header] + table.rows
-
-            // Measure every cell once at the widest column allowed. The
-            // final column is at least as wide as its widest cell, so no
-            // cell rewraps when drawn.
-            var measured: [[(text: NSAttributedString, size: NSSize)]] = []
-            var columnWidths = [CGFloat](
-                repeating: Self.minimumColumnWidth,
-                count: columnCount
-            )
-            for row in rows {
-                var measuredRow: [(NSAttributedString, NSSize)] = []
-                for column in 0..<columnCount {
-                    let text = Self.cellText(
-                        row.indices.contains(column) ? row[column] : nil,
-                        alignment: table.alignments.indices.contains(column)
-                            ? table.alignments[column] : .leading
-                    )
-                    let size = Self.measure(text)
-                    columnWidths[column] = max(columnWidths[column], size.width)
-                    measuredRow.append((text, size))
-                }
-                measured.append(measuredRow)
-            }
-
-            var columnOrigins: [CGFloat] = []
-            var x: CGFloat = 0
-            for width in columnWidths {
-                columnOrigins.append(x)
-                x += width + Self.columnSpacing
-            }
-            let tableWidth = max(0, x - Self.columnSpacing)
-
-            var cells: [Cell] = []
-            var dividerRects: [NSRect] = []
-            var y: CGFloat = 0
-            for (rowIndex, row) in measured.enumerated() {
-                let rowHeight = row.map(\.size.height).max() ?? 0
-                for (column, cell) in row.enumerated() {
-                    cells.append(
-                        Cell(
-                            text: cell.text,
-                            frame: NSRect(
-                                x: columnOrigins[column],
-                                y: y + Self.verticalPadding,
-                                width: columnWidths[column],
-                                height: cell.size.height
-                            )
-                        )
-                    )
-                }
-                y += rowHeight + 2 * Self.verticalPadding
-                if rowIndex < measured.count - 1 {
-                    dividerRects.append(
-                        NSRect(
-                            x: 0,
-                            y: y,
-                            width: tableWidth,
-                            height: Self.dividerHeight
-                        )
-                    )
-                    y += Self.dividerHeight
-                }
-            }
-
-            size = NSSize(width: tableWidth, height: y)
-            self.cells = cells
-            self.dividerRects = dividerRects
-        }
-
-        private static func cellText(
-            _ value: ChatMarkdownText?,
-            alignment: ChatMarkdownTable.ColumnAlignment
-        ) -> NSAttributedString {
-            let text = NSMutableAttributedString(
-                attributedString: value?.value ?? NSAttributedString()
-            )
-            let range = NSRange(location: 0, length: text.length)
-            // Drawn cells are not interactive. AppKit would otherwise replace
-            // the renderer's link styling with its own link color.
-            text.removeAttribute(.link, range: range)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment =
-                switch alignment {
-                case .leading: .left
-                case .center: .center
-                case .trailing: .right
-                }
-            text.addAttribute(.paragraphStyle, value: paragraph, range: range)
-            return text
-        }
-
-        private static func measure(_ text: NSAttributedString) -> NSSize {
-            guard text.length > 0 else {
-                return NSSize(
-                    width: 0,
-                    height: ceil(NSFont.preferredFont(forTextStyle: .body).boundingRectForFont.height)
-                )
-            }
-            let storage = NSTextStorage(attributedString: text)
-            let manager = NSLayoutManager()
-            let container = NSTextContainer(
-                containerSize: NSSize(
-                    width: maximumColumnWidth,
-                    height: .greatestFiniteMagnitude
-                )
-            )
-            container.lineFragmentPadding = 0
-            manager.addTextContainer(container)
-            storage.addLayoutManager(manager)
-            manager.ensureLayout(for: container)
-            let used = manager.usedRect(for: container)
-            return NSSize(width: ceil(used.width), height: ceil(used.height))
-        }
-    }
-
     /// A Markdown table drawn from a prepared `ChatTableLayout` inside the
     /// horizontal scroller. Cells are deliberately not selectable; the copy
     /// button above the table copies it whole.
-    struct ChatMacTableBlock: NSViewRepresentable {
+    struct ChatTableBlock: NSViewRepresentable {
         let layoutID: String
         let table: ChatMarkdownTable
         let layoutStore: ChatTextLayoutStore

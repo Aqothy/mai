@@ -49,7 +49,7 @@ def main():
         "deviceName": matches[0][1]["name"], "deviceUUID": args.device,
         "codeImageSHA256": hashlib.sha256(code.read_bytes()).hexdigest(),
         "plan": args.plan, "runs": args.runs, "syntheticTurns": args.turns,
-        "paginated": args.paginated, "container": "iOS SwiftUI List",
+        "paginated": args.paginated, "container": "iOS UIKit transcript",
         "measurement": "simulator display-link callbacks, not physical-device or presented FPS",
     }
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")

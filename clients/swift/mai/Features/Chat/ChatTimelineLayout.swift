@@ -1,6 +1,6 @@
 import Foundation
 
-/// Builds the flat row list the chat `List` renders from a thread's turns.
+/// Builds the flat row list the chat transcript renders from a thread's turns.
 ///
 /// Each turn is one section, in the daemon's order. Layout rules:
 /// - User messages and the turn's final assistant message are always visible.

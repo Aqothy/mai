@@ -2,80 +2,11 @@
     import AppKit
 
     /// Native presentation for prepared assistant prose, code and tables.
-    /// Unsupported rows retain the existing SwiftUI renderer. Prose and table
-    /// geometry uses the same prepared layouts as their visible native bodies.
+    /// Unsupported rows retain the SwiftUI renderer. A row's geometry comes
+    /// from the same prepared layout as its visible native body.
     final class ChatNativePreparedRow: NSView {
         // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
         nonisolated deinit {}
-
-        enum Content: Equatable {
-            case prose(ChatTextContent)
-            case code(ChatMarkdownCodeBlock)
-            case table(ChatMarkdownTable)
-        }
-        struct Descriptor: Equatable {
-            let id: String
-            let content: Content
-            let top: CGFloat
-            let bottom: CGFloat
-        }
-
-        static func descriptor(for row: ChatTimelineRenderRow) -> Descriptor? {
-            let id: String
-            let content: Content
-            switch row {
-            case .prose(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false,
-                    segment.annotations?.isEmpty != false
-                else { return nil }
-                id = segment.rowID
-                content = .prose(.source(segment.source))
-            case .resolvedMarkdown(let block):
-                guard block.attachments?.isEmpty != false else { return nil }
-                id = block.rowID
-                switch block.content {
-                case .proseRun(let prose): content = .prose(.rendered(prose.text))
-                case .code(let code): content = .code(code)
-                case .table(let table): content = .table(table)
-                }
-            case .richMarkdown(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false,
-                    segment.annotations?.isEmpty != false,
-                    let plan = ChatMarkdownRenderCache.shared.cachedPlan(
-                        messageID: segment.rowID, source: segment.source),
-                    plan.blocks.count == 1, let block = plan.blocks.first
-                else { return nil }
-                // The SwiftUI renderer keys this block's layout the same way.
-                id = "\(segment.rowID)-block-0"
-                switch block {
-                case .prose: return nil
-                case .code(let code): content = .code(code)
-                case .table(let table): content = .table(table)
-                }
-            case .standard: return nil
-            }
-            let insets = row.verticalInsets
-            return Descriptor(id: id, content: content, top: insets.top, bottom: insets.bottom)
-        }
-
-        /// Text and table layouts already contain exact geometry. Code headers
-        /// and interactive rows continue to use the existing SwiftUI measurement.
-        static func preparedHeight(
-            for descriptor: Descriptor, width: CGFloat, store: ChatTextLayoutStore
-        ) -> CGFloat? {
-            let bodyHeight: CGFloat
-            switch descriptor.content {
-            case .prose(let text):
-                bodyHeight = store.layout(
-                    id: descriptor.id, content: text, width: width).height
-            case .table(let table):
-                bodyHeight = store.tableLayout(id: descriptor.id, table: table).size.height
-                    + ChatRichBlockStyle.tableToolbarHeight
-            case .code:
-                return nil
-            }
-            return ceil(bodyHeight + descriptor.top + descriptor.bottom)
-        }
 
         private var descriptor: Descriptor?
         private var bodyView: NSView?
@@ -84,18 +15,30 @@
         private lazy var proseView = ChatSelectableTextHostView()
         private lazy var codeView = ChatMacCodeBlockHostView(frame: .zero)
         private lazy var tableView = ChatMacTableHostView(frame: .zero)
+        /// The code block's rounded surface. A layer draws it: a `draw(_:)`
+        /// override would give every row, prose included, a bitmap of its
+        /// own size.
+        private let codeBackground = NSView()
         private let language = NSTextField(labelWithString: "")
         private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
         private var copyText = ""
         private var feedbackTask: Task<Void, Never>?
         private var contentWidth: CGFloat = 0
-        private var codeHeight: CGFloat = 0
         private var theme = ChatCodeHighlightTheme.light
+        /// The store the body's layouts come from. A new one (a Dynamic Type
+        /// change) holds layouts at other sizes, and the rows' heights
+        /// already come from it.
+        private weak var store: ChatTextLayoutStore?
         override var isFlipped: Bool { true }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
             setAccessibilityRole(.group)
+            codeBackground.wantsLayer = true
+            codeBackground.layer?.cornerRadius = ChatRichBlockStyle.codeCornerRadius
+            codeBackground.layer?.cornerCurve = .continuous
+            codeBackground.layer?.borderWidth = 1
+            codeBackground.isHidden = true
             language.font = NSFont.preferredFont(forTextStyle: .callout)
             copyButton.isBordered = false
             copyButton.imagePosition = .imageOnly
@@ -103,6 +46,7 @@
                 systemSymbolName: "square.on.square", accessibilityDescription: "Copy")
             copyButton.target = self
             copyButton.action = #selector(copyContent)
+            addSubview(codeBackground)
             addSubview(language)
             addSubview(copyButton)
         }
@@ -119,19 +63,22 @@
                 (code.documentView as? ChatAnnotationTextView)?.annotationContext = annotationContext
             }
             contentWidth = width
-            if self.descriptor == descriptor, self.theme == theme {
+            if self.descriptor == descriptor, self.theme == theme,
+                self.store === store
+            {
                 needsLayout = true
                 return
             }
             feedbackTask?.cancel()
             feedbackTask = nil
             self.descriptor = descriptor
-            contentWidth = width
             self.theme = theme
+            self.store = store
             copyButton.image = NSImage(
                 systemSymbolName: "square.on.square", accessibilityDescription: "Copy")
             language.isHidden = true
             copyButton.isHidden = true
+            codeBackground.isHidden = true
             setAccessibilityElement(false)
             switch descriptor.content {
             case .prose(let text):
@@ -146,9 +93,8 @@
                 codeView.contentView.scroll(to: .zero)
                 codeView.update(
                     layoutID: descriptor.id, block: code, theme: theme, layoutStore: store)
-                codeHeight =
-                    store.codeLayout(id: descriptor.id, block: code, theme: theme).layout.height
-                    + ChatMacCodeStyle.bottomInset
+                applyCodeBackgroundColors()
+                codeBackground.isHidden = false
                 language.stringValue = code.displayLanguage
                 language.isHidden = false
                 copyText = code.code
@@ -171,7 +117,6 @@
                 setAccessibilityValue(table.tabSeparatedText)
             }
             needsLayout = true
-            needsDisplay = true
         }
 
         private func setBody(_ view: NSView) {
@@ -181,7 +126,7 @@
             bodyView?.removeFromSuperview()
             bodyView = view
             addSubview(view)
-            subviews = [language, copyButton, view]
+            subviews = [codeBackground, language, copyButton, view]
             setAccessibilityLabel(nil)
             setAccessibilityValue(nil)
         }
@@ -197,20 +142,18 @@
             case .prose:
                 bodyView?.frame = rect
             case .code:
-                let headerHeight = max(0, rect.height - codeHeight)
+                let headerHeight = ChatRichBlockStyle.codeHeaderHeight
+                codeBackground.frame = rect
                 language.frame = NSRect(
                     x: rect.minX + ChatRichBlockStyle.codeHeaderHorizontalInset,
                     y: rect.minY + ChatRichBlockStyle.codeHeaderTopInset,
                     width: max(0, rect.width - 64),
-                    height: max(
-                        0,
-                        headerHeight - ChatRichBlockStyle.codeHeaderTopInset
-                            - ChatRichBlockStyle.codeHeaderBottomInset))
+                    height: ChatRichBlockStyle.codeHeaderContentHeight)
                 copyButton.frame = NSRect(
                     x: max(0, rect.maxX - 40), y: rect.minY + 10, width: 24, height: 24)
                 bodyView?.frame = NSRect(
-                    x: rect.minX, y: rect.minY + headerHeight, width: rect.width, height: codeHeight
-                )
+                    x: rect.minX, y: rect.minY + headerHeight, width: rect.width,
+                    height: max(0, rect.height - headerHeight))
             case .table:
                 copyButton.frame = NSRect(
                     x: max(0, rect.maxX - ChatRichBlockStyle.tableToolbarHeight), y: rect.minY,
@@ -223,22 +166,25 @@
             }
         }
 
-        override func draw(_ dirtyRect: NSRect) {
-            guard let descriptor, case .code = descriptor.content else { return }
-            let width = min(contentWidth, bounds.width)
-            let rect = NSRect(
-                x: (bounds.width - width) / 2, y: descriptor.top, width: width,
-                height: max(0, bounds.height - descriptor.top - descriptor.bottom))
-            let path = NSBezierPath(
-                roundedRect: rect, xRadius: ChatRichBlockStyle.codeCornerRadius,
-                yRadius: ChatRichBlockStyle.codeCornerRadius)
-            NSColor.labelColor.withAlphaComponent(
-                CGFloat(ChatRichBlockStyle.codeBackgroundOpacity(isDark: theme == .dark))
-            ).setFill()
-            path.fill()
-            NSColor.labelColor.withAlphaComponent(CGFloat(ChatRichBlockStyle.codeBorderOpacity))
-                .setStroke()
-            path.stroke()
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyCodeBackgroundColors()
+        }
+
+        /// Layer colors are resolved values; they do not follow the
+        /// appearance on their own.
+        private func applyCodeBackgroundColors() {
+            guard let layer = codeBackground.layer else { return }
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                layer.backgroundColor =
+                    NSColor.labelColor.withAlphaComponent(
+                        CGFloat(ChatRichBlockStyle.codeBackgroundOpacity(isDark: theme == .dark))
+                    ).cgColor
+                layer.borderColor =
+                    NSColor.labelColor.withAlphaComponent(
+                        CGFloat(ChatRichBlockStyle.codeBorderOpacity)
+                    ).cgColor
+            }
         }
 
         @objc private func copyContent() {

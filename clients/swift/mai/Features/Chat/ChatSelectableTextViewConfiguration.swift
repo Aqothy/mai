@@ -31,7 +31,13 @@
     enum ChatSelectableTextViewConfiguration {
         static func makeTextView() -> UITextView {
             let view = UITextView(usingTextLayoutManager: false)
+            // A text view is a scroll view. This one never scrolls, so it
+            // needs no indicators, and only the transcript may answer the
+            // status-bar tap, which UIKit sends when exactly one view does.
             view.isScrollEnabled = false
+            view.showsVerticalScrollIndicator = false
+            view.showsHorizontalScrollIndicator = false
+            view.scrollsToTop = false
             view.isEditable = false
             view.isSelectable = true
             view.backgroundColor = .clear

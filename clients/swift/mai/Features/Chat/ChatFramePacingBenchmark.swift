@@ -15,12 +15,18 @@ import SwiftUI
     typealias ChatBenchmarkScrollView = UIScrollView
 #endif
 
-/// Display-link callback pacing for one benchmark pass.
+/// Display-link callback pacing and main-thread work for one benchmark pass.
 ///
 /// This is a low-overhead regression signal for main-thread stalls while the
 /// benchmark drives the transcript. A callback is not proof that the app's
 /// surface was presented, so production FPS and hitch claims must come from a
 /// bounded Animation Hitches trace rather than these legacy field names.
+///
+/// Callback pacing is capped by the display: on a 60 Hz display a transcript
+/// that needs 2 ms a frame and one that needs 15 ms both report 60. The
+/// main-thread fields say how long the main run loop was busy between two
+/// callbacks, which is what decides whether a faster display would be kept up
+/// with.
 nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     let measurementKind: String
     let label: String
@@ -35,6 +41,14 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     let maxFrameMilliseconds: Double
     let hitchCount: Int
     let hitchTimeMillisecondsPerSecond: Double
+    let p50MainThreadMilliseconds: Double
+    let p95MainThreadMilliseconds: Double
+    let p99MainThreadMilliseconds: Double
+    let maxMainThreadMilliseconds: Double
+    /// Frames whose main-thread work alone exceeds one 120 Hz refresh.
+    let framesOver120HzBudget: Int
+    /// Frames whose main-thread work alone exceeds one 60 Hz refresh.
+    let framesOver60HzBudget: Int
 
     var summary: String {
         """
@@ -42,6 +56,7 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
         display-link callbacks: \(frameCount) over \(durationSeconds.formatted(.number.precision(.fractionLength(1))))s · avg \(averageFPS.formatted(.number.precision(.fractionLength(1))))/s
         callback interval ms: p50 \(p50FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p95 \(p95FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p99 \(p99FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · max \(maxFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) (target \(expectedFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))))
         late callbacks: \(hitchCount) · \(hitchTimeMillisecondsPerSecond.formatted(.number.precision(.fractionLength(2)))) excess ms/s
+        main-thread work ms per frame: p50 \(p50MainThreadMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p95 \(p95MainThreadMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p99 \(p99MainThreadMilliseconds.formatted(.number.precision(.fractionLength(2)))) · max \(maxMainThreadMilliseconds.formatted(.number.precision(.fractionLength(2)))) · over 8.33 ms: \(framesOver120HzBudget) · over 16.67 ms: \(framesOver60HzBudget)
         """
     }
 
@@ -53,9 +68,10 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     }
 }
 
-/// Records display-link timestamps while a benchmark runs and reduces them to
-/// a callback-pacing report. The link requests the display's maximum refresh
-/// rate so main-thread delivery is sampled against the 120 Hz budget.
+/// Records display-link timestamps and main run loop activity while a
+/// benchmark runs and reduces them to a report. The link requests the
+/// display's maximum refresh rate so main-thread delivery is sampled against
+/// the 120 Hz budget.
 final class ChatFramePacingMonitor: NSObject {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
@@ -66,6 +82,12 @@ final class ChatFramePacingMonitor: NSObject {
     private var onFailure: ((String) -> Void)?
     private var timestamps: [CFTimeInterval] = []
     private var onFrame: ((CADisplayLink) -> Void)?
+    private var runLoopObserver: CFRunLoopObserver?
+    /// When the main run loop last woke; nil while it sleeps.
+    private var busySince: CFTimeInterval?
+    /// How long the run loop has been awake since the last callback.
+    private var busyTime: CFTimeInterval = 0
+    private var mainThreadWork: [CFTimeInterval] = []
     private(set) var displayMaximumFPS = 60
 
     func start(
@@ -95,6 +117,8 @@ final class ChatFramePacingMonitor: NSObject {
         self.onFrame = onFrame
         timestamps.removeAll(keepingCapacity: true)
         timestamps.reserveCapacity(displayMaximumFPS * 60)
+        mainThreadWork.removeAll(keepingCapacity: true)
+        mainThreadWork.reserveCapacity(displayMaximumFPS * 60)
 
         #if os(macOS)
             guard
@@ -117,6 +141,7 @@ final class ChatFramePacingMonitor: NSObject {
         )
         link.add(to: .main, forMode: .common)
         displayLink = link
+        observeMainRunLoop()
         watchdog = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(maximumWallSeconds)) } catch { return }
             self?.onFailure?("display-link wall-clock timeout")
@@ -131,11 +156,37 @@ final class ChatFramePacingMonitor: NSObject {
         }
     #endif
 
+    /// The run loop is busy from the moment it wakes until it next sleeps.
+    /// It does not sleep between pieces of pending work, so one long stretch
+    /// is one busy interval however many sources it served.
+    private func observeMainRunLoop() {
+        busyTime = 0
+        busySince = CACurrentMediaTime()
+        let activities: CFRunLoopActivity = [.beforeWaiting, .afterWaiting]
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, activities.rawValue, true, 0
+        ) { [weak self] _, activity in
+            guard let self else { return }
+            let now = CACurrentMediaTime()
+            if activity == .afterWaiting {
+                self.busySince = now
+            } else if let since = self.busySince {
+                self.busyTime += now - since
+                self.busySince = nil
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        runLoopObserver = observer
+    }
+
     /// Stops recording and reduces the samples. Returns nil for runs too
     /// short to summarize meaningfully.
     func stop(label: String) -> ChatFramePacingReport? {
         cancel()
-        defer { timestamps.removeAll(keepingCapacity: false) }
+        defer {
+            timestamps.removeAll(keepingCapacity: false)
+            mainThreadWork.removeAll(keepingCapacity: false)
+        }
         guard timestamps.count >= 10,
             let first = timestamps.first,
             let last = timestamps.last,
@@ -161,10 +212,12 @@ final class ChatFramePacingMonitor: NSObject {
             hitchTime += interval - expected
         }
 
-        func percentile(_ q: Double) -> Double {
-            let index = Int(Double(intervals.count - 1) * q)
-            return intervals[index] * 1_000
+        func percentile(_ q: Double, of samples: [Double]) -> Double {
+            guard !samples.isEmpty else { return 0 }
+            return samples[Int(Double(samples.count - 1) * q)] * 1_000
         }
+
+        let work = mainThreadWork.sorted()
 
         return ChatFramePacingReport(
             measurementKind: "displayLinkCallbacks",
@@ -174,12 +227,18 @@ final class ChatFramePacingMonitor: NSObject {
             durationSeconds: duration,
             averageFPS: Double(intervals.count) / duration,
             expectedFrameMilliseconds: expected * 1_000,
-            p50FrameMilliseconds: percentile(0.5),
-            p95FrameMilliseconds: percentile(0.95),
-            p99FrameMilliseconds: percentile(0.99),
+            p50FrameMilliseconds: percentile(0.5, of: intervals),
+            p95FrameMilliseconds: percentile(0.95, of: intervals),
+            p99FrameMilliseconds: percentile(0.99, of: intervals),
             maxFrameMilliseconds: (intervals.last ?? 0) * 1_000,
             hitchCount: hitchCount,
-            hitchTimeMillisecondsPerSecond: hitchTime * 1_000 / duration
+            hitchTimeMillisecondsPerSecond: hitchTime * 1_000 / duration,
+            p50MainThreadMilliseconds: percentile(0.5, of: work),
+            p95MainThreadMilliseconds: percentile(0.95, of: work),
+            p99MainThreadMilliseconds: percentile(0.99, of: work),
+            maxMainThreadMilliseconds: (work.last ?? 0) * 1_000,
+            framesOver120HzBudget: work.count { $0 > 1.0 / 120 },
+            framesOver60HzBudget: work.count { $0 > 1.0 / 60 }
         )
     }
 
@@ -194,10 +253,25 @@ final class ChatFramePacingMonitor: NSObject {
         onFailure = nil
         displayLink?.invalidate()
         displayLink = nil
+        if let runLoopObserver {
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), runLoopObserver, .commonModes)
+        }
+        runLoopObserver = nil
         onFrame = nil
     }
 
     @objc private func tick(_ link: CADisplayLink) {
+        // The callback itself runs inside a busy stretch; close it here so
+        // each sample is the work between two callbacks.
+        let now = CACurrentMediaTime()
+        if let since = busySince {
+            busyTime += now - since
+            busySince = now
+        }
+        if !timestamps.isEmpty {
+            mainThreadWork.append(busyTime)
+        }
+        busyTime = 0
         timestamps.append(link.timestamp)
         onFrame?(link)
     }
@@ -255,24 +329,20 @@ final class ChatBenchmarkModel {
             isRunning = false
         }
 
-        #if os(macOS)
-            let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
-            if anchorRow > 0 {
-                let horizontalOrigin = scrollView.contentView.bounds.minX
-                if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
-                    document.scrollToBenchmarkRow(anchorRow)
-                }
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-                try? await Task.sleep(for: .milliseconds(250))
-                guard abs(scrollView.contentView.bounds.minX - horizontalOrigin) < 0.5 else {
-                    Self.note("invalid measurement: benchmark anchor changed horizontal alignment")
-                    return nil
-                }
-                Self.note(
-                    "anchor row=\(anchorRow) x=\(horizontalOrigin) preservedX=true offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
-                )
+        let document = Self.transcriptDocument(of: scrollView)
+        let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
+        if anchorRow > 0 {
+            let horizontalOrigin = Self.contentOffsetX(of: scrollView)
+            document?.scrollToBenchmarkRow(anchorRow)
+            try? await Task.sleep(for: .milliseconds(250))
+            guard abs(Self.contentOffsetX(of: scrollView) - horizontalOrigin) < 0.5 else {
+                Self.note("invalid measurement: benchmark anchor changed horizontal alignment")
+                return nil
             }
-        #endif
+            Self.note(
+                "anchor row=\(anchorRow) x=\(horizontalOrigin) preservedX=true offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
+            )
+        }
         let monitor = ChatFramePacingMonitor()
         var scrollsUpward = true
         let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
@@ -334,11 +404,9 @@ final class ChatBenchmarkModel {
             }
         }
         if encounteredOcclusion { Self.note("invalid measurement: visible=false during sweep") }
-        #if os(macOS)
-            if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
-                Self.note(document.benchmarkStatistics)
-            }
-        #endif
+        if let document {
+            Self.note(document.benchmarkStatistics)
+        }
         let measuredLabel =
             scrubPeriod > 0
             ? "full-history-scrub-\(scrubPeriod)s-\(maximumSweepSeconds * 2)s" : label
@@ -523,6 +591,26 @@ final class ChatBenchmarkModel {
         #endif
     }
 
+    private static func transcriptDocument(
+        of scrollView: ChatBenchmarkScrollView
+    ) -> (any ChatBenchmarkAnchoredDocument)? {
+        #if os(macOS)
+            scrollView.documentView as? any ChatBenchmarkAnchoredDocument
+        #else
+            scrollView as? any ChatBenchmarkAnchoredDocument
+        #endif
+    }
+
+    private static func contentOffsetX(
+        of scrollView: ChatBenchmarkScrollView
+    ) -> CGFloat {
+        #if os(macOS)
+            scrollView.contentView.bounds.origin.x
+        #else
+            scrollView.contentOffset.x
+        #endif
+    }
+
     private static func contentOffsetY(
         of scrollView: ChatBenchmarkScrollView
     ) -> CGFloat {
@@ -635,14 +723,8 @@ nonisolated enum ChatBenchmarkAutoRun {
     @MainActor static func awaitTranscriptWarm(
         timeoutSeconds: TimeInterval
     ) async {
-        func isWarm() -> Bool {
-            #if os(macOS)
-                // The native transcript must also have installed its row geometry.
-                isTranscriptWarm && isNativeGeometryWarm
-            #else
-                isTranscriptWarm
-            #endif
-        }
+        // The native transcript must also have installed its row geometry.
+        func isWarm() -> Bool { isTranscriptWarm && isNativeGeometryWarm }
         let deadline = ContinuousClock.now + .seconds(timeoutSeconds)
         while !isWarm(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(250))
@@ -677,21 +759,26 @@ nonisolated enum ChatBenchmarkAutoRun {
     }
 }
 
-#if os(macOS)
-    @MainActor protocol ChatBenchmarkAnchoredDocument {
-        func scrollToBenchmarkRow(_ index: Int)
-        var benchmarkStatistics: String { get }
-    }
+@MainActor protocol ChatBenchmarkAnchoredDocument {
+    func scrollToBenchmarkRow(_ index: Int)
+    var benchmarkStatistics: String { get }
+}
 
-    extension ChatNativeTranscript.VirtualDocument: ChatBenchmarkAnchoredDocument {
-        func scrollToBenchmarkRow(_ index: Int) {
-            guard index >= 0, index < offsets.count - 1, let scroll = enclosingScrollView else { return }
+extension ChatNativeTranscript.VirtualDocument: ChatBenchmarkAnchoredDocument {
+    func scrollToBenchmarkRow(_ index: Int) {
+        #if os(macOS)
+            guard index >= 0, index < offsets.count - 1, let scroll = enclosingScrollView
+            else { return }
             ChatBenchmarkModel.setContentOffsetY(offsets[index], on: scroll)
-        }
-
-        var benchmarkStatistics: String {
-            "nativeMounts=\(nativeMounts) hostingMounts=\(hostingMounts) resident=\(hosts.count) pooled=\(reusable.count)"
-        }
+        #else
+            guard index >= 0, index < numberOfRows else { return }
+            ChatBenchmarkModel.setContentOffsetY(
+                offsets[index] - adjustedContentInset.top, on: self)
+        #endif
     }
-#endif
+
+    var benchmarkStatistics: String {
+        "nativeMounts=\(nativeMounts) hostingMounts=\(hostingMounts) created=\(createdRows) resident=\(hosts.count) pooled=\(reusableNative.count + reusableHosting.count)"
+    }
+}
 #endif

@@ -11,9 +11,11 @@
         var isPrepared = true
         var measurementKeys: [ChatNativeRowMeasurementKey?] = []
         var presentationTheme: ChatCodeHighlightTheme? = nil
+        /// The store the rows' prepared heights came from.
+        var layoutStore: ObjectIdentifier? = nil
         var historyLoadDistance: CGFloat = 0
-        var onGeometryChange: ((ChatMacScrollGeometry, ChatMacScrollGeometry) -> Void)? = nil
-        var onAttach: ((any ChatMacScrollDocument) -> Void)? = nil
+        var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)? = nil
+        var onAttach: ((ChatTranscriptScrollDocument) -> Void)? = nil
         var nativeRowHeight: ((Int, CGFloat) -> CGFloat?)? = nil
         var nativeRowFactory: ((Int, NSView?) -> NSView?)? = nil
         @ViewBuilder let content: (Int) -> Content
@@ -42,7 +44,8 @@
             context.coordinator.virtualDocument.onGeometryChange = onGeometryChange
             context.coordinator.update(
                 ids: ids, width: width, measurementKeys: measurementKeys,
-                presentationTheme: presentationTheme, nativeRowHeight: nativeRowHeight,
+                presentationTheme: presentationTheme, layoutStore: layoutStore,
+                nativeRowHeight: nativeRowHeight,
                 nativeRowFactory: nativeRowFactory,
                 onAttach: onAttach, content: content)
         }
@@ -54,102 +57,6 @@
             coordinator.virtualDocument.heightUpdateTask?.cancel()
             coordinator.virtualDocument.geometryNotificationTask?.cancel()
             coordinator.virtualDocument.setGeometryCommitHandler(nil)
-        }
-
-        final class Coordinator {
-            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
-            nonisolated deinit {}
-
-            let virtualDocument = VirtualDocument()
-            var task: Task<Void, Never>?
-            struct Measurement {
-                let key: ChatNativeRowMeasurementKey?
-                let width: CGFloat
-                let height: CGFloat
-            }
-            var measurements: [String: Measurement] = [:]
-            private var presentationTheme: ChatCodeHighlightTheme?
-            private(set) var lastMeasuredRowCount = 0
-
-            func update(
-                ids: [String], width: CGFloat, measurementKeys: [ChatNativeRowMeasurementKey?] = [],
-                presentationTheme: ChatCodeHighlightTheme? = nil,
-                nativeRowHeight: ((Int, CGFloat) -> CGFloat?)? = nil,
-                nativeRowFactory: ((Int, NSView?) -> NSView?)?,
-                onAttach: ((any ChatMacScrollDocument) -> Void)?,
-                content: @escaping (Int) -> Content
-            ) {
-                guard width > 0 else { return }
-                if ids.isEmpty {
-                    task?.cancel()
-                    measurements.removeAll()
-                    virtualDocument.install(heights: [], width: width, content: content)
-                    return
-                }
-                task?.cancel()
-                #if DEBUG
-                    ChatBenchmarkAutoRun.isNativeGeometryWarm = false
-                #endif
-                task = Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    #if DEBUG
-                        let started = ContinuousClock.now
-                    #endif
-                    let measure = NSHostingController(rootView: content(0))
-                    var result: [CGFloat] = []
-                    var updatedMeasurements: [String: Measurement] = [:]
-                    var changedIDs: Set<String> =
-                        self.presentationTheme == presentationTheme ? [] : Set(ids)
-                    var heightInvalidatedIDs = changedIDs
-                    self.lastMeasuredRowCount = 0
-                    result.reserveCapacity(ids.count)
-                    for index in ids.indices {
-                        if Task.isCancelled { return }
-                        let key =
-                            measurementKeys.indices.contains(index) ? measurementKeys[index] : nil
-                        let previous = self.measurements[ids[index]]
-                        let height: CGFloat
-                        if let previous, previous.width == width, previous.key == key {
-                            height =
-                                self.virtualDocument.geometry.index(for: ids[index]).map {
-                                    self.virtualDocument.geometry.heights[$0]
-                                } ?? previous.height
-                            if key == nil { changedIDs.insert(ids[index]) }
-                        } else {
-                            if let preparedHeight = nativeRowHeight?(index, width) {
-                                height = max(1, ceil(preparedHeight))
-                            } else {
-                                measure.rootView = content(index)
-                                let size = measure.sizeThatFits(
-                                    in: CGSize(width: width, height: .greatestFiniteMagnitude))
-                                height = max(1, ceil(size.height))
-                            }
-                            self.lastMeasuredRowCount += 1
-                            changedIDs.insert(ids[index])
-                            heightInvalidatedIDs.insert(ids[index])
-                            await Task.yield()
-                        }
-                        result.append(height)
-                        updatedMeasurements[ids[index]] = Measurement(
-                            key: key, width: width, height: height)
-                    }
-                    guard !Task.isCancelled else { return }
-                    self.measurements = updatedMeasurements
-                    self.presentationTheme = presentationTheme
-                    self.virtualDocument.nativeRowFactory = nativeRowFactory
-                    self.virtualDocument.install(
-                        heights: result, width: width, ids: ids, changedIDs: changedIDs,
-                        heightInvalidatedIDs: heightInvalidatedIDs, content: content)
-                    onAttach?(self.virtualDocument)
-                    #if DEBUG
-                        ChatBenchmarkAutoRun.trace(
-                            "native geometry rows=\(result.count) measured=\(self.lastMeasuredRowCount) width=\(width) totalHeight=\(result.reduce(0,+)) elapsed=\(started.duration(to: .now))"
-                        )
-                        ChatBenchmarkAutoRun.isNativeGeometryWarm = true
-                    #endif
-                }
-            }
-
         }
 
         final class VirtualDocument: NSView, ChatMacScrollDocument {
@@ -176,14 +83,33 @@
                 return NSRange(location: first, length: max(0, last - first + 1))
             }
 
+            /// Sizes one SwiftUI row at a width. The hosting controller is
+            /// shared by every row of an update and built on first use.
+            func makeRowMeasurer() -> (Content, CGFloat) -> CGFloat {
+                var controller: NSHostingController<Content>?
+                return { rootView, width in
+                    let measuring: NSHostingController<Content>
+                    if let controller {
+                        controller.rootView = rootView
+                        measuring = controller
+                    } else {
+                        measuring = NSHostingController(rootView: rootView)
+                        controller = measuring
+                    }
+                    return measuring.sizeThatFits(
+                        in: CGSize(width: width, height: .greatestFiniteMagnitude)
+                    ).height
+                }
+            }
+
             override var isFlipped: Bool { true }
             var geometry = ChatVirtualTranscriptGeometry()
             var offsets: [CGFloat] { geometry.offsets }
             var contentWidth: CGFloat = 0
             var historyLoadDistance: CGFloat = 0
-            var onGeometryChange: ((ChatMacScrollGeometry, ChatMacScrollGeometry) -> Void)?
-            private var lastReportedGeometry: ChatMacScrollGeometry?
-            private var pendingGeometry: ChatMacScrollGeometry?
+            var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)?
+            private var lastReportedGeometry: ChatScrollGeometry?
+            private var pendingGeometry: ChatScrollGeometry?
             var geometryNotificationTask: Task<Void, Never>?
             var rowRevisions: [String: Int] = [:]
             private var nextRowRevision = 0
@@ -200,10 +126,25 @@
             #if DEBUG
                 var nativeMounts = 0
                 var hostingMounts = 0
+                var createdRows = 0
             #endif
-            var reusable: [NSView] = []
+            /// Unmounted rows by kind. One mixed pool hands a hosting view to
+            /// a native row (and the reverse) about half the time, and the
+            /// mismatched view is then thrown away.
+            var reusableNative: [NSView] = []
+            var reusableHosting: [NSView] = []
+            private static var maximumPooledRows: Int { 32 }
             var preparationTask: Task<Void, Never>?
             var preparedRange: ClosedRange<Int>?
+            /// The rows last tiled and the width they were tiled at. Most
+            /// scrolled frames stay inside the same rows and need no work.
+            private var tiledViewport: TiledViewport?
+
+            private struct TiledViewport: Equatable {
+                let resident: ClosedRange<Int>
+                let visible: ClosedRange<Int>
+                let width: CGFloat
+            }
 
             func install(
                 heights: [CGFloat], width: CGFloat, ids: [String] = [],
@@ -222,13 +163,15 @@
                 }
                 preparationTask?.cancel()
                 preparedRange = nil
+                tiledViewport = nil
                 self.content = content
                 contentWidth = width
                 let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                 let oldIDs = geometry.ids
-                geometry.replace(ids: ids, estimatedHeight: 1)
-                geometry.updateHeights(Dictionary(zip(ids, heights), uniquingKeysWith: { first, _ in first }))
-                rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
+                if geometry.replace(ids: ids, estimatedHeight: 1) {
+                    rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
+                }
+                geometry.setHeights(heights)
                 // An unchanged live row keeps its reporting identity across parent
                 // updates; otherwise a queued height can be discarded permanently.
                 for id in heightInvalidatedIDs ?? changedIDs ?? Set(ids) {
@@ -244,12 +187,13 @@
                             ? host : configuredHost(index, reused: host, content: content)
                         if updated !== host {
                             host.removeFromSuperview()
+                            recycle(host)
                             addSubview(updated)
                         }
                         retained[index] = updated
                     } else {
                         host.removeFromSuperview()
-                        reusable.append(host)
+                        recycle(host)
                     }
                 }
                 hosts = retained
@@ -296,8 +240,11 @@
             private func repositionMountedRows() {
                 let width = enclosingScrollView?.contentSize.width ?? contentWidth
                 for (index, host) in hosts {
-                    host.frame = NSRect(x: 0, y: offsets[index], width: width,
-                                        height: geometry.heights[index])
+                    let frame = NSRect(
+                        x: 0, y: offsets[index], width: width, height: geometry.heights[index])
+                    if host.frame != frame {
+                        host.frame = frame
+                    }
                 }
             }
 
@@ -305,7 +252,7 @@
                 guard onGeometryChange != nil, let scroll = enclosingScrollView else { return }
                 let clip = scroll.contentView
                 let visible = clip.documentVisibleRect
-                let geometry = ChatMacScrollGeometry(
+                let geometry = ChatScrollGeometry(
                     isNearTop: numberOfRows > 0
                         && visible.minY + clip.contentInsets.top <= historyLoadDistance,
                     isNearBottom: numberOfRows > 0
@@ -379,15 +326,20 @@
                 // while allowing ordinary wheel input to reuse already mounted rows.
                 let first = max(0, row(at: max(0, visible.minY - visible.height)))
                 let last = row(at: min(frame.height, visible.maxY + visible.height))
-                guard first <= last else { return }
-                for index in Array(hosts.keys) where !(first...last).contains(index) {
-                    if let host = hosts.removeValue(forKey: index) {
-                        host.removeFromSuperview()
-                        reusable.append(host)
-                    }
-                }
                 let visibleFirst = max(first, row(at: visible.minY))
                 let visibleLast = min(last, row(at: visible.maxY))
+                guard first <= last, visibleFirst <= visibleLast else { return }
+                let viewport = TiledViewport(
+                    resident: first...last, visible: visibleFirst...visibleLast,
+                    width: visible.width)
+                guard viewport != tiledViewport else { return }
+                tiledViewport = viewport
+                for index in hosts.keys.filter({ $0 < first || $0 > last }) {
+                    if let host = hosts.removeValue(forKey: index) {
+                        host.removeFromSuperview()
+                        recycle(host)
+                    }
+                }
                 for index in visibleFirst...visibleLast {
                     mount(index, width: visible.width, content: content)
                 }
@@ -402,15 +354,41 @@
                     }
                     for index in nearby {
                         guard !Task.isCancelled, let self else { return }
-                        if self.hosts[index] == nil {
-                            self.mount(index, width: visible.width, content: content)
-                        }
+                        guard self.hosts[index] == nil else { continue }
+                        self.mount(index, width: visible.width, content: content)
                         await Task.yield()
                     }
                 }
             }
 
-            private func configuredHost(_ index: Int, reused: NSView?, content: (Int) -> Content)
+            private func recycle(_ host: NSView) {
+                if host is NSHostingView<ChatMeasuredTranscriptRow<Content>> {
+                    if reusableHosting.count < Self.maximumPooledRows { reusableHosting.append(host) }
+                } else if reusableNative.count < Self.maximumPooledRows {
+                    reusableNative.append(host)
+                }
+            }
+
+            /// A newly mounted row takes a pooled view of its own kind.
+            private func pooledHost(_ index: Int, content: (Int) -> Content) -> NSView {
+                let candidate = reusableNative.last
+                if let native = nativeRowFactory?(index, candidate) {
+                    if native === candidate { reusableNative.removeLast() }
+                    #if DEBUG
+                        nativeMounts += 1
+                        if native !== candidate { createdRows += 1 }
+                    #endif
+                    return native
+                }
+                #if DEBUG
+                    if reusableHosting.isEmpty { createdRows += 1 }
+                #endif
+                return hostingView(index, reused: reusableHosting.popLast(), content: content)
+            }
+
+            /// Refreshes a mounted row in place, replacing its view only when
+            /// the row changed kind.
+            private func configuredHost(_ index: Int, reused: NSView, content: (Int) -> Content)
                 -> NSView
             {
                 if let native = nativeRowFactory?(index, reused) {
@@ -418,23 +396,28 @@
                         nativeMounts += 1
                     #endif
                     return native
-                } else {
-                    let id = geometry.ids[index]
-                    let revision = rowRevisions[id, default: 0]
-                    let measured = ChatMeasuredTranscriptRow(content: content(index)) {
-                        [weak self] height in
-                        self?.noteHeight(height, id: id, revision: revision)
-                    }
-                    let hosting =
-                        reused as? NSHostingView<ChatMeasuredTranscriptRow<Content>>
-                        ?? NSHostingView(rootView: measured)
-                    hosting.sizingOptions = []
-                    hosting.rootView = measured
-                    #if DEBUG
-                        hostingMounts += 1
-                    #endif
-                    return hosting
                 }
+                return hostingView(index, reused: reused, content: content)
+            }
+
+            private func hostingView(_ index: Int, reused: NSView?, content: (Int) -> Content)
+                -> NSView
+            {
+                let id = geometry.ids[index]
+                let revision = rowRevisions[id, default: 0]
+                let measured = ChatMeasuredTranscriptRow(content: content(index)) {
+                    [weak self] height in
+                    self?.noteHeight(height, id: id, revision: revision)
+                }
+                let hosting =
+                    reused as? NSHostingView<ChatMeasuredTranscriptRow<Content>>
+                    ?? NSHostingView(rootView: measured)
+                hosting.sizingOptions = []
+                hosting.rootView = measured
+                #if DEBUG
+                    hostingMounts += 1
+                #endif
+                return hosting
             }
 
             private func mount(_ index: Int, width: CGFloat, content: (Int) -> Content) {
@@ -442,7 +425,7 @@
                 if let existing = hosts[index] {
                     host = existing
                 } else {
-                    host = configuredHost(index, reused: reusable.popLast(), content: content)
+                    host = pooledHost(index, content: content)
                     let next = hosts.keys.filter { $0 > index }.min().flatMap { hosts[$0] }
                     hosts[index] = host
                     addSubview(host, positioned: next == nil ? .above : .below, relativeTo: next)

@@ -327,10 +327,6 @@ struct ChatView: View {
             // Whether mounted through the warm pass or the primed fast
             // path, later bodies skip the cache probe.
             warmedThreadID = thread.id
-            textLayoutStore.activateTextViewReuse()
-        }
-        .onDisappear {
-            textLayoutStore.deactivateTextViewReuse()
         }
     }
 

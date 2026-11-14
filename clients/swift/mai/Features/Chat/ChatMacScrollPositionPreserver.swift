@@ -7,9 +7,8 @@
     /// allowing trackpad scrolling to continue between layout updates.
     @MainActor
     final class ChatMacScrollPositionPreserver: NSObject {
-        /// Ignore subpixel frame noise while still correcting a one-pixel
-        /// movement on Retina displays.
-        nonisolated private static let minimumLayoutCorrection: CGFloat = 0.5
+        nonisolated private static let minimumLayoutCorrection =
+            ChatScrollFollowPolicy.minimumMovement
 
         private weak var document: (any ChatMacScrollDocument)?
         private weak var scrollView: NSScrollView?
@@ -130,16 +129,6 @@
                 documentMinY - topInset,
                 documentMaxY - viewportHeight + bottomInset
             )
-        }
-
-        nonisolated static func shouldRestoreFollowingAfterUserScroll(
-            startY: CGFloat?,
-            endY: CGFloat?,
-            isNearBottom: Bool
-        ) -> Bool {
-            guard isNearBottom else { return false }
-            guard let startY, let endY else { return true }
-            return endY >= startY - minimumLayoutCorrection
         }
 
         /// Captures a visible row just before the model mutation that prepends
@@ -345,7 +334,7 @@
             let endY = scrollView?.contentView.documentVisibleRect.minY
             userScrollStartY = nil
             noteUserScrollActivity(false)
-            if Self.shouldRestoreFollowingAfterUserScroll(
+            if ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
                 startY: startY,
                 endY: endY,
                 isNearBottom: isNearBottom()

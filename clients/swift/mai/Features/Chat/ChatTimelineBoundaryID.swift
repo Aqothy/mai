@@ -1,4 +1,4 @@
-/// Shared identities for the List and native transcript boundaries.
+/// Identities of the transcript's boundary rows.
 enum ChatTimelineBoundaryID {
     static let bottom = "chat-bottom"
     static let history = "chat-history-marker"

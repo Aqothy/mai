@@ -40,7 +40,7 @@ extension ChatTimeline {
         await textLayoutStore.prepareCodeBlocks(requests: richBlocks.code)
     }
 
-    /// Settled code blocks and tables the rows will host natively on macOS,
+    /// Settled code blocks and tables the rows will host natively,
     /// keyed exactly as `ChatMarkdownRichContentView` and
     /// `ChatResolvedMarkdownBlockRow` key them. Streaming messages are
     /// excluded: their tail changes per chunk.
@@ -185,42 +185,36 @@ extension ChatTimeline {
             )
             switch plan {
             case .existingRenderer:
-                #if os(macOS)
-                    // A restored message can carry no turn ID; `nil != nil` must
-                    // not classify it as the streaming message when nothing is
-                    // streaming.
-                    guard message.annotations?.isEmpty != false,
-                        message.role == ChatRole.assistant.rawValue,
-                        streamingTurnID == nil || message.turnID != streamingTurnID
-                    else { return [.standard(row)] }
+                // A restored message can carry no turn ID; `nil != nil` must
+                // not classify it as the streaming message when nothing is
+                // streaming.
+                guard message.annotations?.isEmpty != false,
+                    message.role == ChatRole.assistant.rawValue,
+                    streamingTurnID == nil || message.turnID != streamingTurnID
+                else { return [.standard(row)] }
 
-                    let renderPlan = ChatMarkdownRenderCache.shared.plan(
-                        messageID: message.id,
-                        source: message.text
-                    )
-                    let contents = ChatResolvedMarkdownRowPlanner.contents(
-                        in: renderPlan
-                    )
-                    guard !contents.isEmpty else { return [.standard(row)] }
-                    return contents.indices.map { index in
-                        .resolvedMarkdown(
-                            ChatResolvedMarkdownBlockRowModel(
-                                messageID: message.id,
-                                index: index,
-                                content: contents[index],
-                                attachments: index == contents.count - 1
-                                    ? message.attachments
-                                    : nil,
-                                isFirst: index == 0,
-                                isLast: index == contents.count - 1
-                            )
+                let renderPlan = ChatMarkdownRenderCache.shared.plan(
+                    messageID: message.id,
+                    source: message.text
+                )
+                let contents = ChatResolvedMarkdownRowPlanner.contents(
+                    in: renderPlan
+                )
+                guard !contents.isEmpty else { return [.standard(row)] }
+                return contents.indices.map { index in
+                    .resolvedMarkdown(
+                        ChatResolvedMarkdownBlockRowModel(
+                            messageID: message.id,
+                            index: index,
+                            content: contents[index],
+                            attachments: index == contents.count - 1
+                                ? message.attachments
+                                : nil,
+                            isFirst: index == 0,
+                            isLast: index == contents.count - 1
                         )
-                    }
-                #else
-                    // Keep the selection action on the complete attributed
-                    // document, including references resolved outside a block.
-                    return [.standard(row)]
-                #endif
+                    )
+                }
 
             case .segmented(let segments):
                 return segments.indices.map { index in

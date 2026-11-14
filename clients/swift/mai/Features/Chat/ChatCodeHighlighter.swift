@@ -23,7 +23,7 @@ nonisolated enum ChatCodeHighlightTheme: String, Hashable, Sendable {
 
 /// Reuses and serializes access to HighlighterSwift's JavaScript context.
 /// Syntax work never runs on the main actor. Recent finished values stay
-/// process-wide so List recycling does not repeatedly execute the same JavaScript.
+/// process-wide so row recycling does not repeatedly execute the same JavaScript.
 actor ChatCodeHighlighter {
     static let shared = ChatCodeHighlighter()
 

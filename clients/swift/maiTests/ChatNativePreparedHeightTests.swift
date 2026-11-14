@@ -21,6 +21,12 @@
                 Issue.record("Expected a prose run followed by a table")
                 return
             }
+            let fenced = ChatMarkdownRenderPlanner.plan(
+                from: "```swift\nlet answer = 42\nprint(answer)\n```")
+            guard case .code(let code) = fenced.blocks.first else {
+                Issue.record("Expected a code block")
+                return
+            }
             _ = ChatMarkdownRenderCache.shared.plan(
                 messageID: "rich-table#segment-0", source: tableSource)
             for width: CGFloat in [220, 380, 760] {
@@ -52,13 +58,16 @@
                                 .init(
                                     messageID: "table", index: 0, content: .table(table),
                                     attachments: nil, isFirst: first, isLast: last)),
+                            .resolvedMarkdown(
+                                .init(
+                                    messageID: "code", index: 0, content: .code(code),
+                                    attachments: nil, isFirst: first, isLast: last)),
                         ]
                         for row in rows {
                             let descriptor = try #require(
                                 ChatNativePreparedRow.descriptor(for: row))
-                            let prepared = try #require(
-                                ChatNativePreparedRow.preparedHeight(
-                                    for: descriptor, width: width, store: layouts))
+                            let prepared = ChatNativePreparedRow.preparedHeight(
+                                for: descriptor, width: width, store: layouts, theme: .light)
                             let host = NSHostingController(
                                 rootView: ChatTimelineRenderRowView(
                                     row: row, streamingTurnID: nil, threadID: "height-test",

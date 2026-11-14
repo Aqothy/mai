@@ -147,7 +147,7 @@ private struct ChatStreamingMarkdownContentView: View {
 }
 
 /// Keeps stable timeline updates at a cheap equality check. Settled plans are
-/// process-cached so List remounts don't parse unchanged Markdown again.
+/// process-cached so row remounts don't parse unchanged Markdown again.
 private struct ChatMarkdownMessageLifetimeView: Equatable, View {
     let messageID: String
     let source: String

@@ -83,7 +83,6 @@ final class ThreadStore {
         guard let selectedThreadID,
             var session = sessionsByID[selectedThreadID]
         else { return }
-        session.textLayoutStore.deactivateTextViewReuse()
         session.textLayoutStore = ChatTextLayoutStore()
         sessionsByID[selectedThreadID] = session
         noteSelectedSessionChanged(selectedThreadID)
@@ -820,25 +819,30 @@ final class ThreadStore {
     }
 
     /// Loads the selected chat's turns before the oldest one it shows.
-    func loadOlderTurns() async {
+    /// Returns whether older turns arrived, by this call or one that
+    /// finished during it; a failed read returns false so the caller does
+    /// not ask again at once.
+    func loadOlderTurns() async -> Bool {
         guard let threadID = selectedThreadID,
             let older = sessionsByID[threadID]?.detail?.older,
             !isLoadingOlderTurns
-        else { return }
+        else { return false }
         isLoadingOlderTurns = true
         defer { isLoadingOlderTurns = false }
         do {
             let page = try await rpc.threadTurns(ThreadTurnsParams(before: older, limit: nil, thread: threadID))
-            guard sessionsByID[threadID]?.detail?.older == older else { return }
+            guard sessionsByID[threadID]?.detail?.older == older else { return true }
             sessionsByID[threadID]?.detail?.prepend(page)
             sessionsByID[threadID]?.timelineProjection.invalidateAll()
             noteSelectedSessionChanged(threadID)
+            return true
         } catch is CancellationError {
-            return
+            return false
         } catch {
             if selectedThreadID == threadID {
                 selectedThreadLoadErrorMessage = error.localizedDescription
             }
+            return false
         }
     }
 
@@ -1256,7 +1260,6 @@ final class ThreadStore {
         // daemon's caught-up snapshot rather than showing it first.
         session.detail = nil
         session.markdownSegmentCache = ChatMarkdownSegmentCache()
-        session.textLayoutStore.deactivateTextViewReuse()
         session.textLayoutStore = ChatTextLayoutStore()
         sessionsByID[id] = session
         removeEntryDetails(for: id)

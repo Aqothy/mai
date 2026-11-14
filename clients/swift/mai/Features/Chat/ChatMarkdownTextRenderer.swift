@@ -2,14 +2,8 @@ import Markdown
 
 #if os(macOS)
     import AppKit
-
-    private typealias ChatPlatformColor = NSColor
-    private typealias ChatPlatformFont = NSFont
 #else
     import UIKit
-
-    private typealias ChatPlatformColor = UIColor
-    private typealias ChatPlatformFont = UIFont
 #endif
 
 extension NSAttributedString.Key {

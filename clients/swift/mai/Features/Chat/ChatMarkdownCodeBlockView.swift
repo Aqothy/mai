@@ -3,7 +3,7 @@ import SwiftUI
 struct ChatMarkdownCodeBlockView: View {
     let block: ChatMarkdownCodeBlock
     let isStreaming: Bool
-    /// Identifies the block's prepared native layout on macOS.
+    /// Identifies the block's prepared native layout.
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
 
@@ -16,15 +16,13 @@ struct ChatMarkdownCodeBlockView: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    #if os(iOS)
-        @State private var highlightedCode: HighlightedCode?
-    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(block.displayLanguage)
                     .font(.callout)
+                    .lineLimit(1)
 
                 Spacer(minLength: 12)
 
@@ -34,45 +32,35 @@ struct ChatMarkdownCodeBlockView: View {
                     text: block.code
                 )
             }
+            // A fixed line: the native row computes the block's height
+            // from the same metric instead of measuring this header.
+            .frame(height: ChatRichBlockStyle.codeHeaderContentHeight)
             .padding(.horizontal, ChatRichBlockStyle.codeHeaderHorizontalInset)
             .padding(.top, ChatRichBlockStyle.codeHeaderTopInset)
             .padding(.bottom, ChatRichBlockStyle.codeHeaderBottomInset)
 
-            #if os(macOS)
-                if isStreaming {
-                    ScrollView(.horizontal) {
-                        Text(block.code)
-                        .font(.callout.monospaced())
-                        .lineSpacing(ChatMacCodeStyle.lineSpacing)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, ChatMacCodeStyle.horizontalInset)
-                        .padding(.bottom, ChatMacCodeStyle.bottomInset)
-                    }
-                    .scrollIndicators(.visible, axes: .horizontal)
-                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                } else {
-                    // A native, prepared text view: the row's height is known
-                    // before the row exists and vertical wheel gestures pass
-                    // through to the transcript.
-                    ChatMacCodeBlockText(
-                        layoutID: layoutID,
-                        block: block,
-                        theme: colorScheme == .dark ? .dark : .light,
-                        layoutStore: textLayoutStore
-                    )
-                }
-            #else
+            if isStreaming {
                 ScrollView(.horizontal) {
-                    Text(displayedCode)
+                    Text(block.code)
                         .font(.callout.monospaced())
-                        .lineSpacing(4)
+                        .lineSpacing(ChatCodeBlockStyle.lineSpacing)
                         .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
+                        .padding(.horizontal, ChatCodeBlockStyle.horizontalInset)
+                        .padding(.bottom, ChatCodeBlockStyle.bottomInset)
                 }
                 .scrollIndicators(.visible, axes: .horizontal)
                 .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            #endif
+            } else {
+                // A native, prepared text view: the row's height is known
+                // before the row exists, and a vertical scroll over the code
+                // moves the transcript.
+                ChatCodeBlockText(
+                    layoutID: layoutID,
+                    block: block,
+                    theme: colorScheme == .dark ? .dark : .light,
+                    layoutStore: textLayoutStore
+                )
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -84,55 +72,7 @@ struct ChatMarkdownCodeBlockView: View {
             RoundedRectangle(cornerRadius: ChatRichBlockStyle.codeCornerRadius)
                 .strokeBorder(Color.primary.opacity(ChatRichBlockStyle.codeBorderOpacity))
         }
-        #if os(iOS)
-            .task(id: highlightingRequest) {
-                guard let request = highlightingRequest else {
-                    highlightedCode = nil
-                    return
-                }
-                let result = await ChatCodeHighlighter.shared.highlight(
-                    code: request.code,
-                    language: request.language,
-                    theme: request.theme
-                )
-                guard !Task.isCancelled else { return }
-                highlightedCode = result.map {
-                    HighlightedCode(request: request, attributed: $0)
-                }
-            }
-        #endif
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(block.displayLanguage) code block")
     }
-
-    #if os(iOS)
-        private var highlightingRequest: HighlightingRequest? {
-            guard !isStreaming, !block.code.isEmpty else { return nil }
-            return HighlightingRequest(
-                code: block.code,
-                language: block.language,
-                theme: colorScheme == .dark ? .dark : .light
-            )
-        }
-
-        private var displayedCode: AttributedString {
-            guard let highlightedCode,
-                highlightedCode.request == highlightingRequest
-            else { return AttributedString(block.code) }
-            return highlightedCode.attributed
-        }
-    #endif
 }
-
-#if os(iOS)
-    private struct HighlightingRequest: Hashable {
-        let code: String
-        let language: String?
-        let theme: ChatCodeHighlightTheme
-    }
-
-    private struct HighlightedCode {
-        let request: HighlightingRequest
-        let attributed: AttributedString
-    }
-#endif
