@@ -26,16 +26,15 @@ import Testing
                 ids: ["user", "header", "work", "live", "working"],
                 sources: ["user", "header", "work", "m", "working"], estimatedHeight: 100)
             geometry.setHeights([100, 40, 300, 900, 40])
-            let inReply = try #require(geometry.anchor(at: 940))
-            let inWork = try #require(geometry.anchor(at: 200))
-            let previous = geometry
+            let inReply = try #require(geometry.readingPlace(atViewportTop: 940, markerHeight: 1))
+            let inWork = try #require(geometry.readingPlace(atViewportTop: 200, markerHeight: 1))
 
             geometry.replace(
                 ids: ["user", "header", "m#0", "m#1"], sources: ["user", "header", "m", "m"],
                 estimatedHeight: 100)
             geometry.setHeights([100, 40, 300, 500])
-            #expect(geometry.offset(for: inReply, from: previous) == 140 + 500)
-            #expect(geometry.offset(for: inWork, from: previous) == 140)
+            #expect(geometry.offset(for: inReply) == 140 + 500)
+            #expect(geometry.offset(for: inWork) == 140)
         }
 
         @Test func emptyRemovalAndBoundaryLookup() throws {

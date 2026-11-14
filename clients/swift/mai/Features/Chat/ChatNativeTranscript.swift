@@ -421,7 +421,7 @@
                 #endif
                 let id = geometry.ids[index]
                 let revision = rowRevisions[id] ?? 0
-                let measured = ChatMeasuredTranscriptRow(content: content(index)) {
+                let measured = ChatMeasuredTranscriptRow(id: id, content: content(index)) {
                     [weak self] height in
                     self?.noteHeight(height, id: id, revision: revision)
                 }

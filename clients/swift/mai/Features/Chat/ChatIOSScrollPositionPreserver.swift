@@ -76,8 +76,8 @@
         @discardableResult
         func pinToBottom(animated: Bool = false) -> Bool {
             guard let document else { return false }
-            if animated, document.isDecelerating {
-                // The jump stops the fling, and UIKit then reports no end
+            if document.isDecelerating {
+                // The move stops the fling, and UIKit then reports no end
                 // of deceleration.
                 finishUserScroll(in: document)
             }

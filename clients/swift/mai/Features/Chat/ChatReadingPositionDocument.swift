@@ -39,9 +39,8 @@ extension ChatReadingPositionDocument {
     func updateGeometry(_ change: () -> Void) {
         let follows = isFollowingBottom
         let top = follows ? nil : viewportTop
-        let previous = geometry
-        let anchor = top.flatMap {
-            geometry.readingAnchor(
+        let place = top.flatMap {
+            geometry.readingPlace(
                 atViewportTop: $0, markerHeight: ChatTimelineMetrics.historyMarkerHeight)
         }
         change()
@@ -51,7 +50,7 @@ extension ChatReadingPositionDocument {
         } else if let top {
             // Without a place to keep, the viewport still moves back inside
             // content that may have shrunk under it.
-            setViewportTop(anchor.flatMap { geometry.offset(for: $0, from: previous) } ?? top)
+            setViewportTop(place.flatMap(geometry.offset(for:)) ?? top)
         }
     }
 

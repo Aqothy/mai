@@ -111,24 +111,35 @@ nonisolated struct ChatVirtualTranscriptGeometry {
         return offsets[index] + min(anchor.offsetWithinRow, heights[index])
     }
 
-    /// Where an anchor taken in `previous` is now, when its row may have
-    /// left. Its content may be shown by other rows now (a finished reply's
-    /// live row becomes its settled blocks): the reader keeps their place
-    /// in that content. Or it folded away (a finished turn's work behind
-    /// its header): the reader lands where it was, below the nearest row
-    /// above it that stayed.
-    func offset(for anchor: Anchor, from previous: Self) -> CGFloat? {
-        if let offset = offset(for: anchor) { return offset }
-        guard let old = previous.indices[anchor.id] else { return nil }
-        let source = previous.sources[old]
-        if let start = sourceStarts[source], let oldStart = previous.sourceStarts[source] {
-            let intoContent =
-                previous.offsets[old] - previous.offsets[oldStart] + anchor.offsetWithinRow
-            return offsets[start] + min(intoContent, sourceEnd(from: start) - offsets[start])
+    /// The place of a reader at `top`; see `readingAnchor`.
+    func readingPlace(atViewportTop top: CGFloat, markerHeight: CGFloat)
+        -> ChatTranscriptReadingPlace?
+    {
+        guard let anchor = readingAnchor(atViewportTop: top, markerHeight: markerHeight),
+            let index = indices[anchor.id]
+        else { return nil }
+        let source = sources[index]
+        let sourceStart = sourceStarts[source] ?? index
+        return ChatTranscriptReadingPlace(
+            anchor: anchor, source: source,
+            offsetIntoSource: offsets[index] - offsets[sourceStart] + anchor.offsetWithinRow,
+            idsAbove: ids[..<index], sourcesAbove: sources[..<index])
+    }
+
+    /// Where a reading place taken before the rows changed is now. While
+    /// its row stays, that is the row. Otherwise the reader keeps their
+    /// place in the rows now showing its content, or, when it folded
+    /// away, lands where it was: below the nearest row above it that
+    /// stayed.
+    func offset(for place: ChatTranscriptReadingPlace) -> CGFloat? {
+        if let offset = offset(for: place.anchor) { return offset }
+        if let start = sourceStarts[place.source] {
+            return offsets[start]
+                + min(place.offsetIntoSource, sourceEnd(from: start) - offsets[start])
         }
-        for index in stride(from: old - 1, through: 0, by: -1) {
-            if let kept = indices[previous.ids[index]] { return offsets[kept + 1] }
-            if let start = sourceStarts[previous.sources[index]] { return sourceEnd(from: start) }
+        for (id, source) in zip(place.idsAbove, place.sourcesAbove).reversed() {
+            if let kept = indices[id] { return offsets[kept + 1] }
+            if let start = sourceStarts[source] { return sourceEnd(from: start) }
         }
         return nil
     }

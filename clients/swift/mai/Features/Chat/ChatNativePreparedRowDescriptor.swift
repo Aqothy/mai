@@ -4,11 +4,6 @@ import Foundation
 /// `ChatNativePreparedRow` present the same descriptor, so a row is native
 /// on one exactly when it is on the other.
 extension ChatNativePreparedRow {
-    enum Content: Equatable {
-        case prose(ChatTextContent)
-        case code(ChatMarkdownCodeBlock)
-        case table(ChatMarkdownTable)
-    }
     struct Descriptor: Equatable {
         let id: String
         let content: Content

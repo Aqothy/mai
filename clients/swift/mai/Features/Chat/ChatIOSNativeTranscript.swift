@@ -291,17 +291,17 @@
             @discardableResult
             func scrollToBottom(animated: Bool) -> Bool {
                 endScrollAnimation()
+                if isDecelerating {
+                    // Assigning the offset leaves a fling running from the
+                    // new position, carrying the reader off the end.
+                    setContentOffset(contentOffset, animated: false)
+                }
                 // Without a window there are no frames to animate in.
                 guard animated, window != nil else { return scrollToBottom() }
                 guard let bottom = bottomViewportTop, let top = viewportTop else { return false }
                 let distance = bottom - top
                 guard abs(distance) > ChatScrollFollowPolicy.minimumMovement else {
                     return scrollToBottom()
-                }
-                if isDecelerating {
-                    // Assigning the offset would leave the fling running
-                    // under the jump.
-                    setContentOffset(contentOffset, animated: false)
                 }
                 let link = CADisplayLink(target: self, selector: #selector(stepScrollAnimation))
                 link.add(to: .main, forMode: .common)
@@ -596,7 +596,7 @@
                 // takes no part in the safe area or keyboard avoidance, which
                 // would otherwise move a row's content as it scrolls under a bar.
                 let configuration = UIHostingConfiguration {
-                    ChatMeasuredTranscriptRow(content: content(index)) { [weak self] height in
+                    ChatMeasuredTranscriptRow(id: id, content: content(index)) { [weak self] height in
                         self?.noteHeight(height, id: id, revision: revision)
                     }
                 }
