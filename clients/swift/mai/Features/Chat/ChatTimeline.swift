@@ -1,33 +1,5 @@
 import SwiftUI
 
-private struct ChatTimelinePreparationKey: Equatable {
-    let timelineEntryCount: Int
-    let streamingTurnID: String?
-    let rowWidth: CGFloat
-    /// Highlighted code is prepared per appearance.
-    let codeTheme: ChatCodeHighlightTheme
-    /// Layouts bake their fonts in; a new store means none of them exist.
-    let layoutStore: ObjectIdentifier
-    let expandedSectionIDs: Set<String>
-    /// Loading earlier history changes which rows exist without changing the
-    /// counts above; preparation must re-run over the widened window or a
-    /// later width change only prepares the rows captured at the old window.
-    let oldestLoadedSectionID: String?
-}
-
-/// Which history a request to load earlier turns was made for: the oldest
-/// section shown and the oldest the store holds.
-private struct ChatTimelineHistoryPosition: Equatable {
-    let oldestLoadedSectionID: String?
-    let oldestSectionID: String?
-}
-
-private struct ChatTimelineHistoryLoadTrigger: Equatable {
-    let request: Int
-    let isAwaitingInitialBottom: Bool
-    let oldestSectionID: String?
-}
-
 struct ChatTimeline: View {
     // The transcript arms pagination well before the top edge so the next
     // page is prepared before the reader reaches it. A flick on a phone
