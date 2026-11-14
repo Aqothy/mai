@@ -17,6 +17,12 @@ extension ChatNativeTranscript {
             let height: CGFloat
         }
         var measurements: [String: Measurement] = [:]
+        /// Rows a pass measured before a newer update cancelled it. A pass
+        /// yields after each SwiftUI row it sizes, and updates can arrive
+        /// faster than a whole pass; without these, each pass would start
+        /// over and the rows would never install.
+        private var unpublishedMeasurements: [String: Measurement] = [:]
+        private var unpublishedLayoutStore: ObjectIdentifier?
         private var presentationTheme: ChatCodeHighlightTheme?
         private var layoutStore: ObjectIdentifier?
         private(set) var lastMeasuredRowCount = 0
@@ -34,6 +40,7 @@ extension ChatNativeTranscript {
             if ids.isEmpty {
                 task?.cancel()
                 measurements.removeAll()
+                unpublishedMeasurements.removeAll()
                 virtualDocument.install(heights: [], width: width, content: content)
                 return
             }
@@ -59,6 +66,10 @@ extension ChatNativeTranscript {
                     self.presentationTheme == presentationTheme
                         && self.layoutStore == layoutStore ? [] : Set(ids)
                 var heightInvalidatedIDs = changedIDs
+                if self.unpublishedLayoutStore != layoutStore {
+                    self.unpublishedMeasurements.removeAll()
+                    self.unpublishedLayoutStore = layoutStore
+                }
                 self.lastMeasuredRowCount = 0
                 result.reserveCapacity(ids.count)
                 updatedMeasurements.reserveCapacity(ids.count)
@@ -75,12 +86,19 @@ extension ChatNativeTranscript {
                             } ?? previous.height
                         if key == nil { changedIDs.insert(ids[index]) }
                     } else {
+                        let unpublished = self.unpublishedMeasurements[ids[index]]
                         if let preparedHeight = nativeRowHeight?(index, width) {
                             // A lookup in the prepared layouts: nothing
                             // worth giving the frame back for.
                             height = max(1, ceil(preparedHeight))
+                        } else if let unpublished, unpublished.width == width,
+                            unpublished.key == key
+                        {
+                            height = unpublished.height
                         } else {
                             height = max(1, ceil(measure(content(index), width)))
+                            self.unpublishedMeasurements[ids[index]] = Measurement(
+                                key: key, width: width, height: height)
                             await Task.yield()
                         }
                         self.lastMeasuredRowCount += 1
@@ -93,6 +111,7 @@ extension ChatNativeTranscript {
                 }
                 guard !Task.isCancelled else { return }
                 self.measurements = updatedMeasurements
+                self.unpublishedMeasurements.removeAll()
                 self.presentationTheme = presentationTheme
                 self.layoutStore = layoutStore
                 self.virtualDocument.nativeRowFactory = nativeRowFactory

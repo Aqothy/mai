@@ -80,9 +80,7 @@
             document.install(heights: [600, 20, 1], width: 300,
                              ids: ["reply", "working", "end"]) { Text("Row \($0)") }
             let preserver = ChatMacScrollPositionPreserver()
-            preserver.configure(isBottomFollowingEnabled: { true },
-                               noteUserScrollActivity: { _ in }, noteUserReachedEnd: {},
-                               noteKeyboardScrollIntent: { _ in })
+            preserver.configure(ChatScrollIntentHandlers(isBottomFollowingEnabled: { true }))
             preserver.attach(to: document)
             #expect(preserver.pinToBottom())
             let workingY = document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY
@@ -107,7 +105,7 @@
             await document.preparationTask?.value
             let neighbor = document.hosts[3]
             #expect(neighbor != nil)
-            document.noteHeight(150, id: "0", revision: document.rowRevisions["0", default: 0])
+            document.noteHeight(150, id: "0", revision: document.rowRevisions["0"] ?? 0)
             // Already-mounted neighbors must move before the next frame can paint.
             #expect(neighbor?.frame.minY == 350)
             #expect(document.rect(ofRow: 3).minY == 350)

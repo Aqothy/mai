@@ -20,10 +20,7 @@
         private var userScrollStartY: CGFloat?
         private var lastOffsetY: CGFloat?
         private var lastViewport: Viewport?
-        private var isBottomFollowingEnabled: () -> Bool = { false }
-        private var noteUserScrollActivity: (Bool) -> Void = { _ in }
-        private var noteUserReachedEnd: () -> Void = {}
-        private var noteKeyboardScrollIntent: (Bool) -> Void = { _ in }
+        private var handlers = ChatScrollIntentHandlers()
 
         /// The viewport a scroll happened in. An offset that moves along with
         /// it is the keyboard or a rotation, not the reader.
@@ -33,17 +30,9 @@
             let contentHeight: CGFloat
         }
 
-        func configure(
-            isBottomFollowingEnabled: @escaping () -> Bool,
-            noteUserScrollActivity: @escaping (Bool) -> Void,
-            noteUserReachedEnd: @escaping () -> Void,
-            noteKeyboardScrollIntent: @escaping (_ towardEnd: Bool) -> Void
-        ) {
-            self.isBottomFollowingEnabled = isBottomFollowingEnabled
-            self.noteUserScrollActivity = noteUserScrollActivity
-            self.noteUserReachedEnd = noteUserReachedEnd
-            self.noteKeyboardScrollIntent = noteKeyboardScrollIntent
-            document?.isBottomFollowingEnabled = isBottomFollowingEnabled
+        func configure(_ handlers: ChatScrollIntentHandlers) {
+            self.handlers = handlers
+            document?.isBottomFollowingEnabled = handlers.isBottomFollowingEnabled
         }
 
         /// Called after every install, so it must converge when repeated.
@@ -56,7 +45,7 @@
                 self.document = document
                 document.delegate = self
             }
-            document.isBottomFollowingEnabled = isBottomFollowingEnabled
+            document.isBottomFollowingEnabled = handlers.isBottomFollowingEnabled
             document.setViewportInsets(viewportInsets)
             if let completion = pendingInitialBottomAlignment {
                 pendingInitialBottomAlignment = nil
@@ -92,11 +81,13 @@
         // MARK: Reader input
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            // A drag stops a running jump to the end.
+            document?.endScrollAnimation()
             document?.completeInitialBottomAlignment()
             if userScrollStartY == nil {
                 userScrollStartY = scrollView.contentOffset.y
             }
-            noteUserScrollActivity(true)
+            handlers.noteUserScrollActivity(true)
         }
 
         func scrollViewDidEndDragging(
@@ -116,22 +107,25 @@
         /// the document's own pins while it flies do not stop it. Rows that
         /// changed height on the way leave the end somewhere else by now.
         func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-            if isBottomFollowingEnabled() {
+            document?.endScrollAnimation()
+            if handlers.isBottomFollowingEnabled() {
                 document?.scrollToBottom(animated: false)
             }
+        }
+
+        /// The tap's scroll replaces a running jump to the end, and its
+        /// movement is the reader's.
+        func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+            document?.endScrollAnimation()
+            return true
         }
 
         private func finishUserScroll(in scrollView: UIScrollView) {
             guard let startY = userScrollStartY else { return }
             userScrollStartY = nil
-            noteUserScrollActivity(false)
-            if ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
-                startY: startY,
-                endY: scrollView.contentOffset.y,
-                isNearBottom: document?.isNearBottom ?? false
-            ) {
-                noteUserReachedEnd()
-            }
+            handlers.finishUserScroll(
+                startY: startY, endY: scrollView.contentOffset.y,
+                isNearBottom: document?.isNearBottom ?? false)
         }
 
         /// A status-bar tap, a hardware keyboard and VoiceOver scroll without
@@ -156,9 +150,9 @@
             else { return }
 
             if offsetY < lastOffsetY - ChatScrollFollowPolicy.minimumMovement {
-                noteKeyboardScrollIntent(false)
+                handlers.noteKeyboardScrollIntent(false)
             } else if offsetY > lastOffsetY + ChatScrollFollowPolicy.minimumMovement {
-                noteKeyboardScrollIntent(true)
+                handlers.noteKeyboardScrollIntent(true)
             }
         }
     }

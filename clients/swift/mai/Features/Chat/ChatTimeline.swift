@@ -266,24 +266,24 @@ struct ChatTimeline: View {
 
     private func configureScrollDocument(_ document: ChatTranscriptScrollDocument) {
         scrollPositionPreserver.configure(
-            isBottomFollowingEnabled: {
-                scrollState.shouldFollowBottom
-            },
-            noteUserScrollActivity: { isActive in
-                scrollState.noteUserScrollActivity(
-                    isActive: isActive
-                )
-            },
-            noteUserReachedEnd: {
-                scrollState.noteScrollReturnedToEnd()
-            },
-            noteKeyboardScrollIntent: { towardEnd in
-                if towardEnd {
-                    scrollState.noteScrollTowardEnd()
-                } else {
-                    scrollState.noteScrollAwayFromEnd()
+            ChatScrollIntentHandlers(
+                isBottomFollowingEnabled: {
+                    scrollState.shouldFollowBottom
+                },
+                noteUserScrollActivity: { isActive in
+                    scrollState.noteUserScrollActivity(isActive: isActive)
+                },
+                noteUserReachedEnd: {
+                    scrollState.noteScrollReturnedToEnd()
+                },
+                noteKeyboardScrollIntent: { towardEnd in
+                    if towardEnd {
+                        scrollState.noteScrollTowardEnd()
+                    } else {
+                        scrollState.noteScrollAwayFromEnd()
+                    }
                 }
-            }
+            )
         )
         scrollPositionPreserver.attach(to: document)
     }

@@ -28,7 +28,7 @@
             // The first row grows above the viewport; the row being read keeps
             // its place on screen, in the same pass.
             document.noteHeight(
-                200, id: "row-0", revision: document.rowRevisions["row-0", default: 0])
+                200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
             #expect(document.contentOffset.y == 450)
 
             // An older page arrives above every row.
@@ -49,7 +49,7 @@
             #expect(document.contentOffset.y == document.contentSize.height - 200)
             for height in [CGFloat(630), 950, 780, 1100] {
                 document.noteHeight(
-                    height, id: "reply", revision: document.rowRevisions["reply", default: 0])
+                    height, id: "reply", revision: document.rowRevisions["reply"] ?? 0)
                 #expect(document.contentOffset.y == document.contentSize.height - 200)
             }
         }
@@ -93,8 +93,7 @@
             let preserver = ChatIOSScrollPositionPreserver()
             var intents: [Bool] = []
             preserver.configure(
-                isBottomFollowingEnabled: { false }, noteUserScrollActivity: { _ in },
-                noteUserReachedEnd: {}, noteKeyboardScrollIntent: { intents.append($0) })
+                ChatScrollIntentHandlers(noteKeyboardScrollIntent: { intents.append($0) }))
             preserver.attach(to: document)
 
             document.contentOffset = CGPoint(x: 0, y: 500)
@@ -103,9 +102,54 @@
             #expect(intents == [false, true])
 
             document.noteHeight(
-                200, id: "row-0", revision: document.rowRevisions["row-0", default: 0])
+                200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
             #expect(document.contentOffset.y == 700)
             #expect(intents == [false, true])
+        }
+
+        /// The jump's animation frames trail the document's pins to a grown
+        /// end; they are not the reader leaving it.
+        @Test func anAnimatedJumpsFramesAreNotIntent() {
+            let document = makeDocument()
+            defer { document.tearDown() }
+            document.install(
+                heights: Array(repeating: 100, count: 10), width: 300, content: rowContent)
+            let preserver = ChatIOSScrollPositionPreserver()
+            var intents: [Bool] = []
+            preserver.configure(
+                ChatScrollIntentHandlers(noteKeyboardScrollIntent: { intents.append($0) }))
+            preserver.attach(to: document)
+            document.contentOffset = CGPoint(x: 0, y: 100)
+            intents.removeAll()
+
+            #expect(preserver.pinToBottom(animated: true))
+            #expect(document.isAdjustingScrollPosition)
+            document.contentOffset = CGPoint(x: 0, y: 700)
+            document.contentOffset = CGPoint(x: 0, y: 400)
+            #expect(intents.isEmpty)
+
+            preserver.scrollViewDidEndScrollingAnimation(document)
+            #expect(!document.isAdjustingScrollPosition)
+            document.contentOffset = CGPoint(x: 0, y: 200)
+            #expect(intents == [false])
+        }
+
+        /// A streaming reply's live row becomes its settled blocks while the
+        /// reader is inside it, and the turn's work folds above it.
+        @Test func aReaderWhoseRowLeftKeepsTheirDistanceFromTheEnd() {
+            let document = makeDocument()
+            defer { document.tearDown() }
+            document.install(
+                heights: [100, 300, 300, 900], width: 300,
+                ids: ["user", "work-a", "work-b", "reply-live"], content: rowContent)
+            document.contentOffset = CGPoint(x: 0, y: 1_000)
+
+            document.install(
+                heights: [100, 40, 400, 500], width: 300,
+                ids: ["user", "worked-for", "reply-block-0", "reply-block-1"],
+                content: rowContent)
+            #expect(document.contentSize.height == 1_040)
+            #expect(document.contentOffset.y == 440)
         }
     }
 #endif

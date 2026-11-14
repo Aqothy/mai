@@ -78,9 +78,13 @@
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
             var initialBottomAlignmentCompletion: (() -> Void)?
-            private(set) var isAdjustingScrollPosition = false
-            var rowRevisions: [String: Int] = [:]
-            private var nextRowRevision = 0
+            /// True while the document moves the offset itself, or while a
+            /// jump it started flies: the animation's frames move the offset
+            /// back below the document's own pins, which is not the reader.
+            var isAdjustingScrollPosition: Bool { isSettingOffset || isAnimatingScroll }
+            private var isSettingOffset = false
+            private var isAnimatingScroll = false
+            private(set) var rowRevisions = ChatTranscriptRowRevisions()
             var content: ((Int) -> Content)?
             var hosts: [Int: UIView] = [:]
             var nativeRowFactory: ((Int, UIView?) -> UIView?)?
@@ -136,6 +140,7 @@
                 geometryReporter.onChange = nil
                 delegate = nil
                 initialBottomAlignmentCompletion = nil
+                isAnimatingScroll = false
             }
 
             // MARK: Rows
@@ -186,34 +191,15 @@
                     let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                     let oldIDs = geometry.ids
                     updateGeometry {
-                        if geometry.replace(ids: ids, estimatedHeight: 1) {
-                            rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
-                        }
+                        let rowsChanged = geometry.replace(ids: ids, estimatedHeight: 1)
                         geometry.setHeights(heights)
-                        // An unchanged live row keeps its reporting identity across parent
-                        // updates; otherwise a queued height can be discarded permanently.
-                        for id in heightInvalidatedIDs ?? changedIDs ?? Set(ids) {
-                            nextRowRevision += 1
-                            rowRevisions[id] = nextRowRevision
-                        }
-                        var retained: [Int: UIView] = [:]
-                        retained.reserveCapacity(hosts.count)
-                        for (oldIndex, host) in hosts {
-                            let id = oldIDs[oldIndex]
-                            guard let index = geometry.index(for: id), retained[index] == nil else {
-                                recycle(host)
-                                continue
-                            }
-                            let updated =
-                                changedIDs?.contains(id) == false
-                                ? host : configuredHost(index, current: host)
-                            if updated !== host {
-                                recycle(host)
-                                show(updated)
-                            }
-                            retained[index] = updated
-                        }
-                        hosts = retained
+                        rowRevisions.install(
+                            invalidatedIDs: heightInvalidatedIDs ?? changedIDs ?? Set(ids),
+                            rowsChanged: rowsChanged, in: geometry)
+                        hosts = ChatTranscriptMountedRows.retained(
+                            hosts, oldIDs: oldIDs, in: geometry, changedIDs: changedIDs,
+                            configure: { configuredHost($0, current: $1) },
+                            recycle: recycle, show: show)
                     }
                     tiledViewport = nil
                     alignInitialBottomIfPossible()
@@ -222,8 +208,7 @@
             }
 
             func noteHeight(_ height: CGFloat, id: String, revision: Int) {
-                guard height.isFinite, height > 0, rowRevisions[id, default: 0] == revision,
-                    let index = geometry.index(for: id), geometry.heights[index] != height
+                guard rowRevisions.accepts(height, id: id, revision: revision, in: geometry)
                 else { return }
                 // Commit geometry before this layout can paint. Deferring these
                 // frames leaves the working row over newly expanded content.
@@ -279,17 +264,30 @@
                 let scale = max(1, traitCollection.displayScale)
                 let aligned = (y * scale).rounded() / scale
                 guard abs(contentOffset.y - aligned) > 0.01 else { return }
-                isAdjustingScrollPosition = true
+                isSettingOffset = true
                 contentOffset = CGPoint(x: contentOffset.x, y: aligned)
-                isAdjustingScrollPosition = false
+                isSettingOffset = false
             }
 
             @discardableResult
             func scrollToBottom(animated: Bool) -> Bool {
                 guard animated else { return scrollToBottom() }
                 guard bottomViewportTop != nil else { return false }
-                setContentOffset(CGPoint(x: contentOffset.x, y: bottomOffsetY), animated: true)
+                let y = bottomOffsetY
+                // UIKit reports no end for an animation that would not move,
+                // and the flag below must always be cleared.
+                guard abs(contentOffset.y - y) > ChatScrollFollowPolicy.minimumMovement else {
+                    return scrollToBottom()
+                }
+                isAnimatingScroll = true
+                setContentOffset(CGPoint(x: contentOffset.x, y: y), animated: true)
                 return true
+            }
+
+            /// The jump `scrollToBottom(animated:)` started reached its
+            /// target, or a drag took over.
+            func endScrollAnimation() {
+                isAnimatingScroll = false
             }
 
             /// Geometry changes move every resident row, including prepared neighbors.
@@ -555,7 +553,7 @@
             private func hostingView(_ index: Int, reused: UIView?) -> UIView {
                 guard let content else { return reused ?? UIView() }
                 let id = geometry.ids[index]
-                let revision = rowRevisions[id, default: 0]
+                let revision = rowRevisions[id] ?? 0
                 // A hosting configuration's view needs no view controller and
                 // takes no part in the safe area or keyboard avoidance, which
                 // would otherwise move a row's content as it scrolls under a bar.

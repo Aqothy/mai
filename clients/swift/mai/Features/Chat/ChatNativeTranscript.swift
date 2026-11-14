@@ -94,8 +94,7 @@
             /// origin was. A change to the first is layout, not the reader.
             private var lastViewport: Viewport?
             private var lastClipY: CGFloat = 0
-            var rowRevisions: [String: Int] = [:]
-            private var nextRowRevision = 0
+            private(set) var rowRevisions = ChatTranscriptRowRevisions()
             var heightUpdateTask: Task<Void, Never>?
             var isApplyingHeights = false
 
@@ -168,35 +167,15 @@
                 let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                 let oldIDs = geometry.ids
                 updateGeometry {
-                    if geometry.replace(ids: ids, estimatedHeight: 1) {
-                        rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
-                    }
+                    let rowsChanged = geometry.replace(ids: ids, estimatedHeight: 1)
                     geometry.setHeights(heights)
-                    // An unchanged live row keeps its reporting identity across parent
-                    // updates; otherwise a queued height can be discarded permanently.
-                    for id in heightInvalidatedIDs ?? changedIDs ?? Set(ids) {
-                        nextRowRevision += 1
-                        rowRevisions[id] = nextRowRevision
-                    }
-                    var retained: [Int: NSView] = [:]
-                    for (oldIndex, host) in hosts {
-                        let id = oldIDs[oldIndex]
-                        if let index = geometry.index(for: id) {
-                            let updated =
-                                changedIDs?.contains(id) == false
-                                ? host : configuredHost(index, reused: host, content: content)
-                            if updated !== host {
-                                host.removeFromSuperview()
-                                recycle(host)
-                                addSubview(updated)
-                            }
-                            retained[index] = updated
-                        } else {
-                            host.removeFromSuperview()
-                            recycle(host)
-                        }
-                    }
-                    hosts = retained
+                    rowRevisions.install(
+                        invalidatedIDs: heightInvalidatedIDs ?? changedIDs ?? Set(ids),
+                        rowsChanged: rowsChanged, in: geometry)
+                    hosts = ChatTranscriptMountedRows.retained(
+                        hosts, oldIDs: oldIDs, in: geometry, changedIDs: changedIDs,
+                        configure: { configuredHost($0, reused: $1, content: content) },
+                        recycle: recycle, show: { addSubview($0) })
                     subviews = hosts.keys.sorted().compactMap { hosts[$0] }
                 }
                 alignInitialBottomIfPossible()
@@ -205,8 +184,7 @@
             func row(at y: CGFloat) -> Int { geometry.index(at: y) ?? -1 }
 
             func noteHeight(_ height: CGFloat, id: String, revision: Int) {
-                guard height.isFinite, height > 0, rowRevisions[id, default: 0] == revision,
-                    let index = geometry.index(for: id), geometry.heights[index] != height
+                guard rowRevisions.accepts(height, id: id, revision: revision, in: geometry)
                 else { return }
                 // Commit geometry before this layout can paint. Deferring these
                 // frames leaves the working row over newly expanded content.
@@ -383,7 +361,6 @@
                 tiledViewport = viewport
                 for index in hosts.keys.filter({ $0 < first || $0 > last }) {
                     if let host = hosts.removeValue(forKey: index) {
-                        host.removeFromSuperview()
                         recycle(host)
                     }
                 }
@@ -408,7 +385,9 @@
                 }
             }
 
+            /// Takes a row out of the document into the pool of its kind.
             private func recycle(_ host: NSView) {
+                host.removeFromSuperview()
                 if host is NSHostingView<ChatMeasuredTranscriptRow<Content>> {
                     if reusableHosting.count < Self.maximumPooledRows { reusableHosting.append(host) }
                 } else if reusableNative.count < Self.maximumPooledRows {
@@ -451,7 +430,7 @@
                 -> NSView
             {
                 let id = geometry.ids[index]
-                let revision = rowRevisions[id, default: 0]
+                let revision = rowRevisions[id] ?? 0
                 let measured = ChatMeasuredTranscriptRow(content: content(index)) {
                     [weak self] height in
                     self?.noteHeight(height, id: id, revision: revision)

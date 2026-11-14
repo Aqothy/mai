@@ -120,7 +120,7 @@ import Testing
             let coordinator = ChatNativeTranscript<Text>.Coordinator()
             coordinator.update(ids: ["active"], width: 300, nativeRowFactory: nil, onAttach: nil) { _ in Text("Reply") }
             await coordinator.task?.value
-            let revision = coordinator.virtualDocument.rowRevisions["active", default: 0]
+            let revision = coordinator.virtualDocument.rowRevisions["active"] ?? 0
             coordinator.update(ids: ["active"], width: 300, nativeRowFactory: nil, onAttach: nil) { _ in Text("Reply") }
             await coordinator.task?.value
             coordinator.virtualDocument.noteHeight(150, id: "active", revision: revision)

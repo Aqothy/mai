@@ -21,22 +21,11 @@
         private var isMonitoringScrollWheel = false
         private var isDiscreteScrollFinishScheduled = false
         private var userScrollStartY: CGFloat?
-        private var isBottomFollowingEnabled: () -> Bool = { false }
-        private var noteUserScrollActivity: (Bool) -> Void = { _ in }
-        private var noteUserReachedEnd: () -> Void = {}
-        private var noteKeyboardScrollIntent: (Bool) -> Void = { _ in }
+        private var handlers = ChatScrollIntentHandlers()
 
-        func configure(
-            isBottomFollowingEnabled: @escaping () -> Bool,
-            noteUserScrollActivity: @escaping (Bool) -> Void,
-            noteUserReachedEnd: @escaping () -> Void,
-            noteKeyboardScrollIntent: @escaping (_ towardEnd: Bool) -> Void
-        ) {
-            self.isBottomFollowingEnabled = isBottomFollowingEnabled
-            self.noteUserScrollActivity = noteUserScrollActivity
-            self.noteUserReachedEnd = noteUserReachedEnd
-            self.noteKeyboardScrollIntent = noteKeyboardScrollIntent
-            document?.isBottomFollowingEnabled = isBottomFollowingEnabled
+        func configure(_ handlers: ChatScrollIntentHandlers) {
+            self.handlers = handlers
+            document?.isBottomFollowingEnabled = handlers.isBottomFollowingEnabled
         }
 
         /// Called after every install, so it must converge when repeated.
@@ -64,7 +53,7 @@
                     installInputEventMonitor()
                 }
             }
-            document.isBottomFollowingEnabled = isBottomFollowingEnabled
+            document.isBottomFollowingEnabled = handlers.isBottomFollowingEnabled
             if let completion = pendingInitialBottomAlignment {
                 pendingInitialBottomAlignment = nil
                 document.beginInitialBottomAlignment(completion: completion)
@@ -142,15 +131,15 @@
 
             switch event.keyCode {
             case 116: // Page Up
-                noteKeyboardScrollIntent(false)
+                handlers.noteKeyboardScrollIntent(false)
                 beginUserScroll()
                 scheduleDiscreteScrollFinish()
             case 121: // Page Down
-                noteKeyboardScrollIntent(true)
+                handlers.noteKeyboardScrollIntent(true)
                 beginUserScroll()
                 scheduleDiscreteScrollFinish()
             case 49: // Space / Shift-Space
-                noteKeyboardScrollIntent(!event.modifierFlags.contains(.shift))
+                handlers.noteKeyboardScrollIntent(!event.modifierFlags.contains(.shift))
                 beginUserScroll()
                 scheduleDiscreteScrollFinish()
             default:
@@ -205,14 +194,8 @@
             let endY = scrollView?.contentView.documentVisibleRect.minY
             userScrollStartY = nil
             document?.isReaderScrolling = false
-            noteUserScrollActivity(false)
-            if ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
-                startY: startY,
-                endY: endY,
-                isNearBottom: document?.isNearBottom ?? false
-            ) {
-                noteUserReachedEnd()
-            }
+            handlers.finishUserScroll(
+                startY: startY, endY: endY, isNearBottom: document?.isNearBottom ?? false)
         }
 
         private func beginUserScroll() {
@@ -220,7 +203,7 @@
                 userScrollStartY = scrollView?.contentView.documentVisibleRect.minY
             }
             document?.isReaderScrolling = true
-            noteUserScrollActivity(true)
+            handlers.noteUserScrollActivity(true)
         }
 
         deinit {
