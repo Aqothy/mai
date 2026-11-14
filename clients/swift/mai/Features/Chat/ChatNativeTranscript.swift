@@ -7,6 +7,8 @@
     /// The parent prepares content before publishing a new set of rows.
     struct ChatNativeTranscript<Content: View>: NSViewRepresentable {
         let ids: [String]
+        /// What each row shows; see `ChatVirtualTranscriptGeometry.sources`.
+        var sourceIDs: [String] = []
         let width: CGFloat
         var isPrepared = true
         var measurementKeys: [ChatNativeRowMeasurementKey?] = []
@@ -43,7 +45,7 @@
             context.coordinator.virtualDocument.historyLoadDistance = historyLoadDistance
             context.coordinator.virtualDocument.geometryReporter.onChange = onGeometryChange
             context.coordinator.update(
-                ids: ids, width: width, measurementKeys: measurementKeys,
+                ids: ids, sourceIDs: sourceIDs, width: width, measurementKeys: measurementKeys,
                 presentationTheme: presentationTheme, layoutStore: layoutStore,
                 nativeRowHeight: nativeRowHeight,
                 nativeRowFactory: nativeRowFactory,
@@ -145,7 +147,7 @@
             }
 
             func install(
-                heights: [CGFloat], width: CGFloat, ids: [String] = [],
+                heights: [CGFloat], width: CGFloat, ids: [String] = [], sourceIDs: [String] = [],
                 changedIDs: Set<String>? = nil, heightInvalidatedIDs: Set<String>? = nil,
                 content: @escaping (Int) -> Content
             ) {
@@ -167,14 +169,15 @@
                 let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                 let oldIDs = geometry.ids
                 updateGeometry {
-                    let rowsChanged = geometry.replace(ids: ids, estimatedHeight: 1)
+                    let rowsChanged = geometry.replace(
+                        ids: ids, sources: sourceIDs, estimatedHeight: 1)
                     geometry.setHeights(heights)
                     rowRevisions.install(
                         invalidatedIDs: heightInvalidatedIDs ?? changedIDs ?? Set(ids),
                         rowsChanged: rowsChanged, in: geometry)
                     hosts = ChatTranscriptMountedRows.retained(
                         hosts, oldIDs: oldIDs, in: geometry, changedIDs: changedIDs,
-                        configure: { configuredHost($0, reused: $1, content: content) },
+                        configure: { configuredHost($0, current: $1, content: content) },
                         recycle: recycle, show: { addSubview($0) })
                     subviews = hosts.keys.sorted().compactMap { hosts[$0] }
                 }
@@ -345,29 +348,24 @@
                 // The first install can come before the viewport has a size.
                 alignInitialBottomIfPossible()
                 notifyGeometryChange()
-                guard let content, numberOfRows > 0 else { return }
                 let visible = scroll.contentView.documentVisibleRect
-                // One viewport of preparation on either side bounds resident views
-                // while allowing ordinary wheel input to reuse already mounted rows.
-                let first = max(0, row(at: max(0, visible.minY - visible.height)))
-                let last = row(at: min(frame.height, visible.maxY + visible.height))
-                let visibleFirst = max(first, row(at: visible.minY))
-                let visibleLast = min(last, row(at: visible.maxY))
-                guard first <= last, visibleFirst <= visibleLast else { return }
+                guard let content,
+                    let tiling = geometry.tiling(top: visible.minY, bottom: visible.maxY)
+                else { return }
+                let (visibleFirst, visibleLast) = (tiling.visible.lowerBound, tiling.visible.upperBound)
                 let viewport = TiledViewport(
-                    resident: first...last, visible: visibleFirst...visibleLast,
-                    width: visible.width)
+                    resident: tiling.resident, visible: tiling.visible, width: visible.width)
                 guard viewport != tiledViewport else { return }
                 tiledViewport = viewport
-                for index in hosts.keys.filter({ $0 < first || $0 > last }) {
+                for index in hosts.keys where !tiling.resident.contains(index) {
                     if let host = hosts.removeValue(forKey: index) {
                         recycle(host)
                     }
                 }
-                for index in visibleFirst...visibleLast {
+                for index in tiling.visible {
                     mount(index, width: visible.width, content: content)
                 }
-                let range = first...last
+                let range = tiling.resident
                 guard range != preparedRange else { return }
                 preparedRange = range
                 preparationTask?.cancel()
@@ -395,40 +393,32 @@
                 }
             }
 
-            /// A newly mounted row takes a pooled view of its own kind.
-            private func pooledHost(_ index: Int, content: (Int) -> Content) -> NSView {
-                let candidate = reusableNative.last
-                if let native = nativeRowFactory?(index, candidate) {
-                    if native === candidate { reusableNative.removeLast() }
-                    #if DEBUG
-                        nativeMounts += 1
-                        if native !== candidate { createdRows += 1 }
-                    #endif
-                    return native
-                }
-                #if DEBUG
-                    if reusableHosting.isEmpty { createdRows += 1 }
-                #endif
-                return hostingView(index, reused: reusableHosting.popLast(), content: content)
-            }
-
-            /// Refreshes a mounted row in place, replacing its view only when
-            /// the row changed kind.
-            private func configuredHost(_ index: Int, reused: NSView, content: (Int) -> Content)
-                -> NSView
-            {
-                if let native = nativeRowFactory?(index, reused) {
-                    #if DEBUG
-                        nativeMounts += 1
-                    #endif
-                    return native
-                }
-                return hostingView(index, reused: reused, content: content)
+            private func configuredHost(
+                _ index: Int, current: NSView? = nil, content: (Int) -> Content
+            ) -> NSView {
+                ChatTranscriptMountedRows.configuredHost(
+                    index, current: current,
+                    isHosting: { $0 is NSHostingView<ChatMeasuredTranscriptRow<Content>> },
+                    nativePool: &reusableNative, hostingPool: &reusableHosting,
+                    nativeRow: { index, candidate in
+                        let native = nativeRowFactory?(index, candidate)
+                        #if DEBUG
+                            if let native {
+                                nativeMounts += 1
+                                if native !== candidate { createdRows += 1 }
+                            }
+                        #endif
+                        return native
+                    },
+                    hostingRow: { hostingView($0, reused: $1, content: content) })
             }
 
             private func hostingView(_ index: Int, reused: NSView?, content: (Int) -> Content)
                 -> NSView
             {
+                #if DEBUG
+                    if reused == nil { createdRows += 1 }
+                #endif
                 let id = geometry.ids[index]
                 let revision = rowRevisions[id] ?? 0
                 let measured = ChatMeasuredTranscriptRow(content: content(index)) {
@@ -451,7 +441,7 @@
                 if let existing = hosts[index] {
                     host = existing
                 } else {
-                    host = pooledHost(index, content: content)
+                    host = configuredHost(index, content: content)
                     let next = hosts.keys.filter { $0 > index }.min().flatMap { hosts[$0] }
                     hosts[index] = host
                     addSubview(host, positioned: next == nil ? .above : .below, relativeTo: next)

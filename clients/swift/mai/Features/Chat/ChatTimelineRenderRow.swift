@@ -38,6 +38,17 @@ enum ChatTimelineRenderRow: Identifiable {
         }
     }
 
+    /// The content the row shows: a message keeps it whether it is one row
+    /// or split into segments or blocks.
+    var sourceID: String {
+        switch self {
+        case .standard(.message(let message)): message.id
+        case .standard(let row): row.id
+        case .richMarkdown(let segment), .prose(let segment): segment.messageID
+        case .resolvedMarkdown(let block): block.messageID
+        }
+    }
+
     var id: String {
         switch self {
         case .standard(let row): row.id

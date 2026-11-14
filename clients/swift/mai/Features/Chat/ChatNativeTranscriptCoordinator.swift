@@ -28,7 +28,7 @@ extension ChatNativeTranscript {
         private(set) var lastMeasuredRowCount = 0
 
         func update(
-            ids: [String], width: CGFloat, measurementKeys: [ChatNativeRowMeasurementKey?] = [],
+            ids: [String], sourceIDs: [String] = [], width: CGFloat, measurementKeys: [ChatNativeRowMeasurementKey?] = [],
             presentationTheme: ChatCodeHighlightTheme? = nil,
             layoutStore: ObjectIdentifier? = nil,
             nativeRowHeight: ((Int, CGFloat) -> CGFloat?)? = nil,
@@ -70,6 +70,9 @@ extension ChatNativeTranscript {
                     self.unpublishedMeasurements.removeAll()
                     self.unpublishedLayoutStore = layoutStore
                 }
+                // Rows not measured again take their height at install: a
+                // mounted row can report a new one while this pass yields.
+                var unmeasured: [Int] = []
                 self.lastMeasuredRowCount = 0
                 result.reserveCapacity(ids.count)
                 updatedMeasurements.reserveCapacity(ids.count)
@@ -80,10 +83,8 @@ extension ChatNativeTranscript {
                     let previous = previousMeasurements[ids[index]]
                     let height: CGFloat
                     if let previous, previous.width == width, previous.key == key {
-                        height =
-                            self.virtualDocument.geometry.index(for: ids[index]).map {
-                                self.virtualDocument.geometry.heights[$0]
-                            } ?? previous.height
+                        height = previous.height
+                        unmeasured.append(index)
                         if key == nil { changedIDs.insert(ids[index]) }
                     } else {
                         let unpublished = self.unpublishedMeasurements[ids[index]]
@@ -110,13 +111,22 @@ extension ChatNativeTranscript {
                         key: key, width: width, height: height)
                 }
                 guard !Task.isCancelled else { return }
+                let geometry = self.virtualDocument.geometry
+                for index in unmeasured {
+                    guard let current = geometry.index(for: ids[index]) else { continue }
+                    result[index] = geometry.heights[current]
+                    updatedMeasurements[ids[index]] = Measurement(
+                        key: measurementKeys.indices.contains(index) ? measurementKeys[index] : nil,
+                        width: width, height: result[index])
+                }
                 self.measurements = updatedMeasurements
                 self.unpublishedMeasurements.removeAll()
                 self.presentationTheme = presentationTheme
                 self.layoutStore = layoutStore
                 self.virtualDocument.nativeRowFactory = nativeRowFactory
                 self.virtualDocument.install(
-                    heights: result, width: width, ids: ids, changedIDs: changedIDs,
+                    heights: result, width: width, ids: ids, sourceIDs: sourceIDs,
+                    changedIDs: changedIDs,
                     heightInvalidatedIDs: heightInvalidatedIDs, content: content)
                 onAttach?(self.virtualDocument)
                 #if DEBUG

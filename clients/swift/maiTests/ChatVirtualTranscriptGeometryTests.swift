@@ -18,6 +18,26 @@ import Testing
             #expect(geometry.totalHeight == 810)
         }
 
+        /// A row that left still says where the reader was: in the rows now
+        /// showing its content, or below the nearest row above it that stayed.
+        @Test func anchorWhoseRowLeftFindsItsContentOrTheRowAboveIt() throws {
+            var geometry = ChatVirtualTranscriptGeometry()
+            geometry.replace(
+                ids: ["user", "header", "work", "live", "working"],
+                sources: ["user", "header", "work", "m", "working"], estimatedHeight: 100)
+            geometry.setHeights([100, 40, 300, 900, 40])
+            let inReply = try #require(geometry.anchor(at: 940))
+            let inWork = try #require(geometry.anchor(at: 200))
+            let previous = geometry
+
+            geometry.replace(
+                ids: ["user", "header", "m#0", "m#1"], sources: ["user", "header", "m", "m"],
+                estimatedHeight: 100)
+            geometry.setHeights([100, 40, 300, 500])
+            #expect(geometry.offset(for: inReply, from: previous) == 140 + 500)
+            #expect(geometry.offset(for: inWork, from: previous) == 140)
+        }
+
         @Test func emptyRemovalAndBoundaryLookup() throws {
             var geometry = ChatVirtualTranscriptGeometry()
             #expect(geometry.index(at: 0) == nil)

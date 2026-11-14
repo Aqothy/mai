@@ -7,6 +7,8 @@
     /// The parent prepares content before publishing a new set of rows.
     struct ChatNativeTranscript<Content: View>: UIViewRepresentable {
         let ids: [String]
+        /// What each row shows; see `ChatVirtualTranscriptGeometry.sources`.
+        var sourceIDs: [String] = []
         let width: CGFloat
         var isPrepared = true
         var measurementKeys: [ChatNativeRowMeasurementKey?] = []
@@ -37,7 +39,7 @@
             document.historyLoadDistance = historyLoadDistance
             document.geometryReporter.onChange = onGeometryChange
             context.coordinator.update(
-                ids: ids, width: width, measurementKeys: measurementKeys,
+                ids: ids, sourceIDs: sourceIDs, width: width, measurementKeys: measurementKeys,
                 presentationTheme: presentationTheme, layoutStore: layoutStore,
                 nativeRowHeight: nativeRowHeight,
                 nativeRowFactory: nativeRowFactory,
@@ -78,12 +80,8 @@
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
             var initialBottomAlignmentCompletion: (() -> Void)?
-            /// True while the document moves the offset itself, or while a
-            /// jump it started flies: the animation's frames move the offset
-            /// back below the document's own pins, which is not the reader.
-            var isAdjustingScrollPosition: Bool { isSettingOffset || isAnimatingScroll }
-            private var isSettingOffset = false
-            private var isAnimatingScroll = false
+            private(set) var isAdjustingScrollPosition = false
+            private var scrollAnimation: ScrollAnimation?
             private(set) var rowRevisions = ChatTranscriptRowRevisions()
             var content: ((Int) -> Content)?
             var hosts: [Int: UIView] = [:]
@@ -110,6 +108,19 @@
                 let end: CFTimeInterval
                 let options: UIView.AnimationOptions
             }
+
+            /// The reader's jump to the end. Each frame lands a shrinking
+            /// distance short of the end as it is then, so rows that grow
+            /// on the way move the target and the jump still arrives.
+            /// UIKit's own animation runs to the offset it computed at the
+            /// start, and reports no end when something else stops it.
+            private struct ScrollAnimation {
+                let start: CFTimeInterval
+                let distanceFromEnd: CGFloat
+                let link: CADisplayLink
+            }
+
+            private static var scrollAnimationDuration: CFTimeInterval { 0.3 }
 
             override init(frame: CGRect) {
                 super.init(frame: frame)
@@ -140,7 +151,7 @@
                 geometryReporter.onChange = nil
                 delegate = nil
                 initialBottomAlignmentCompletion = nil
-                isAnimatingScroll = false
+                endScrollAnimation()
             }
 
             // MARK: Rows
@@ -180,7 +191,7 @@
             }
 
             func install(
-                heights: [CGFloat], width: CGFloat, ids: [String] = [],
+                heights: [CGFloat], width: CGFloat, ids: [String] = [], sourceIDs: [String] = [],
                 changedIDs: Set<String>? = nil, heightInvalidatedIDs: Set<String>? = nil,
                 content: @escaping (Int) -> Content
             ) {
@@ -191,7 +202,8 @@
                     let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                     let oldIDs = geometry.ids
                     updateGeometry {
-                        let rowsChanged = geometry.replace(ids: ids, estimatedHeight: 1)
+                        let rowsChanged = geometry.replace(
+                            ids: ids, sources: sourceIDs, estimatedHeight: 1)
                         geometry.setHeights(heights)
                         rowRevisions.install(
                             invalidatedIDs: heightInvalidatedIDs ?? changedIDs ?? Set(ids),
@@ -230,6 +242,13 @@
             }
 
             func setViewportTop(_ top: CGFloat) {
+                // A running jump places the viewport relative to the end on
+                // its next frame.
+                guard scrollAnimation == nil else { return }
+                moveViewportTop(to: top)
+            }
+
+            private func moveViewportTop(to top: CGFloat) {
                 var y = top - adjustedContentInset.top
                 // A gesture may hold the content past either end; layout may not.
                 if !isTracking, !isDecelerating {
@@ -264,30 +283,56 @@
                 let scale = max(1, traitCollection.displayScale)
                 let aligned = (y * scale).rounded() / scale
                 guard abs(contentOffset.y - aligned) > 0.01 else { return }
-                isSettingOffset = true
+                isAdjustingScrollPosition = true
                 contentOffset = CGPoint(x: contentOffset.x, y: aligned)
-                isSettingOffset = false
+                isAdjustingScrollPosition = false
             }
 
             @discardableResult
             func scrollToBottom(animated: Bool) -> Bool {
-                guard animated else { return scrollToBottom() }
-                guard bottomViewportTop != nil else { return false }
-                let y = bottomOffsetY
-                // UIKit reports no end for an animation that would not move,
-                // and the flag below must always be cleared.
-                guard abs(contentOffset.y - y) > ChatScrollFollowPolicy.minimumMovement else {
+                endScrollAnimation()
+                // Without a window there are no frames to animate in.
+                guard animated, window != nil else { return scrollToBottom() }
+                guard let bottom = bottomViewportTop, let top = viewportTop else { return false }
+                let distance = bottom - top
+                guard abs(distance) > ChatScrollFollowPolicy.minimumMovement else {
                     return scrollToBottom()
                 }
-                isAnimatingScroll = true
-                setContentOffset(CGPoint(x: contentOffset.x, y: y), animated: true)
+                if isDecelerating {
+                    // Assigning the offset would leave the fling running
+                    // under the jump.
+                    setContentOffset(contentOffset, animated: false)
+                }
+                let link = CADisplayLink(target: self, selector: #selector(stepScrollAnimation))
+                link.add(to: .main, forMode: .common)
+                scrollAnimation = ScrollAnimation(
+                    start: CACurrentMediaTime(), distanceFromEnd: distance, link: link)
                 return true
             }
 
-            /// The jump `scrollToBottom(animated:)` started reached its
-            /// target, or a drag took over.
+            @objc private func stepScrollAnimation(_ link: CADisplayLink) {
+                advanceScrollAnimation(to: link.targetTimestamp)
+            }
+
+            /// Places the jump's frame for `time`, ending it at the end.
+            func advanceScrollAnimation(to time: CFTimeInterval) {
+                guard let animation = scrollAnimation, let bottom = bottomViewportTop else {
+                    endScrollAnimation()
+                    return
+                }
+                let progress = min(
+                    1, max(0, (time - animation.start) / Self.scrollAnimationDuration))
+                let remaining = pow(1 - progress, 3)
+                moveViewportTop(to: bottom - animation.distanceFromEnd * remaining)
+                if progress >= 1 {
+                    endScrollAnimation()
+                }
+            }
+
+            /// Stops a jump to the end where it is; the reader took over.
             func endScrollAnimation() {
-                isAnimatingScroll = false
+                scrollAnimation?.link.invalidate()
+                scrollAnimation = nil
             }
 
             /// Geometry changes move every resident row, including prepared neighbors.
@@ -385,9 +430,10 @@
             override func willMove(toWindow newWindow: UIWindow?) {
                 super.willMove(toWindow: newWindow)
                 if newWindow == nil {
-                    // The display link retains its target.
+                    // The display links retain their target.
                     preparationLink?.invalidate()
                     preparationLink = nil
+                    endScrollAnimation()
                 }
             }
 
@@ -403,26 +449,20 @@
             /// more than a viewport away. Runs on every scrolled frame, so an
             /// unchanged viewport costs two binary searches.
             private func tile() {
-                guard content != nil, numberOfRows > 0, bounds.height > 0 else { return }
-                let visible = bounds
-                let extent = geometry.totalHeight
-                let first = max(0, row(at: max(0, visible.minY - visible.height)))
-                let last = max(first, row(at: min(extent, visible.maxY + visible.height)))
-                let visibleFirst = min(last, max(first, row(at: max(0, visible.minY))))
-                let visibleLast = max(
-                    visibleFirst, min(last, row(at: min(extent, visible.maxY))))
-                let viewport = TiledViewport(
-                    resident: first...last, visible: visibleFirst...visibleLast)
+                guard content != nil, bounds.height > 0,
+                    let tiling = geometry.tiling(top: bounds.minY, bottom: bounds.maxY)
+                else { return }
+                let viewport = TiledViewport(resident: tiling.resident, visible: tiling.visible)
                 guard viewport != tiledViewport else { return }
                 tiledViewport = viewport
 
                 UIView.performWithoutAnimation {
-                    for index in hosts.keys.filter({ $0 < first || $0 > last }) {
+                    for index in hosts.keys where !tiling.resident.contains(index) {
                         if let host = hosts.removeValue(forKey: index) {
                             recycle(host)
                         }
                     }
-                    for index in visibleFirst...visibleLast where hosts[index] == nil {
+                    for index in tiling.visible where hosts[index] == nil {
                         mount(index)
                     }
                 }
@@ -528,29 +568,27 @@
                 }
             }
 
-            /// The view for a row: its current view refreshed in place when
-            /// that is still the row's kind, otherwise a pooled one.
             private func configuredHost(_ index: Int, current: UIView? = nil) -> UIView {
-                let isHosted = current is any UIContentView
-                let candidate = isHosted ? reusableNative.last : current ?? reusableNative.last
-                if let native = nativeRowFactory?(index, candidate) {
-                    if native === candidate, native !== current {
-                        reusableNative.removeLast()
-                    }
-                    #if DEBUG
-                        nativeMounts += 1
-                        if native !== candidate { createdRows += 1 }
-                    #endif
-                    return native
-                }
-                let reused = isHosted ? current : reusableHosting.popLast()
-                #if DEBUG
-                    if reused == nil { createdRows += 1 }
-                #endif
-                return hostingView(index, reused: reused)
+                ChatTranscriptMountedRows.configuredHost(
+                    index, current: current, isHosting: { $0 is any UIContentView },
+                    nativePool: &reusableNative, hostingPool: &reusableHosting,
+                    nativeRow: { index, candidate in
+                        let native = nativeRowFactory?(index, candidate)
+                        #if DEBUG
+                            if let native {
+                                nativeMounts += 1
+                                if native !== candidate { createdRows += 1 }
+                            }
+                        #endif
+                        return native
+                    },
+                    hostingRow: hostingView)
             }
 
             private func hostingView(_ index: Int, reused: UIView?) -> UIView {
+                #if DEBUG
+                    if reused == nil { createdRows += 1 }
+                #endif
                 guard let content else { return reused ?? UIView() }
                 let id = geometry.ids[index]
                 let revision = rowRevisions[id] ?? 0

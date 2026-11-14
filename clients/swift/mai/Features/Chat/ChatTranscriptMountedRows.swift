@@ -29,4 +29,26 @@ enum ChatTranscriptMountedRows {
         }
         return retained
     }
+
+    /// The view for a row: its current view refreshed in place while that
+    /// is still the row's kind, otherwise a pooled view of the new kind.
+    /// Pools are split by kind: a hosting view cannot become a native row,
+    /// so a mixed pool would hand over the wrong kind about half the time.
+    static func configuredHost<Host: AnyObject>(
+        _ index: Int, current: Host?,
+        isHosting: (Host) -> Bool,
+        nativePool: inout [Host], hostingPool: inout [Host],
+        nativeRow: (_ index: Int, _ reused: Host?) -> Host?,
+        hostingRow: (_ index: Int, _ reused: Host?) -> Host
+    ) -> Host {
+        let isHosted = current.map(isHosting) ?? false
+        let candidate = isHosted ? nativePool.last : current ?? nativePool.last
+        if let native = nativeRow(index, candidate) {
+            if native === candidate, native !== current {
+                nativePool.removeLast()
+            }
+            return native
+        }
+        return hostingRow(index, isHosted ? current : hostingPool.popLast())
+    }
 }

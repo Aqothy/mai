@@ -34,27 +34,24 @@ extension ChatReadingPositionDocument {
 
     /// The only way row geometry changes. While following, the viewport
     /// lands on the new end; otherwise the row being read stays where it
-    /// is, whatever happened above it.
-    ///
-    /// A row being read can leave: a finished reply's live row becomes its
-    /// settled blocks, and its turn's work folds behind a header above it.
-    /// What follows such a row is the same content as before, so the
-    /// reader then keeps their distance from the end.
+    /// is, whatever happened above it, or the reader keeps their place in
+    /// its content when the row itself left.
     func updateGeometry(_ change: () -> Void) {
         let follows = isFollowingBottom
         let top = follows ? nil : viewportTop
+        let previous = geometry
         let anchor = top.flatMap {
             geometry.readingAnchor(
                 atViewportTop: $0, markerHeight: ChatTimelineMetrics.historyMarkerHeight)
         }
-        let distanceFromEnd = top.map { geometry.totalHeight - $0 }
         change()
         applyGeometryToViews()
         if follows {
             scrollToBottom()
-        } else if let anchor, let distanceFromEnd {
-            setViewportTop(
-                geometry.offset(for: anchor) ?? geometry.totalHeight - distanceFromEnd)
+        } else if let top {
+            // Without a place to keep, the viewport still moves back inside
+            // content that may have shrunk under it.
+            setViewportTop(anchor.flatMap { geometry.offset(for: $0, from: previous) } ?? top)
         }
     }
 

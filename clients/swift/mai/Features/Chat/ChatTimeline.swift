@@ -90,7 +90,7 @@ struct ChatTimeline: View {
         // The transcript reports its own geometry; a SwiftUI scroll observer
         // here would see nested code/table scrollers instead.
         ChatNativeTranscript(
-            ids: items.map(\.id), width: rowWidth,
+            ids: items.map(\.id), sourceIDs: items.map(\.sourceID), width: rowWidth,
             isPrepared: preparedKey == preparationKey,
             measurementKeys: items.map(\.measurementKey),
             presentationTheme: codeTheme,

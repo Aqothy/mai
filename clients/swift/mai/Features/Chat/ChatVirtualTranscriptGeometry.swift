@@ -10,9 +10,14 @@ nonisolated struct ChatVirtualTranscriptGeometry {
     }
 
     private(set) var ids: [String] = []
+    /// The content each row shows. The rows one piece of content is split
+    /// into share it: a reply streams as one row and settles into a row
+    /// per block, all showing the same message.
+    private(set) var sources: [String] = []
     private(set) var heights: [CGFloat] = []
     private(set) var offsets: [CGFloat] = [0]
     private var indices: [String: Int] = [:]
+    private var sourceStarts: [String: Int] = [:]
 
     var totalHeight: CGFloat { offsets.last ?? 0 }
 
@@ -20,13 +25,25 @@ nonisolated struct ChatVirtualTranscriptGeometry {
     /// that ID instead of trapping, matching SwiftUI's `ForEach`. Returns
     /// false when the rows are the ones already held: most updates only
     /// refresh content, and rebuilding the index for them is wasted work.
+    /// A row's source is derived from the row, so the same IDs have the
+    /// same sources; without sources, each row is its own.
     @discardableResult
-    mutating func replace(ids: [String], estimatedHeight: CGFloat) -> Bool {
+    mutating func replace(
+        ids: [String], sources: [String]? = nil, estimatedHeight: CGFloat
+    ) -> Bool {
         guard ids != self.ids else { return false }
         let previous = Dictionary(zip(self.ids, heights), uniquingKeysWith: { first, _ in first })
         self.ids = ids
+        if let sources, sources.count == ids.count {
+            self.sources = sources
+        } else {
+            self.sources = ids
+        }
         indices = Dictionary(
             ids.enumerated().map { ($0.element, $0.offset) },
+            uniquingKeysWith: { first, _ in first })
+        sourceStarts = Dictionary(
+            self.sources.enumerated().map { ($0.element, $0.offset) },
             uniquingKeysWith: { first, _ in first })
         heights = ids.map { previous[$0] ?? max(1, estimatedHeight) }
         offsets = Array(repeating: 0, count: ids.count + 1)
@@ -92,6 +109,50 @@ nonisolated struct ChatVirtualTranscriptGeometry {
     func offset(for anchor: Anchor) -> CGFloat? {
         guard let index = indices[anchor.id] else { return nil }
         return offsets[index] + min(anchor.offsetWithinRow, heights[index])
+    }
+
+    /// Where an anchor taken in `previous` is now, when its row may have
+    /// left. Its content may be shown by other rows now (a finished reply's
+    /// live row becomes its settled blocks): the reader keeps their place
+    /// in that content. Or it folded away (a finished turn's work behind
+    /// its header): the reader lands where it was, below the nearest row
+    /// above it that stayed.
+    func offset(for anchor: Anchor, from previous: Self) -> CGFloat? {
+        if let offset = offset(for: anchor) { return offset }
+        guard let old = previous.indices[anchor.id] else { return nil }
+        let source = previous.sources[old]
+        if let start = sourceStarts[source], let oldStart = previous.sourceStarts[source] {
+            let intoContent =
+                previous.offsets[old] - previous.offsets[oldStart] + anchor.offsetWithinRow
+            return offsets[start] + min(intoContent, sourceEnd(from: start) - offsets[start])
+        }
+        for index in stride(from: old - 1, through: 0, by: -1) {
+            if let kept = indices[previous.ids[index]] { return offsets[kept + 1] }
+            if let start = sourceStarts[previous.sources[index]] { return sourceEnd(from: start) }
+        }
+        return nil
+    }
+
+    /// The bottom of the run of rows showing the source of row `start`.
+    private func sourceEnd(from start: Int) -> CGFloat {
+        var end = start + 1
+        while end < sources.count, sources[end] == sources[start] { end += 1 }
+        return offsets[end]
+    }
+
+    /// The rows to keep mounted for a viewport spanning `top..<bottom`: the
+    /// rows it shows, and one viewport's height of rows on either side so
+    /// a scroll finds its next rows ready. Nil without rows.
+    func tiling(top: CGFloat, bottom: CGFloat) -> (
+        resident: ClosedRange<Int>, visible: ClosedRange<Int>
+    )? {
+        guard !ids.isEmpty else { return nil }
+        let height = bottom - top
+        let first = index(at: max(0, top - height)) ?? 0
+        let last = max(first, index(at: min(totalHeight, bottom + height)) ?? first)
+        let visibleFirst = min(last, max(first, index(at: max(0, top)) ?? first))
+        let visibleLast = max(visibleFirst, min(last, index(at: min(totalHeight, bottom)) ?? last))
+        return (first...last, visibleFirst...visibleLast)
     }
 
     func index(for id: String) -> Int? { indices[id] }

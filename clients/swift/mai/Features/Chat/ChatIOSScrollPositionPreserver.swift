@@ -75,13 +75,18 @@
         /// Returns false until a document with rows is attached.
         @discardableResult
         func pinToBottom(animated: Bool = false) -> Bool {
-            document?.scrollToBottom(animated: animated) ?? false
+            guard let document else { return false }
+            if animated, document.isDecelerating {
+                // The jump stops the fling, and UIKit then reports no end
+                // of deceleration.
+                finishUserScroll(in: document)
+            }
+            return document.scrollToBottom(animated: animated)
         }
 
         // MARK: Reader input
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-            // A drag stops a running jump to the end.
             document?.endScrollAnimation()
             document?.completeInitialBottomAlignment()
             if userScrollStartY == nil {
@@ -103,18 +108,7 @@
             finishUserScroll(in: scrollView)
         }
 
-        /// An animated scroll runs to the offset it computed when it began;
-        /// the document's own pins while it flies do not stop it. Rows that
-        /// changed height on the way leave the end somewhere else by now.
-        func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-            document?.endScrollAnimation()
-            if handlers.isBottomFollowingEnabled() {
-                document?.scrollToBottom(animated: false)
-            }
-        }
-
-        /// The tap's scroll replaces a running jump to the end, and its
-        /// movement is the reader's.
+        /// The tap's own scroll takes over from a running jump to the end.
         func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
             document?.endScrollAnimation()
             return true

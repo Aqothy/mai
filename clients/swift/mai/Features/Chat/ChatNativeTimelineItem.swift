@@ -17,6 +17,10 @@ enum ChatNativeTimelineItem: Identifiable {
         }
     }
 
+    var sourceID: String {
+        if case .row(let row) = self { row.sourceID } else { id }
+    }
+
     var measurementKey: ChatNativeRowMeasurementKey? {
         if case .row(let row) = self { row.nativeMeasurementKey } else { nil }
     }

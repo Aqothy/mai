@@ -107,49 +107,69 @@
             #expect(intents == [false, true])
         }
 
-        /// The jump's animation frames trail the document's pins to a grown
-        /// end; they are not the reader leaving it.
-        @Test func anAnimatedJumpsFramesAreNotIntent() {
+        /// The jump lands on the end as it is when it arrives, and the
+        /// document's own frames are not the reader's intent.
+        @Test func anAnimatedJumpArrivesAtAnEndThatGrewOnTheWay() {
             let document = makeDocument()
             defer { document.tearDown() }
+            let window = UIWindow(frame: document.frame)
+            window.addSubview(document)
+            let ids = (0..<10).map { "row-\($0)" }
             document.install(
-                heights: Array(repeating: 100, count: 10), width: 300, content: rowContent)
+                heights: Array(repeating: 100, count: 10), width: 300, ids: ids,
+                content: rowContent)
             let preserver = ChatIOSScrollPositionPreserver()
             var intents: [Bool] = []
             preserver.configure(
-                ChatScrollIntentHandlers(noteKeyboardScrollIntent: { intents.append($0) }))
+                ChatScrollIntentHandlers(
+                    isBottomFollowingEnabled: { true },
+                    noteKeyboardScrollIntent: { intents.append($0) }))
             preserver.attach(to: document)
             document.contentOffset = CGPoint(x: 0, y: 100)
             intents.removeAll()
 
             #expect(preserver.pinToBottom(animated: true))
-            #expect(document.isAdjustingScrollPosition)
-            document.contentOffset = CGPoint(x: 0, y: 700)
-            document.contentOffset = CGPoint(x: 0, y: 400)
+            // A row grows while the jump flies; the jump, not a pin, moves
+            // the viewport.
+            document.noteHeight(400, id: "row-9", revision: document.rowRevisions["row-9"] ?? 0)
+            #expect(document.contentOffset.y == 100)
+            document.advanceScrollAnimation(to: CACurrentMediaTime() + 1)
+            #expect(document.contentOffset.y == document.contentSize.height - 200)
             #expect(intents.isEmpty)
-
-            preserver.scrollViewDidEndScrollingAnimation(document)
-            #expect(!document.isAdjustingScrollPosition)
-            document.contentOffset = CGPoint(x: 0, y: 200)
-            #expect(intents == [false])
         }
 
         /// A streaming reply's live row becomes its settled blocks while the
-        /// reader is inside it, and the turn's work folds above it.
-        @Test func aReaderWhoseRowLeftKeepsTheirDistanceFromTheEnd() {
+        /// reader is inside it, and the working row below it leaves.
+        @Test func aReaderInsideASettlingReplyKeepsTheirPlaceInIt() {
             let document = makeDocument()
             defer { document.tearDown() }
             document.install(
-                heights: [100, 300, 300, 900], width: 300,
-                ids: ["user", "work-a", "work-b", "reply-live"], content: rowContent)
-            document.contentOffset = CGPoint(x: 0, y: 1_000)
+                heights: [100, 900, 40, 1], width: 300,
+                ids: ["user", "message-m", "working", "end"],
+                sourceIDs: ["user", "m", "working", "end"], content: rowContent)
+            document.contentOffset = CGPoint(x: 0, y: 600)
 
             document.install(
-                heights: [100, 40, 400, 500], width: 300,
-                ids: ["user", "worked-for", "reply-block-0", "reply-block-1"],
+                heights: [100, 400, 500, 1], width: 300,
+                ids: ["user", "m#block-0", "m#block-1", "end"],
+                sourceIDs: ["user", "m", "m", "end"], content: rowContent)
+            #expect(document.contentOffset.y == 600)
+        }
+
+        /// The work the reader was looking at folds behind its header when
+        /// the turn finishes.
+        @Test func aReaderInsideFoldedWorkLandsBelowTheHeader() {
+            let document = makeDocument()
+            defer { document.tearDown() }
+            document.install(
+                heights: [100, 40, 300, 300, 900], width: 300,
+                ids: ["user", "header", "work-a", "work-b", "reply"], content: rowContent)
+            document.contentOffset = CGPoint(x: 0, y: 500)
+
+            document.install(
+                heights: [100, 40, 900], width: 300, ids: ["user", "header", "reply"],
                 content: rowContent)
-            #expect(document.contentSize.height == 1_040)
-            #expect(document.contentOffset.y == 440)
+            #expect(document.contentOffset.y == 140)
         }
     }
 #endif
