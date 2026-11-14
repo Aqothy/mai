@@ -21,13 +21,14 @@
         private var isMonitoringScrollWheel = false
         private var isDiscreteScrollFinishScheduled = false
         private var userScrollStartY: CGFloat?
-        /// Between a trackpad momentum's first and last event over this
-        /// transcript.
-        private var isInMomentum = false
-        /// Set by a move to the end during momentum, until the momentum
-        /// ends. Its remaining events would carry the reader off the end
-        /// the app just showed, and AppKit has no call that stops
-        /// momentum; they are not delivered.
+        /// Between AppKit's start and end of a live scroll of this
+        /// transcript: the reader's gesture and its momentum, wherever the
+        /// pointer is.
+        private var isLiveScrolling = false
+        /// Set by a move to the end during a live scroll, until its
+        /// momentum ends. The momentum would carry the reader off the end
+        /// the app just showed, and AppKit has no call that stops it; its
+        /// events are not delivered.
         private var dropsMomentum = false
         private var handlers = ChatScrollIntentHandlers()
 
@@ -43,7 +44,7 @@
                 removeInputEventMonitor()
                 userScrollStartY = nil
                 isMonitoringScrollWheel = false
-                isInMomentum = false
+                isLiveScrolling = false
                 dropsMomentum = false
                 self.document = document
                 scrollView = document.enclosingScrollView
@@ -82,7 +83,7 @@
         /// Returns false until a document with rows is attached.
         @discardableResult
         func pinToBottom() -> Bool {
-            if isInMomentum {
+            if isLiveScrolling {
                 dropsMomentum = true
                 finishUserScroll()
             }
@@ -96,6 +97,7 @@
             guard notification.object as? NSScrollView === scrollView else {
                 return
             }
+            isLiveScrolling = true
             document?.completeInitialBottomAlignment()
             beginUserScroll()
         }
@@ -105,6 +107,8 @@
             guard notification.object as? NSScrollView === scrollView else {
                 return
             }
+            isLiveScrolling = false
+            dropsMomentum = false
             finishUserScroll()
         }
 
@@ -165,30 +169,22 @@
         /// app's move to the end ended.
         private func deliversScrollWheel(_ event: NSEvent) -> Bool {
             guard let scrollView, event.window === scrollView.window else { return true }
-            if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
-                isInMomentum = false
-                dropsMomentum = false
-            }
-            let momentumEnds =
-                event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)
-            if momentumEnds {
-                isInMomentum = false
-            }
             if dropsMomentum, !event.momentumPhase.isEmpty {
                 // The last event lets the scroll view end its live scroll.
-                if momentumEnds { dropsMomentum = false }
-                return momentumEnds
-            }
-            let point = scrollView.convert(event.locationInWindow, from: nil)
-            guard scrollView.bounds.contains(point) else { return true }
-            if event.momentumPhase.contains(.began) {
-                isInMomentum = true
+                let ends =
+                    event.momentumPhase.contains(.ended)
+                    || event.momentumPhase.contains(.cancelled)
+                if ends { dropsMomentum = false }
+                return ends
             }
             handleScrollWheel(event)
             return true
         }
 
         private func handleScrollWheel(_ event: NSEvent) {
+            guard let scrollView else { return }
+            let point = scrollView.convert(event.locationInWindow, from: nil)
+            guard scrollView.bounds.contains(point) else { return }
 
             if event.phase == .ended || event.phase == .cancelled {
                 guard isMonitoringScrollWheel else { return }

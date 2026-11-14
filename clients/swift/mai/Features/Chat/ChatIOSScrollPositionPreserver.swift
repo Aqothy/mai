@@ -111,9 +111,12 @@
             finishUserScroll(in: scrollView)
         }
 
-        /// The tap's own scroll takes over from a running jump to the end.
+        /// The tap's own scroll takes over from a running jump to the end,
+        /// and leaves the end. Its frames can't say so while streaming:
+        /// each one that comes with new content reads as layout.
         func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
             document?.endScrollAnimation()
+            handlers.noteKeyboardScrollIntent(false)
             return true
         }
 

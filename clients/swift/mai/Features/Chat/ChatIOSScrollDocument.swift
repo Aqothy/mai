@@ -12,7 +12,8 @@
         var isNearBottom: Bool { get }
         /// Moves to the exact end of the content, animated for a reader's
         /// request. Returns false until the document has rows and a
-        /// viewport.
+        /// viewport. The scroll-intent controller, which owns the reader's
+        /// scroll, ends any fling or scroll animation first.
         @discardableResult
         func scrollToBottom(animated: Bool) -> Bool
         /// Stops an animated jump to the end where it is; the reader took
