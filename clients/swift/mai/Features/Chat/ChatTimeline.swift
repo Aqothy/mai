@@ -213,10 +213,7 @@ struct ChatTimeline: View {
             guard historyLoadRequest > 0, isTimelineNearTop,
                 !isAwaitingInitialBottom
             else { return }
-            await loadEarlier(
-                loadedSections: loadedSections,
-                hasEarlierSections: hasEarlierSections
-            )
+            await loadEarlier(loadedSections: loadedSections)
         }
         .task(
             id: preparationKey
@@ -269,12 +266,6 @@ struct ChatTimeline: View {
             }
         }
         .onAppear {
-            #if os(macOS)
-                foldModel.prepareForToggle = {
-                    scrollPositionPreserver
-                        .captureBeforeContentExpansion()
-                }
-            #endif
             if oldestLoadedSectionID == nil {
                 oldestLoadedSectionID = loadedSections.first?.id
                 #if DEBUG
@@ -341,23 +332,6 @@ struct ChatTimeline: View {
         }
         scrollState.noteEndVisibility(geometry.isNearBottom)
 
-        #if os(macOS)
-            if isAwaitingInitialBottom {
-                guard geometry.isNearBottom else {
-                    _ = scrollPositionPreserver.pinToBottom()
-                    return
-                }
-                isAwaitingInitialBottom = false
-            }
-
-            // The 24-point end zone is only UI/intent hysteresis. While
-            // following, every projected layout change (resize, reflow, or
-            // content growth) aligns to the exact native document end.
-            if scrollState.shouldFollowBottom {
-                _ = scrollPositionPreserver.pinToBottom()
-            }
-        #endif
-
         // Asked for once per loaded history while the top is near, not only
         // on arriving there: a first page shorter than the viewport is near
         // the top from the start, and a short earlier page leaves the reader
@@ -404,10 +378,7 @@ struct ChatTimeline: View {
         return Array(sections[startIndex...])
     }
 
-    private func loadEarlier(
-        loadedSections: [ChatTimelineLayout.Section],
-        hasEarlierSections: Bool
-    ) async {
+    private func loadEarlier(loadedSections: [ChatTimelineLayout.Section]) async {
         guard !isLoadingEarlier else { return }
 
         isLoadingEarlier = true
@@ -423,31 +394,8 @@ struct ChatTimeline: View {
             return
         }
 
-        #if os(macOS)
-            // The preserver needs the exact number of rows entering above the
-            // current anchor: the page's rows plus the change in leading
-            // fixed rows (history marker or plan). The iOS document anchors
-            // itself to the row being read when the rows install.
-            let pageRows = Self.renderRows(
-                page.timelineRows,
-                streamingTurnID: streamingTurnID,
-                segmentCache: segmentCache
-            )
-            let oldLeadingRowCount = hasEarlierSections
-                ? 1
-                : (plan.isEmpty ? 0 : 1)
-            let hasEarlierSectionsAfterLoad =
-                page.newOldestSectionID != sections.first?.id || hasOlderTurns
-            let newLeadingRowCount = hasEarlierSectionsAfterLoad
-                ? 1
-                : (plan.isEmpty ? 0 : 1)
-            let leadingRowCount = pageRows.count
-                + newLeadingRowCount - oldLeadingRowCount
-
-            scrollPositionPreserver.captureBeforePrepend(
-                leadingRowCount: leadingRowCount
-            )
-        #endif
+        // The documents keep the row being read in place as the page's rows
+        // install above it.
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {

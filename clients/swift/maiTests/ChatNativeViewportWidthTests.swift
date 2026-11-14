@@ -12,14 +12,14 @@
         /// including widths above the capped content width.
         @Test
         func viewportWidthChangesKeepDocumentAndMountedRowsAligned() {
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300))
+            let scroll = ChatMacTranscriptScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300))
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             scroll.documentView = document
             document.observeViewport(of: scroll)
             defer {
                 NotificationCenter.default.removeObserver(document)
                 document.preparationTask?.cancel()
-                document.geometryNotificationTask?.cancel()
+                document.geometryReporter.cancel()
             }
             document.nativeRowFactory = { _, reused in reused ?? NSView() }
             document.install(heights: [400], width: 760, ids: ["row"]) { _ in Text("Fixture") }
@@ -37,14 +37,14 @@
         /// prepared row must recenter its body when only its width changes.
         @Test
         func preparedRowsRecenterAboveTheContentWidthCap() throws {
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1020, height: 300))
+            let scroll = ChatMacTranscriptScrollView(frame: NSRect(x: 0, y: 0, width: 1020, height: 300))
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             scroll.documentView = document
             document.observeViewport(of: scroll)
             defer {
                 NotificationCenter.default.removeObserver(document)
                 document.preparationTask?.cancel()
-                document.geometryNotificationTask?.cancel()
+                document.geometryReporter.cancel()
             }
             let store = ChatTextLayoutStore()
             document.nativeRowFactory = { _, reused in
@@ -69,12 +69,12 @@
 
         @Test
         func staleHorizontalClipOriginReturnsToLeadingEdge() {
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300))
+            let scroll = ChatMacTranscriptScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300))
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             scroll.documentView = document
             defer {
                 document.preparationTask?.cancel()
-                document.geometryNotificationTask?.cancel()
+                document.geometryReporter.cancel()
             }
             document.nativeRowFactory = { _, reused in reused ?? NSView() }
             document.install(heights: [400, 400], width: 760, ids: ["a", "b"]) { _ in Text("Fixture") }

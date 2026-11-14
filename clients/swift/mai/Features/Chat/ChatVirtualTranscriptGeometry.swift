@@ -76,6 +76,19 @@ nonisolated struct ChatVirtualTranscriptGeometry {
         return Anchor(id: ids[index], offsetWithinRow: max(0, y - offsets[index]))
     }
 
+    /// The row a reader at `top` is reading, and how far `top` is into it:
+    /// negative while the viewport rubber-bands above the first row. Rows no
+    /// taller than `markerHeight` are passed over; the pagination marker
+    /// stays first when older rows arrive below it, so it cannot say where
+    /// the reader was.
+    func readingAnchor(atViewportTop top: CGFloat, markerHeight: CGFloat) -> Anchor? {
+        guard var index = index(at: max(0, top)) else { return nil }
+        while index < ids.count - 1, heights[index] <= markerHeight {
+            index += 1
+        }
+        return Anchor(id: ids[index], offsetWithinRow: top - offsets[index])
+    }
+
     func offset(for anchor: Anchor) -> CGFloat? {
         guard let index = indices[anchor.id] else { return nil }
         return offsets[index] + min(anchor.offsetWithinRow, heights[index])

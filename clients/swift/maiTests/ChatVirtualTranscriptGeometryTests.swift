@@ -133,14 +133,14 @@ import Testing
         {
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             document.nativeRowFactory = { _, reused in reused ?? NSView() }
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            let scroll = ChatMacTranscriptScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
             scroll.documentView = document
+            document.observeViewport(of: scroll)
+            defer { document.tearDown() }
             let ids = (0..<10).map { "row-\($0)" }
             document.install(heights: Array(repeating: 100, count: 10), width: 300, ids: ids) {
                 Text("Row \($0)")
             }
-            let preserver = ChatMacScrollPositionPreserver()
-            preserver.attach(to: document)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 350))
             for _ in 0..<20 { await Task.yield() }
             let anchor = try #require(document.geometry.anchor(at: scroll.contentView.bounds.minY))
@@ -150,7 +150,6 @@ import Testing
             for _ in 0..<20 { await Task.yield() }
             #expect(scroll.contentView.bounds.minY == 450)
             #expect(document.geometry.anchor(at: scroll.contentView.bounds.minY) == anchor)
-            preserver.captureBeforePrepend(leadingRowCount: 2)
             document.install(
                 heights: [20, 50] + document.geometry.heights, width: 300,
                 ids: ["older-a", "older-b"] + ids, changedIDs: ["older-a", "older-b"]
@@ -168,7 +167,7 @@ import Testing
             scroll.contentView.bounds = resizedBounds
             for _ in 0..<20 { await Task.yield() }
             #expect(abs(scroll.contentView.bounds.minY - 520) < 0.000001)
-            #expect(preserver.pinToBottom())
+            #expect(document.scrollToBottom())
             #expect(abs(scroll.contentView.bounds.maxY - document.bounds.maxY) < 0.000001)
             document.preparationTask?.cancel()
         }

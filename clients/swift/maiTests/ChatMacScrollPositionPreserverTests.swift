@@ -6,14 +6,14 @@
 
     struct ChatMacScrollPositionPreserverTests {
         @Test
-        func bottomOriginIncludesComposerInsetAndKeepsShortContentAtTopInset() {
+        func bottomOffsetIncludesComposerInsetAndKeepsShortContentAtTopInset() {
             #expect(
-                ChatMacScrollPositionPreserver.bottomOrigin(
-                    documentMinY: 0, documentMaxY: 27_978, viewportHeight: 928,
+                ChatScrollGeometry.bottomOffset(
+                    contentHeight: 27_978, viewportHeight: 928,
                     topInset: 0, bottomInset: 102) == 27_152)
             #expect(
-                ChatMacScrollPositionPreserver.bottomOrigin(
-                    documentMinY: 0, documentMaxY: 400, viewportHeight: 928,
+                ChatScrollGeometry.bottomOffset(
+                    contentHeight: 400, viewportHeight: 928,
                     topInset: 14, bottomInset: 102) == -14)
         }
 
@@ -41,8 +41,6 @@
             }
             remeasureFirstRow(to: 100)
             defer { document.preparationTask?.cancel() }
-            let preserver = ChatMacScrollPositionPreserver()
-            preserver.attach(to: document)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 250))
             for _ in 0..<20 { await Task.yield() }
 

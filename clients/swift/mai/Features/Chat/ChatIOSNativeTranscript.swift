@@ -46,7 +46,7 @@
                 return
             }
             document.historyLoadDistance = historyLoadDistance
-            document.onGeometryChange = onGeometryChange
+            document.geometryReporter.onChange = onGeometryChange
             context.coordinator.update(
                 ids: ids, width: width, measurementKeys: measurementKeys,
                 presentationTheme: presentationTheme, layoutStore: layoutStore,
@@ -71,13 +71,6 @@
             // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
             nonisolated deinit {}
 
-            /// The row under the viewport's top edge and how far the edge is
-            /// into it. Negative while the top edge rubber-bands above it.
-            private struct ReadingAnchor {
-                let id: String
-                let distance: CGFloat
-            }
-
             private struct TiledViewport: Equatable {
                 let resident: ClosedRange<Int>
                 let visible: ClosedRange<Int>
@@ -94,7 +87,7 @@
             var numberOfRows: Int { geometry.ids.count }
             var contentWidth: CGFloat = 0
             var historyLoadDistance: CGFloat = 0
-            var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)?
+            let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
             private(set) var isAdjustingScrollPosition = false
             var rowRevisions: [String: Int] = [:]
@@ -111,9 +104,6 @@
                 var hostingMounts = 0
                 var createdRows = 0
             #endif
-            var geometryNotificationTask: Task<Void, Never>?
-            private var lastReportedGeometry: ChatScrollGeometry?
-            private var pendingGeometry: ChatScrollGeometry?
             private var initialBottomAlignmentCompletion: (() -> Void)?
             private var tiledViewport: TiledViewport?
             private var preparationLink: CADisplayLink?
@@ -154,10 +144,9 @@
                 preparationLink?.invalidate()
                 preparationLink = nil
                 NotificationCenter.default.removeObserver(self)
-                geometryNotificationTask?.cancel()
-                geometryNotificationTask = nil
+                geometryReporter.cancel()
+                geometryReporter.onChange = nil
                 delegate = nil
-                onGeometryChange = nil
                 initialBottomAlignmentCompletion = nil
             }
 
@@ -280,25 +269,15 @@
                 }
             }
 
-            private func readingAnchor() -> ReadingAnchor? {
-                guard numberOfRows > 0 else { return nil }
-                let top = contentOffset.y + adjustedContentInset.top
-                var index = max(0, row(at: max(0, top)))
-                // The pagination marker stays first when older rows arrive
-                // below it, so it cannot say where the reader was.
-                while index < numberOfRows - 1,
-                    geometry.heights[index] <= ChatTimelineMetrics.historyMarkerHeight
-                {
-                    index += 1
-                }
-                return ReadingAnchor(id: geometry.ids[index], distance: top - offsets[index])
+            private func readingAnchor() -> ChatVirtualTranscriptGeometry.Anchor? {
+                geometry.readingAnchor(
+                    atViewportTop: contentOffset.y + adjustedContentInset.top,
+                    markerHeight: ChatTimelineMetrics.historyMarkerHeight)
             }
 
-            private func restore(_ anchor: ReadingAnchor) {
-                guard let index = geometry.index(for: anchor.id) else { return }
-                var target =
-                    offsets[index] + min(anchor.distance, geometry.heights[index])
-                    - adjustedContentInset.top
+            private func restore(_ anchor: ChatVirtualTranscriptGeometry.Anchor) {
+                guard let anchorY = geometry.offset(for: anchor) else { return }
+                var target = anchorY - adjustedContentInset.top
                 // A gesture may hold the content past either end; layout may not.
                 if !isTracking, !isDecelerating {
                     target = min(max(target, -adjustedContentInset.top), bottomOffsetY)
@@ -307,10 +286,9 @@
             }
 
             private var bottomOffsetY: CGFloat {
-                max(
-                    -adjustedContentInset.top,
-                    contentSize.height + adjustedContentInset.bottom - bounds.height
-                )
+                ChatScrollGeometry.bottomOffset(
+                    contentHeight: contentSize.height, viewportHeight: bounds.height,
+                    topInset: adjustedContentInset.top, bottomInset: adjustedContentInset.bottom)
             }
 
             var isNearBottom: Bool {
@@ -549,32 +527,15 @@
             }
 
             private func notifyGeometryChange() {
-                guard onGeometryChange != nil else { return }
                 let insets = adjustedContentInset
-                let geometry = ChatScrollGeometry(
+                geometryReporter.report(ChatScrollGeometry(
                     isNearTop: numberOfRows > 0
                         && contentOffset.y + insets.top <= historyLoadDistance,
                     isNearBottom: isNearBottom,
                     containerWidth: bounds.width.rounded(),
                     containerHeight: bounds.height.rounded(),
                     bottomInset: insets.bottom.rounded(),
-                    contentHeight: contentSize.height.rounded())
-                guard geometry != (pendingGeometry ?? lastReportedGeometry) else { return }
-                pendingGeometry = geometry
-                guard geometryNotificationTask == nil else { return }
-                // The receiver changes SwiftUI state, which must not happen
-                // inside a layout pass.
-                geometryNotificationTask = Task { @MainActor [weak self] in
-                    await Task.yield()
-                    guard let self, !Task.isCancelled else { return }
-                    self.geometryNotificationTask = nil
-                    guard let geometry = self.pendingGeometry else { return }
-                    self.pendingGeometry = nil
-                    guard geometry != self.lastReportedGeometry else { return }
-                    let previous = self.lastReportedGeometry ?? geometry
-                    self.lastReportedGeometry = geometry
-                    self.onGeometryChange?(previous, geometry)
-                }
+                    contentHeight: contentSize.height.rounded()))
             }
 
             // MARK: Row views

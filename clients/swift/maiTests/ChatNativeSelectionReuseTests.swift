@@ -57,7 +57,7 @@
             defer {
                 document.preparationTask?.cancel()
                 document.heightUpdateTask?.cancel()
-                document.geometryNotificationTask?.cancel()
+                document.geometryReporter.cancel()
             }
             await document.preparationTask?.value
 

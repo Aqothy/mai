@@ -13,10 +13,8 @@ final class ChatTimelineFoldModel {
     /// stable item identity. Rows are recreated when they leave the viewport,
     /// so a choice must outlive them for the rest of this chat's timeline.
     private(set) var disclosureChoices: [ChatDisclosure: Bool] = [:]
-    @ObservationIgnored var prepareForToggle: () -> Void = {}
 
     func toggle(_ sectionID: String) {
-        prepareForToggle()
         withChatContentExpansionTransaction {
             expandedSectionIDs.formSymmetricDifference([sectionID])
         }

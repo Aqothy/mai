@@ -22,8 +22,8 @@
 
         func makeCoordinator() -> Coordinator { Coordinator() }
 
-        func makeNSView(context: Context) -> NSScrollView {
-            let scroll = NSScrollView()
+        func makeNSView(context: Context) -> ChatMacTranscriptScrollView {
+            let scroll = ChatMacTranscriptScrollView()
             scroll.hasVerticalScroller = true
             scroll.drawsBackground = false
             let document = context.coordinator.virtualDocument
@@ -32,7 +32,7 @@
             return scroll
         }
 
-        func updateNSView(_ scroll: NSScrollView, context: Context) {
+        func updateNSView(_ scroll: ChatMacTranscriptScrollView, context: Context) {
             guard isPrepared else {
                 context.coordinator.task?.cancel()
                 #if DEBUG
@@ -41,7 +41,7 @@
                 return
             }
             context.coordinator.virtualDocument.historyLoadDistance = historyLoadDistance
-            context.coordinator.virtualDocument.onGeometryChange = onGeometryChange
+            context.coordinator.virtualDocument.geometryReporter.onChange = onGeometryChange
             context.coordinator.update(
                 ids: ids, width: width, measurementKeys: measurementKeys,
                 presentationTheme: presentationTheme, layoutStore: layoutStore,
@@ -50,20 +50,17 @@
                 onAttach: onAttach, content: content)
         }
 
-        static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        static func dismantleNSView(_ scroll: ChatMacTranscriptScrollView, coordinator: Coordinator) {
             coordinator.task?.cancel()
-            NotificationCenter.default.removeObserver(coordinator.virtualDocument)
-            coordinator.virtualDocument.preparationTask?.cancel()
-            coordinator.virtualDocument.heightUpdateTask?.cancel()
-            coordinator.virtualDocument.geometryNotificationTask?.cancel()
-            coordinator.virtualDocument.setGeometryCommitHandler(nil)
+            scroll.onTile = nil
+            coordinator.virtualDocument.tearDown()
         }
 
         final class VirtualDocument: NSView, ChatMacScrollDocument {
             // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
             nonisolated deinit {}
 
-            var numberOfRows: Int { offsets.count - 1 }
+            var numberOfRows: Int { geometry.ids.count }
             func stableIdentity(forRow row: Int) -> String? {
                 geometry.ids.indices.contains(row) ? geometry.ids[row] : nil
             }
@@ -107,18 +104,38 @@
             var offsets: [CGFloat] { geometry.offsets }
             var contentWidth: CGFloat = 0
             var historyLoadDistance: CGFloat = 0
-            var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)?
-            private var lastReportedGeometry: ChatScrollGeometry?
-            private var pendingGeometry: ChatScrollGeometry?
-            var geometryNotificationTask: Task<Void, Never>?
+            let geometryReporter = ChatScrollGeometryReporter()
+            var isBottomFollowingEnabled: () -> Bool = { false }
+            private var initialBottomAlignmentCompletion: (() -> Void)?
+            /// The clip's size and insets when last seen, and where its top
+            /// was. A change to the first is layout, not the reader.
+            private var lastViewport: Viewport?
+            private var lastViewportTop: CGFloat = 0
+            private var isLiveScrolling = false
             var rowRevisions: [String: Int] = [:]
             private var nextRowRevision = 0
             var heightUpdateTask: Task<Void, Never>?
             var isApplyingHeights = false
-            private var geometryCommitHandler: (() -> Void)?
 
-            func setGeometryCommitHandler(_ handler: (() -> Void)?) {
-                geometryCommitHandler = handler
+            private struct Viewport: Equatable {
+                let size: CGSize
+                let topInset: CGFloat
+                let bottomInset: CGFloat
+
+                init(_ clip: NSClipView) {
+                    size = clip.bounds.size
+                    topInset = clip.contentInsets.top
+                    bottomInset = clip.contentInsets.bottom
+                }
+            }
+
+            func tearDown() {
+                NotificationCenter.default.removeObserver(self)
+                preparationTask?.cancel()
+                heightUpdateTask?.cancel()
+                geometryReporter.cancel()
+                geometryReporter.onChange = nil
+                initialBottomAlignmentCompletion = nil
             }
             var content: ((Int) -> Content)?
             var hosts: [Int: NSView] = [:]
@@ -168,42 +185,39 @@
                 contentWidth = width
                 let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                 let oldIDs = geometry.ids
-                if geometry.replace(ids: ids, estimatedHeight: 1) {
-                    rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
-                }
-                geometry.setHeights(heights)
-                // An unchanged live row keeps its reporting identity across parent
-                // updates; otherwise a queued height can be discarded permanently.
-                for id in heightInvalidatedIDs ?? changedIDs ?? Set(ids) {
-                    nextRowRevision += 1
-                    rowRevisions[id] = nextRowRevision
-                }
-                var retained: [Int: NSView] = [:]
-                for (oldIndex, host) in hosts {
-                    let id = oldIDs[oldIndex]
-                    if let index = geometry.index(for: id) {
-                        let updated =
-                            changedIDs?.contains(id) == false
-                            ? host : configuredHost(index, reused: host, content: content)
-                        if updated !== host {
+                updateGeometry {
+                    if geometry.replace(ids: ids, estimatedHeight: 1) {
+                        rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
+                    }
+                    geometry.setHeights(heights)
+                    // An unchanged live row keeps its reporting identity across parent
+                    // updates; otherwise a queued height can be discarded permanently.
+                    for id in heightInvalidatedIDs ?? changedIDs ?? Set(ids) {
+                        nextRowRevision += 1
+                        rowRevisions[id] = nextRowRevision
+                    }
+                    var retained: [Int: NSView] = [:]
+                    for (oldIndex, host) in hosts {
+                        let id = oldIDs[oldIndex]
+                        if let index = geometry.index(for: id) {
+                            let updated =
+                                changedIDs?.contains(id) == false
+                                ? host : configuredHost(index, reused: host, content: content)
+                            if updated !== host {
+                                host.removeFromSuperview()
+                                recycle(host)
+                                addSubview(updated)
+                            }
+                            retained[index] = updated
+                        } else {
                             host.removeFromSuperview()
                             recycle(host)
-                            addSubview(updated)
                         }
-                        retained[index] = updated
-                    } else {
-                        host.removeFromSuperview()
-                        recycle(host)
                     }
+                    hosts = retained
+                    subviews = hosts.keys.sorted().compactMap { hosts[$0] }
                 }
-                hosts = retained
-                subviews = hosts.keys.sorted().compactMap { hosts[$0] }
-                repositionMountedRows()
-                setFrameSize(
-                    NSSize(
-                        width: enclosingScrollView?.contentSize.width ?? width,
-                        height: geometry.totalHeight))
-                geometryCommitHandler?()
+                alignInitialBottomIfPossible()
             }
 
             func row(at y: CGFloat) -> Int { geometry.index(at: y) ?? -1 }
@@ -218,10 +232,7 @@
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 isApplyingHeights = true
-                geometry.updateHeights([id: height])
-                repositionMountedRows()
-                setFrameSize(NSSize(width: frame.width, height: geometry.totalHeight))
-                geometryCommitHandler?()
+                updateGeometry { geometry.updateHeights([id: height]) }
                 isApplyingHeights = wasApplyingHeights
                 CATransaction.commit()
                 // Mounting newly exposed rows may re-enter SwiftUI layout, so
@@ -232,6 +243,118 @@
                     guard let self, !Task.isCancelled else { return }
                     self.heightUpdateTask = nil
                     self.viewportChanged()
+                }
+            }
+
+            // MARK: Geometry and reading position
+
+            /// The only place row geometry changes. While following, the
+            /// viewport lands on the new end; otherwise the row being read
+            /// stays where it is, whatever happened above it.
+            private func updateGeometry(_ change: () -> Void) {
+                let follows = initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled()
+                let anchor = follows ? nil : readingAnchor()
+                change()
+                repositionMountedRows()
+                setFrameSize(
+                    NSSize(
+                        width: enclosingScrollView?.contentSize.width ?? contentWidth,
+                        height: geometry.totalHeight))
+                if follows {
+                    scrollToBottom()
+                } else if let anchor {
+                    restore(anchor)
+                }
+            }
+
+            private func readingAnchor() -> ChatVirtualTranscriptGeometry.Anchor? {
+                guard let clip = enclosingScrollView?.contentView else { return nil }
+                return geometry.readingAnchor(
+                    atViewportTop: clip.bounds.minY + clip.contentInsets.top,
+                    markerHeight: ChatTimelineMetrics.historyMarkerHeight)
+            }
+
+            private func restore(_ anchor: ChatVirtualTranscriptGeometry.Anchor) {
+                guard let scroll = enclosingScrollView, let anchorY = geometry.offset(for: anchor)
+                else { return }
+                setViewportTop(anchorY - scroll.contentView.contentInsets.top, in: scroll)
+            }
+
+            /// Moves the clip, kept inside the document, and records the move
+            /// as the reader's position before the clip reports it.
+            private func setViewportTop(_ y: CGFloat, in scroll: NSScrollView) {
+                let clip = scroll.contentView
+                var proposed = clip.bounds
+                proposed.origin.y = y
+                let origin = clip.constrainBoundsRect(proposed).origin
+                lastViewport = Viewport(clip)
+                lastViewportTop = origin.y
+                guard origin != clip.bounds.origin else { return }
+                clip.scroll(to: origin)
+                scroll.reflectScrolledClipView(clip)
+            }
+
+            var isNearBottom: Bool {
+                guard numberOfRows > 0, let clip = enclosingScrollView?.contentView else {
+                    return false
+                }
+                return bounds.maxY + clip.contentInsets.bottom - clip.documentVisibleRect.maxY
+                    <= ChatTimelineMetrics.nearBottomDistance
+            }
+
+            /// Moves to the exact end of the content. Returns false until
+            /// there are rows and a viewport.
+            @discardableResult
+            func scrollToBottom() -> Bool {
+                guard numberOfRows > 0, let scroll = enclosingScrollView,
+                    scroll.contentView.bounds.height > 0
+                else { return false }
+                let clip = scroll.contentView
+                setViewportTop(
+                    ChatScrollGeometry.bottomOffset(
+                        contentHeight: geometry.totalHeight, viewportHeight: clip.bounds.height,
+                        topInset: clip.contentInsets.top, bottomInset: clip.contentInsets.bottom),
+                    in: scroll)
+                return true
+            }
+
+            func beginInitialBottomAlignment(completion: @escaping () -> Void) {
+                initialBottomAlignmentCompletion = completion
+                alignInitialBottomIfPossible()
+            }
+
+            func completeInitialBottomAlignment() {
+                guard let completion = initialBottomAlignmentCompletion else { return }
+                initialBottomAlignmentCompletion = nil
+                // This can run inside a layout pass, where the completion's
+                // SwiftUI state change must not land.
+                Task { @MainActor in completion() }
+            }
+
+            private func alignInitialBottomIfPossible() {
+                guard initialBottomAlignmentCompletion != nil, scrollToBottom() else { return }
+                completeInitialBottomAlignment()
+            }
+
+            /// A resize or an inset change moves the clip without the reader:
+            /// AppKit keeps its origin or constrains it to the new extent.
+            /// While following, the viewport lands on the new end; otherwise
+            /// its top stays where the reader left it.
+            private func keepReadingPositionThroughViewportChange(_ scroll: NSScrollView) {
+                let clip = scroll.contentView
+                let viewport = Viewport(clip)
+                guard let lastViewport, lastViewport != viewport else {
+                    self.lastViewport = viewport
+                    lastViewportTop = clip.bounds.minY
+                    return
+                }
+                if initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled() {
+                    scrollToBottom()
+                } else if !isLiveScrolling {
+                    setViewportTop(lastViewportTop, in: scroll)
+                } else {
+                    self.lastViewport = viewport
+                    lastViewportTop = clip.bounds.minY
                 }
             }
 
@@ -249,33 +372,17 @@
             }
 
             private func notifyGeometryChange() {
-                guard onGeometryChange != nil, let scroll = enclosingScrollView else { return }
-                let clip = scroll.contentView
-                let visible = clip.documentVisibleRect
-                let geometry = ChatScrollGeometry(
-                    isNearTop: numberOfRows > 0
-                        && visible.minY + clip.contentInsets.top <= historyLoadDistance,
-                    isNearBottom: numberOfRows > 0
-                        && bounds.maxY + clip.contentInsets.bottom - visible.maxY
-                            <= ChatTimelineMetrics.nearBottomDistance,
-                    containerWidth: clip.bounds.width.rounded(),
-                    containerHeight: clip.bounds.height.rounded(),
-                    bottomInset: clip.contentInsets.bottom.rounded(),
-                    contentHeight: bounds.height.rounded())
-                guard geometry != (pendingGeometry ?? lastReportedGeometry) else { return }
-                pendingGeometry = geometry
-                guard geometryNotificationTask == nil else { return }
-                geometryNotificationTask = Task { @MainActor [weak self] in
-                    await Task.yield()
-                    guard let self, !Task.isCancelled else { return }
-                    self.geometryNotificationTask = nil
-                    guard let geometry = self.pendingGeometry else { return }
-                    self.pendingGeometry = nil
-                    guard geometry != self.lastReportedGeometry else { return }
-                    let previous = self.lastReportedGeometry ?? geometry
-                    self.lastReportedGeometry = geometry
-                    self.onGeometryChange?(previous, geometry)
-                }
+                guard let clip = enclosingScrollView?.contentView else { return }
+                geometryReporter.report(
+                    ChatScrollGeometry(
+                        isNearTop: numberOfRows > 0
+                            && clip.documentVisibleRect.minY + clip.contentInsets.top
+                                <= historyLoadDistance,
+                        isNearBottom: isNearBottom,
+                        containerWidth: clip.bounds.width.rounded(),
+                        containerHeight: clip.bounds.height.rounded(),
+                        bottomInset: clip.contentInsets.bottom.rounded(),
+                        contentHeight: bounds.height.rounded()))
             }
 
             /// The transcript scrolls vertically only. Sidebar, divider and window
@@ -296,31 +403,35 @@
             }
 
             /// Scrolling moves the clip's bounds, which changes the mounted rows.
-            /// Sidebar, divider and window changes resize the clip's frame, which
-            /// can leave its bounds origin unchanged; rows must still match it.
-            func observeViewport(of scroll: NSScrollView) {
+            /// Sidebar, divider and window changes and new insets re-tile the
+            /// scroll view, which can leave the clip's bounds origin unchanged;
+            /// rows and the reading position must still follow.
+            func observeViewport(of scroll: ChatMacTranscriptScrollView) {
                 let clip = scroll.contentView
                 clip.postsBoundsChangedNotifications = true
-                clip.postsFrameChangedNotifications = true
                 NotificationCenter.default.addObserver(
                     self, selector: #selector(viewportChanged),
                     name: NSView.boundsDidChangeNotification, object: clip)
                 NotificationCenter.default.addObserver(
-                    self, selector: #selector(viewportResized),
-                    name: NSView.frameDidChangeNotification, object: clip)
+                    self, selector: #selector(liveScrollStarted),
+                    name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(liveScrollEnded),
+                    name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+                scroll.onTile = { [weak self] in self?.viewportChanged() }
             }
 
-            @objc private func viewportResized() {
-                guard !isApplyingHeights, let scroll = enclosingScrollView else { return }
-                matchViewportWidth(scroll)
-            }
+            @objc private func liveScrollStarted() { isLiveScrolling = true }
+            @objc private func liveScrollEnded() { isLiveScrolling = false }
 
             @objc func viewportChanged() {
-                notifyGeometryChange()
-                guard !isApplyingHeights, let content, offsets.count > 1,
-                    let scroll = enclosingScrollView
-                else { return }
+                guard !isApplyingHeights, let scroll = enclosingScrollView else { return }
                 matchViewportWidth(scroll)
+                keepReadingPositionThroughViewportChange(scroll)
+                // The first install can come before the viewport has a size.
+                alignInitialBottomIfPossible()
+                notifyGeometryChange()
+                guard let content, numberOfRows > 0 else { return }
                 let visible = scroll.contentView.documentVisibleRect
                 // One viewport of preparation on either side bounds resident views
                 // while allowing ordinary wheel input to reuse already mounted rows.
