@@ -25,6 +25,7 @@ private struct ChatTimelineHistoryPosition: Equatable {
 private struct ChatTimelineHistoryLoadTrigger: Equatable {
     let request: Int
     let isAwaitingInitialBottom: Bool
+    let oldestSectionID: String?
 }
 
 struct ChatTimeline: View {
@@ -61,12 +62,6 @@ struct ChatTimeline: View {
     @State private var isLoadingEarlier = false
 
     @State private var rowWidth: CGFloat = 0
-    #if os(iOS)
-        /// The navigation bar above the transcript and the composer and
-        /// keyboard below it, which the transcript scrolls under.
-        @State private var coveredTop: CGFloat = 0
-        @State private var coveredBottom: CGFloat = 0
-    #endif
     @State private var preparedKey: ChatTimelinePreparationKey?
     @State private var scrollPositionPreserver = ChatTranscriptScrollPositionPreserver()
 
@@ -168,7 +163,6 @@ struct ChatTimeline: View {
             .frame(maxWidth: .infinity)
         }
         #if os(iOS)
-            .viewportInsets(top: coveredTop, bottom: coveredBottom)
             // The scroll view runs under the navigation bar, the composer
             // and the keyboard.
             .ignoresSafeArea(edges: .vertical)
@@ -198,17 +192,22 @@ struct ChatTimeline: View {
             rowWidth = width
         }
         #if os(iOS)
+            // The navigation bar above the transcript and the composer and
+            // keyboard below it.
             .onGeometryChange(for: EdgeInsets.self) { geometry in
                 geometry.safeAreaInsets
             } action: { insets in
-                coveredTop = insets.top
-                coveredBottom = insets.bottom
+                scrollPositionPreserver.setViewportInsets(
+                    UIEdgeInsets(top: insets.top, left: 0, bottom: insets.bottom, right: 0))
             }
         #endif
-        // A request made while the first page aligns runs once it has.
+        // A request made while the first page aligns runs once it has, and
+        // older turns arriving run it again over the widened sections. A
+        // read that failed changes neither, so it is not repeated.
         .task(
             id: ChatTimelineHistoryLoadTrigger(
-                request: historyLoadRequest, isAwaitingInitialBottom: isAwaitingInitialBottom)
+                request: historyLoadRequest, isAwaitingInitialBottom: isAwaitingInitialBottom,
+                oldestSectionID: sections.first?.id)
         ) {
             guard historyLoadRequest > 0, isTimelineNearTop,
                 !isAwaitingInitialBottom
@@ -403,13 +402,12 @@ struct ChatTimeline: View {
         }
     }
 
-    /// With every loaded turn shown, reads the daemon's next older page;
-    /// once it lands, the load runs again over the widened sections.
+    /// With every loaded turn shown, reads the daemon's next older page.
+    /// The load runs again once older turns arrive, by this read or any
+    /// other: the task's trigger includes the oldest section.
     private func loadOlderTurns(loadedSections: [ChatTimelineLayout.Section]) async {
-        guard hasOlderTurns, loadedSections.first?.id == sections.first?.id,
-            await store.loadOlderTurns(), !Task.isCancelled
-        else { return }
-        historyLoadRequest &+= 1
+        guard hasOlderTurns, loadedSections.first?.id == sections.first?.id else { return }
+        await store.loadOlderTurns()
     }
 
     private func prepareEarlierPage(

@@ -61,24 +61,6 @@
             nonisolated deinit {}
 
             var numberOfRows: Int { geometry.ids.count }
-            func stableIdentity(forRow row: Int) -> String? {
-                geometry.ids.indices.contains(row) ? geometry.ids[row] : nil
-            }
-            func row(forStableIdentity id: String) -> Int? { geometry.index(for: id) }
-            func rect(ofRow index: Int) -> NSRect {
-                guard index >= 0, index < numberOfRows else { return .zero }
-                return NSRect(
-                    x: 0, y: offsets[index], width: bounds.width,
-                    height: offsets[index + 1] - offsets[index])
-            }
-            func rows(in rect: NSRect) -> NSRange {
-                guard numberOfRows > 0, rect.maxY > 0, rect.minY < bounds.height else {
-                    return NSRange(location: NSNotFound, length: 0)
-                }
-                let first = row(at: max(0, rect.minY))
-                let last = row(at: min(bounds.height, rect.maxY).nextDown)
-                return NSRange(location: first, length: max(0, last - first + 1))
-            }
 
             /// Sizes one SwiftUI row at a width. The hosting controller is
             /// shared by every row of an update and built on first use.
@@ -106,12 +88,12 @@
             var historyLoadDistance: CGFloat = 0
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
-            private var initialBottomAlignmentCompletion: (() -> Void)?
-            /// The clip's size and insets when last seen, and where its top
-            /// was. A change to the first is layout, not the reader.
+            var initialBottomAlignmentCompletion: (() -> Void)?
+            var isReaderScrolling = false
+            /// The clip's size and insets when last seen, and where its
+            /// origin was. A change to the first is layout, not the reader.
             private var lastViewport: Viewport?
-            private var lastViewportTop: CGFloat = 0
-            private var isLiveScrolling = false
+            private var lastClipY: CGFloat = 0
             var rowRevisions: [String: Int] = [:]
             private var nextRowRevision = 0
             var heightUpdateTask: Task<Void, Never>?
@@ -246,49 +228,46 @@
                 }
             }
 
-            // MARK: Geometry and reading position
+            // MARK: Reading position
 
-            /// The only place row geometry changes. While following, the
-            /// viewport lands on the new end; otherwise the row being read
-            /// stays where it is, whatever happened above it.
-            private func updateGeometry(_ change: () -> Void) {
-                let follows = initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled()
-                let anchor = follows ? nil : readingAnchor()
-                change()
+            var viewportTop: CGFloat? {
+                enclosingScrollView.map {
+                    $0.contentView.bounds.minY + $0.contentView.contentInsets.top
+                }
+            }
+
+            var bottomViewportTop: CGFloat? {
+                guard numberOfRows > 0, let clip = enclosingScrollView?.contentView,
+                    clip.bounds.height > 0
+                else { return nil }
+                return ChatScrollGeometry.bottomOffset(
+                    contentHeight: geometry.totalHeight, viewportHeight: clip.bounds.height,
+                    topInset: clip.contentInsets.top, bottomInset: clip.contentInsets.bottom)
+                    + clip.contentInsets.top
+            }
+
+            func setViewportTop(_ top: CGFloat) {
+                guard let scroll = enclosingScrollView else { return }
+                moveClip(toY: top - scroll.contentView.contentInsets.top, in: scroll)
+            }
+
+            func applyGeometryToViews() {
                 repositionMountedRows()
                 setFrameSize(
                     NSSize(
                         width: enclosingScrollView?.contentSize.width ?? contentWidth,
                         height: geometry.totalHeight))
-                if follows {
-                    scrollToBottom()
-                } else if let anchor {
-                    restore(anchor)
-                }
-            }
-
-            private func readingAnchor() -> ChatVirtualTranscriptGeometry.Anchor? {
-                guard let clip = enclosingScrollView?.contentView else { return nil }
-                return geometry.readingAnchor(
-                    atViewportTop: clip.bounds.minY + clip.contentInsets.top,
-                    markerHeight: ChatTimelineMetrics.historyMarkerHeight)
-            }
-
-            private func restore(_ anchor: ChatVirtualTranscriptGeometry.Anchor) {
-                guard let scroll = enclosingScrollView, let anchorY = geometry.offset(for: anchor)
-                else { return }
-                setViewportTop(anchorY - scroll.contentView.contentInsets.top, in: scroll)
             }
 
             /// Moves the clip, kept inside the document, and records the move
             /// as the reader's position before the clip reports it.
-            private func setViewportTop(_ y: CGFloat, in scroll: NSScrollView) {
+            private func moveClip(toY y: CGFloat, in scroll: NSScrollView) {
                 let clip = scroll.contentView
                 var proposed = clip.bounds
                 proposed.origin.y = y
                 let origin = clip.constrainBoundsRect(proposed).origin
                 lastViewport = Viewport(clip)
-                lastViewportTop = origin.y
+                lastClipY = origin.y
                 guard origin != clip.bounds.origin else { return }
                 clip.scroll(to: origin)
                 scroll.reflectScrolledClipView(clip)
@@ -302,59 +281,25 @@
                     <= ChatTimelineMetrics.nearBottomDistance
             }
 
-            /// Moves to the exact end of the content. Returns false until
-            /// there are rows and a viewport.
-            @discardableResult
-            func scrollToBottom() -> Bool {
-                guard numberOfRows > 0, let scroll = enclosingScrollView,
-                    scroll.contentView.bounds.height > 0
-                else { return false }
-                let clip = scroll.contentView
-                setViewportTop(
-                    ChatScrollGeometry.bottomOffset(
-                        contentHeight: geometry.totalHeight, viewportHeight: clip.bounds.height,
-                        topInset: clip.contentInsets.top, bottomInset: clip.contentInsets.bottom),
-                    in: scroll)
-                return true
-            }
-
-            func beginInitialBottomAlignment(completion: @escaping () -> Void) {
-                initialBottomAlignmentCompletion = completion
-                alignInitialBottomIfPossible()
-            }
-
-            func completeInitialBottomAlignment() {
-                guard let completion = initialBottomAlignmentCompletion else { return }
-                initialBottomAlignmentCompletion = nil
-                // This can run inside a layout pass, where the completion's
-                // SwiftUI state change must not land.
-                Task { @MainActor in completion() }
-            }
-
-            private func alignInitialBottomIfPossible() {
-                guard initialBottomAlignmentCompletion != nil, scrollToBottom() else { return }
-                completeInitialBottomAlignment()
-            }
-
             /// A resize or an inset change moves the clip without the reader:
             /// AppKit keeps its origin or constrains it to the new extent.
             /// While following, the viewport lands on the new end; otherwise
-            /// its top stays where the reader left it.
+            /// the clip stays where the reader left it.
             private func keepReadingPositionThroughViewportChange(_ scroll: NSScrollView) {
                 let clip = scroll.contentView
                 let viewport = Viewport(clip)
                 guard let lastViewport, lastViewport != viewport else {
                     self.lastViewport = viewport
-                    lastViewportTop = clip.bounds.minY
+                    lastClipY = clip.bounds.minY
                     return
                 }
-                if initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled() {
+                if isFollowingBottom {
                     scrollToBottom()
-                } else if !isLiveScrolling {
-                    setViewportTop(lastViewportTop, in: scroll)
+                } else if !isReaderScrolling {
+                    moveClip(toY: lastClipY, in: scroll)
                 } else {
                     self.lastViewport = viewport
-                    lastViewportTop = clip.bounds.minY
+                    lastClipY = clip.bounds.minY
                 }
             }
 
@@ -412,17 +357,8 @@
                 NotificationCenter.default.addObserver(
                     self, selector: #selector(viewportChanged),
                     name: NSView.boundsDidChangeNotification, object: clip)
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(liveScrollStarted),
-                    name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(liveScrollEnded),
-                    name: NSScrollView.didEndLiveScrollNotification, object: scroll)
                 scroll.onTile = { [weak self] in self?.viewportChanged() }
             }
-
-            @objc private func liveScrollStarted() { isLiveScrolling = true }
-            @objc private func liveScrollEnded() { isLiveScrolling = false }
 
             @objc func viewportChanged() {
                 guard !isApplyingHeights, let scroll = enclosingScrollView else { return }

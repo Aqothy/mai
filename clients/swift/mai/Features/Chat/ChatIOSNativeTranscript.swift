@@ -14,7 +14,6 @@
         /// The store the rows' prepared heights came from.
         var layoutStore: ObjectIdentifier? = nil
         var historyLoadDistance: CGFloat = 0
-        private var viewportInsets = UIEdgeInsets.zero
         var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)? = nil
         var onAttach: ((ChatTranscriptScrollDocument) -> Void)? = nil
         var nativeRowHeight: ((Int, CGFloat) -> CGFloat?)? = nil
@@ -23,21 +22,11 @@
 
         func makeCoordinator() -> Coordinator { Coordinator() }
 
-        /// The bars and keyboard that cover the transcript's top and bottom.
-        /// SwiftUI reports no safe area to a view that ignores it, so the
-        /// scroll view cannot find these itself.
-        func viewportInsets(top: CGFloat, bottom: CGFloat) -> Self {
-            var copy = self
-            copy.viewportInsets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
-            return copy
-        }
-
         func makeUIView(context: Context) -> VirtualDocument {
             context.coordinator.virtualDocument
         }
 
         func updateUIView(_ document: VirtualDocument, context: Context) {
-            document.setViewportInsets(viewportInsets)
             guard isPrepared else {
                 context.coordinator.task?.cancel()
                 #if DEBUG
@@ -85,10 +74,10 @@
             var geometry = ChatVirtualTranscriptGeometry()
             var offsets: [CGFloat] { geometry.offsets }
             var numberOfRows: Int { geometry.ids.count }
-            var contentWidth: CGFloat = 0
             var historyLoadDistance: CGFloat = 0
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
+            var initialBottomAlignmentCompletion: (() -> Void)?
             private(set) var isAdjustingScrollPosition = false
             var rowRevisions: [String: Int] = [:]
             private var nextRowRevision = 0
@@ -104,7 +93,6 @@
                 var hostingMounts = 0
                 var createdRows = 0
             #endif
-            private var initialBottomAlignmentCompletion: (() -> Void)?
             private var tiledViewport: TiledViewport?
             private var preparationLink: CADisplayLink?
             private var laidOutSize = CGSize.zero
@@ -195,7 +183,6 @@
                 // belong to one layout pass. Never yield between them.
                 UIView.performWithoutAnimation {
                     self.content = content
-                    contentWidth = width
                     let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                     let oldIDs = geometry.ids
                     updateGeometry {
@@ -248,41 +235,30 @@
                 setNeedsLayout()
             }
 
-            // MARK: Geometry and reading position
+            // MARK: Reading position
 
-            /// The only place row geometry changes. While following, the
-            /// viewport lands on the new end; otherwise the row being read
-            /// stays where it is, whatever happened above it.
-            private func updateGeometry(_ change: () -> Void) {
-                let follows = initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled()
-                let anchor = follows ? nil : readingAnchor()
-                change()
+            var viewportTop: CGFloat? { contentOffset.y + adjustedContentInset.top }
+
+            var bottomViewportTop: CGFloat? {
+                guard numberOfRows > 0, bounds.height > 0 else { return nil }
+                return bottomOffsetY + adjustedContentInset.top
+            }
+
+            func setViewportTop(_ top: CGFloat) {
+                var y = top - adjustedContentInset.top
+                // A gesture may hold the content past either end; layout may not.
+                if !isTracking, !isDecelerating {
+                    y = min(max(y, -adjustedContentInset.top), bottomOffsetY)
+                }
+                setContentOffsetY(y)
+            }
+
+            func applyGeometryToViews() {
                 let size = CGSize(width: bounds.width, height: geometry.totalHeight)
                 if contentSize != size {
                     contentSize = size
                 }
                 repositionMountedRows()
-                if follows {
-                    setContentOffsetY(bottomOffsetY)
-                } else if let anchor {
-                    restore(anchor)
-                }
-            }
-
-            private func readingAnchor() -> ChatVirtualTranscriptGeometry.Anchor? {
-                geometry.readingAnchor(
-                    atViewportTop: contentOffset.y + adjustedContentInset.top,
-                    markerHeight: ChatTimelineMetrics.historyMarkerHeight)
-            }
-
-            private func restore(_ anchor: ChatVirtualTranscriptGeometry.Anchor) {
-                guard let anchorY = geometry.offset(for: anchor) else { return }
-                var target = anchorY - adjustedContentInset.top
-                // A gesture may hold the content past either end; layout may not.
-                if !isTracking, !isDecelerating {
-                    target = min(max(target, -adjustedContentInset.top), bottomOffsetY)
-                }
-                setContentOffsetY(target)
             }
 
             private var bottomOffsetY: CGFloat {
@@ -310,32 +286,10 @@
 
             @discardableResult
             func scrollToBottom(animated: Bool) -> Bool {
-                guard numberOfRows > 0, bounds.height > 0 else { return false }
-                if animated {
-                    setContentOffset(CGPoint(x: contentOffset.x, y: bottomOffsetY), animated: true)
-                } else {
-                    setContentOffsetY(bottomOffsetY)
-                }
+                guard animated else { return scrollToBottom() }
+                guard bottomViewportTop != nil else { return false }
+                setContentOffset(CGPoint(x: contentOffset.x, y: bottomOffsetY), animated: true)
                 return true
-            }
-
-            func beginInitialBottomAlignment(completion: @escaping () -> Void) {
-                initialBottomAlignmentCompletion = completion
-                alignInitialBottomIfPossible()
-            }
-
-            func completeInitialBottomAlignment() {
-                guard let completion = initialBottomAlignmentCompletion else { return }
-                initialBottomAlignmentCompletion = nil
-                // This can run inside a layout pass, where the completion's
-                // SwiftUI state change must not land.
-                Task { @MainActor in completion() }
-            }
-
-            private func alignInitialBottomIfPossible() {
-                guard initialBottomAlignmentCompletion != nil, scrollToBottom(animated: false)
-                else { return }
-                completeInitialBottomAlignment()
             }
 
             /// Geometry changes move every resident row, including prepared neighbors.
@@ -360,11 +314,7 @@
                     // viewport without a new install.
                     laidOutSize = bounds.size
                     UIView.performWithoutAnimation {
-                        let size = CGSize(width: bounds.width, height: geometry.totalHeight)
-                        if contentSize != size {
-                            contentSize = size
-                        }
-                        repositionMountedRows()
+                        applyGeometryToViews()
                         keepViewportInRange()
                     }
                     tiledViewport = nil
@@ -427,11 +377,10 @@
             /// while the reader is just above the end would leave blank space
             /// below the last row.
             private func keepViewportInRange() {
-                if initialBottomAlignmentCompletion != nil || isBottomFollowingEnabled() {
-                    setContentOffsetY(bottomOffsetY)
-                } else if !isTracking, !isDecelerating {
-                    setContentOffsetY(
-                        min(max(contentOffset.y, -adjustedContentInset.top), bottomOffsetY))
+                if isFollowingBottom {
+                    scrollToBottom()
+                } else if let viewportTop {
+                    setViewportTop(viewportTop)
                 }
             }
 

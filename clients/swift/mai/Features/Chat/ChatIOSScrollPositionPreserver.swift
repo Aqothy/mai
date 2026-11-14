@@ -16,6 +16,7 @@
         private weak var document: (any ChatIOSScrollDocument)?
         /// Held until a document exists to carry the alignment out.
         private var pendingInitialBottomAlignment: (() -> Void)?
+        private var viewportInsets = UIEdgeInsets.zero
         private var userScrollStartY: CGFloat?
         private var lastOffsetY: CGFloat?
         private var lastViewport: Viewport?
@@ -56,6 +57,7 @@
                 document.delegate = self
             }
             document.isBottomFollowingEnabled = isBottomFollowingEnabled
+            document.setViewportInsets(viewportInsets)
             if let completion = pendingInitialBottomAlignment {
                 pendingInitialBottomAlignment = nil
                 document.beginInitialBottomAlignment(completion: completion)
@@ -69,6 +71,16 @@
             } else {
                 pendingInitialBottomAlignment = completion
             }
+        }
+
+        /// The bars and keyboard that cover the transcript's top and bottom.
+        /// SwiftUI reports no safe area to a view that ignores it, so the
+        /// scroll view cannot find these itself. Handed over here rather
+        /// than through the transcript's inputs, which would rebuild its
+        /// rows for every keyboard movement.
+        func setViewportInsets(_ insets: UIEdgeInsets) {
+            viewportInsets = insets
+            document?.setViewportInsets(insets)
         }
 
         /// Returns false until a document with rows is attached.
@@ -98,6 +110,15 @@
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
             finishUserScroll(in: scrollView)
+        }
+
+        /// An animated scroll runs to the offset it computed when it began;
+        /// the document's own pins while it flies do not stop it. Rows that
+        /// changed height on the way leave the end somewhere else by now.
+        func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+            if isBottomFollowingEnabled() {
+                document?.scrollToBottom(animated: false)
+            }
         }
 
         private func finishUserScroll(in scrollView: UIScrollView) {

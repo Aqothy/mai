@@ -7,7 +7,7 @@
         func runNativeLifecycleBenchmark() async {
             guard let window = Self.appWindow(),
                 let scroll = Self.transcriptScrollView(in: window),
-                let document = scroll.documentView as? any ChatMacScrollDocument
+                let document = scroll.documentView as? any ChatBenchmarkRowGeometry
             else { return }
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate()
@@ -102,7 +102,7 @@
         }
 
         private func anchorError(
-            document: any ChatMacScrollDocument, scroll: NSScrollView,
+            document: any ChatBenchmarkRowGeometry, scroll: NSScrollView,
             id: String?, within: CGFloat
         ) -> CGFloat {
             guard let id, let index = document.row(forStableIdentity: id) else {
@@ -113,7 +113,7 @@
         }
 
         private func waitForStableGeometry(
-            document: any ChatMacScrollDocument, scroll: NSScrollView
+            document: any ChatBenchmarkRowGeometry, scroll: NSScrollView
         ) async {
             let deadline = ContinuousClock.now + .seconds(30)
             var previous = CGRect.null

@@ -444,7 +444,7 @@ final class ChatBenchmarkModel {
             let elapsed = started.duration(to: .now).components
             let window = Self.appWindow()
             let scroll = window.flatMap { Self.transcriptScrollView(in: $0) }
-            let rows = (scroll?.documentView as? any ChatMacScrollDocument)?.numberOfRows ?? 0
+            let rows = (scroll?.documentView as? any ChatBenchmarkRowGeometry)?.numberOfRows ?? 0
             let report: [String: Any] = [
                 "label": "prepared-aligned-transcript",
                 "measurementKind": "preparedAlignedViewport",

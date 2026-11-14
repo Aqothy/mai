@@ -204,6 +204,7 @@
             let startY = userScrollStartY
             let endY = scrollView?.contentView.documentVisibleRect.minY
             userScrollStartY = nil
+            document?.isReaderScrolling = false
             noteUserScrollActivity(false)
             if ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
                 startY: startY,
@@ -218,6 +219,7 @@
             if userScrollStartY == nil {
                 userScrollStartY = scrollView?.contentView.documentVisibleRect.minY
             }
+            document?.isReaderScrolling = true
             noteUserScrollActivity(true)
         }
 
