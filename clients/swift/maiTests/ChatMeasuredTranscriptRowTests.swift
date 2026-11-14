@@ -17,7 +17,7 @@
                     contentRect = $0
                 }
             let hosting = NSHostingView(
-                rootView: ChatMeasuredTranscriptRow(id: "row", content: content) { reportedHeight = $0 })
+                rootView: ChatMeasuredTranscriptRow(revision: 1, content: content) { reportedHeight = $0 })
             hosting.sizingOptions = []
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 380, height: 400),

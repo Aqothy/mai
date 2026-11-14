@@ -76,9 +76,12 @@
         @discardableResult
         func pinToBottom(animated: Bool = false) -> Bool {
             guard let document else { return false }
-            if document.isDecelerating {
-                // The move stops the fling, and UIKit then reports no end
-                // of deceleration.
+            if !document.isTracking {
+                // Moving to the end ends whatever the reader's last scroll
+                // still does: a fling, or UIKit's own scroll animation (a
+                // status-bar tap), which assigning the offset leaves running.
+                // UIKit reports no end for either when stopped this way.
+                document.setContentOffset(document.contentOffset, animated: false)
                 finishUserScroll(in: document)
             }
             return document.scrollToBottom(animated: animated)

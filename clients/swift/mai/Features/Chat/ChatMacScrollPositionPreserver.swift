@@ -21,6 +21,14 @@
         private var isMonitoringScrollWheel = false
         private var isDiscreteScrollFinishScheduled = false
         private var userScrollStartY: CGFloat?
+        /// Between a trackpad momentum's first and last event over this
+        /// transcript.
+        private var isInMomentum = false
+        /// Set by a move to the end during momentum, until the momentum
+        /// ends. Its remaining events would carry the reader off the end
+        /// the app just showed, and AppKit has no call that stops
+        /// momentum; they are not delivered.
+        private var dropsMomentum = false
         private var handlers = ChatScrollIntentHandlers()
 
         func configure(_ handlers: ChatScrollIntentHandlers) {
@@ -35,6 +43,8 @@
                 removeInputEventMonitor()
                 userScrollStartY = nil
                 isMonitoringScrollWheel = false
+                isInMomentum = false
+                dropsMomentum = false
                 self.document = document
                 scrollView = document.enclosingScrollView
                 if let scrollView {
@@ -72,7 +82,11 @@
         /// Returns false until a document with rows is attached.
         @discardableResult
         func pinToBottom() -> Bool {
-            document?.scrollToBottom() ?? false
+            if isInMomentum {
+                dropsMomentum = true
+                finishUserScroll()
+            }
+            return document?.scrollToBottom() ?? false
         }
 
         // MARK: Reader input
@@ -105,7 +119,7 @@
                 case .keyDown:
                     self?.handleKeyDown(event)
                 case .scrollWheel:
-                    self?.handleScrollWheel(event)
+                    if self?.deliversScrollWheel(event) == false { return nil }
                 default:
                     break
                 }
@@ -147,12 +161,34 @@
             }
         }
 
-        private func handleScrollWheel(_ event: NSEvent) {
-            guard let scrollView, event.window === scrollView.window else {
-                return
+        /// Notes the reader's scroll, and returns false for momentum the
+        /// app's move to the end ended.
+        private func deliversScrollWheel(_ event: NSEvent) -> Bool {
+            guard let scrollView, event.window === scrollView.window else { return true }
+            if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
+                isInMomentum = false
+                dropsMomentum = false
+            }
+            let momentumEnds =
+                event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)
+            if momentumEnds {
+                isInMomentum = false
+            }
+            if dropsMomentum, !event.momentumPhase.isEmpty {
+                // The last event lets the scroll view end its live scroll.
+                if momentumEnds { dropsMomentum = false }
+                return momentumEnds
             }
             let point = scrollView.convert(event.locationInWindow, from: nil)
-            guard scrollView.bounds.contains(point) else { return }
+            guard scrollView.bounds.contains(point) else { return true }
+            if event.momentumPhase.contains(.began) {
+                isInMomentum = true
+            }
+            handleScrollWheel(event)
+            return true
+        }
+
+        private func handleScrollWheel(_ event: NSEvent) {
 
             if event.phase == .ended || event.phase == .cancelled {
                 guard isMonitoringScrollWheel else { return }

@@ -137,9 +137,9 @@ nonisolated struct ChatVirtualTranscriptGeometry {
             return offsets[start]
                 + min(place.offsetIntoSource, sourceEnd(from: start) - offsets[start])
         }
-        for (id, source) in zip(place.idsAbove, place.sourcesAbove).reversed() {
-            if let kept = indices[id] { return offsets[kept + 1] }
-            if let start = sourceStarts[source] { return sourceEnd(from: start) }
+        for index in place.idsAbove.indices.reversed() {
+            if let kept = indices[place.idsAbove[index]] { return offsets[kept + 1] }
+            if let start = sourceStarts[place.sourcesAbove[index]] { return sourceEnd(from: start) }
         }
         return nil
     }

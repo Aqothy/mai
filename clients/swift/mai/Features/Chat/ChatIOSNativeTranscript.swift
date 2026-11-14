@@ -291,11 +291,6 @@
             @discardableResult
             func scrollToBottom(animated: Bool) -> Bool {
                 endScrollAnimation()
-                if isDecelerating {
-                    // Assigning the offset leaves a fling running from the
-                    // new position, carrying the reader off the end.
-                    setContentOffset(contentOffset, animated: false)
-                }
                 // Without a window there are no frames to animate in.
                 guard animated, window != nil else { return scrollToBottom() }
                 guard let bottom = bottomViewportTop, let top = viewportTop else { return false }
@@ -433,7 +428,11 @@
                     // The display links retain their target.
                     preparationLink?.invalidate()
                     preparationLink = nil
-                    endScrollAnimation()
+                    if scrollAnimation != nil {
+                        // A jump has no frames off screen; it lands now.
+                        endScrollAnimation()
+                        scrollToBottom()
+                    }
                 }
             }
 
@@ -596,7 +595,7 @@
                 // takes no part in the safe area or keyboard avoidance, which
                 // would otherwise move a row's content as it scrolls under a bar.
                 let configuration = UIHostingConfiguration {
-                    ChatMeasuredTranscriptRow(id: id, content: content(index)) { [weak self] height in
+                    ChatMeasuredTranscriptRow(revision: revision, content: content(index)) { [weak self] height in
                         self?.noteHeight(height, id: id, revision: revision)
                     }
                 }
