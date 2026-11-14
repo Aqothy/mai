@@ -27,7 +27,6 @@
         private struct Viewport: Equatable {
             let size: CGSize
             let insets: UIEdgeInsets
-            let contentHeight: CGFloat
         }
 
         func configure(_ handlers: ChatScrollIntentHandlers) {
@@ -111,12 +110,13 @@
             finishUserScroll(in: scrollView)
         }
 
-        /// The tap's own scroll takes over from a running jump to the end,
-        /// and leaves the end. Its frames can't say so while streaming:
-        /// each one that comes with new content reads as layout.
+        /// The tap's own scroll takes over from a running jump to the end
+        /// or a fling, whose end UIKit then does not report.
         func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
             document?.endScrollAnimation()
-            handlers.noteKeyboardScrollIntent(false)
+            if !scrollView.isTracking {
+                finishUserScroll(in: scrollView)
+            }
             return true
         }
 
@@ -134,10 +134,7 @@
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             let offsetY = scrollView.contentOffset.y
             let viewport = Viewport(
-                size: scrollView.bounds.size,
-                insets: scrollView.adjustedContentInset,
-                contentHeight: scrollView.contentSize.height
-            )
+                size: scrollView.bounds.size, insets: scrollView.adjustedContentInset)
             defer {
                 lastOffsetY = offsetY
                 lastViewport = viewport

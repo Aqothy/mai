@@ -11,12 +11,10 @@ nonisolated enum ChatScrollFollowPolicy {
     /// it moved toward older content: then the reader is leaving, and the
     /// end zone's hysteresis must not pull them back.
     static func shouldRestoreFollowingAfterUserScroll(
-        startY: CGFloat?,
-        endY: CGFloat?,
+        startY: CGFloat,
+        endY: CGFloat,
         isNearBottom: Bool
     ) -> Bool {
-        guard isNearBottom else { return false }
-        guard let startY, let endY else { return true }
-        return endY >= startY - minimumMovement
+        isNearBottom && endY >= startY - minimumMovement
     }
 }

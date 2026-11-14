@@ -12,7 +12,7 @@ struct ChatScrollIntentHandlers {
 
     /// A reader's scroll that started at `startY` ended at `endY`; one that
     /// ended at the transcript's end resumes following.
-    func finishUserScroll(startY: CGFloat?, endY: CGFloat?, isNearBottom: Bool) {
+    func finishUserScroll(startY: CGFloat, endY: CGFloat, isNearBottom: Bool) {
         noteUserScrollActivity(false)
         if ChatScrollFollowPolicy.shouldRestoreFollowingAfterUserScroll(
             startY: startY, endY: endY, isNearBottom: isNearBottom)

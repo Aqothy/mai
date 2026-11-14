@@ -260,7 +260,11 @@
             func applyGeometryToViews() {
                 let size = CGSize(width: bounds.width, height: geometry.totalHeight)
                 if contentSize != size {
+                    // UIKit may move the offset into a smaller content
+                    // itself; that is layout, not the reader.
+                    isAdjustingScrollPosition = true
                     contentSize = size
+                    isAdjustingScrollPosition = false
                 }
                 repositionMountedRows()
             }

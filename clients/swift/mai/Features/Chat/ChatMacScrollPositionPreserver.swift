@@ -5,6 +5,10 @@
     /// a trackpad or wheel scroll, Page Up, Page Down or Space, or reaching
     /// the end.
     ///
+    /// A gesture scroll, its momentum included, is one AppKit live scroll of
+    /// this scroll view, wherever the pointer goes; a mouse wheel notch or a
+    /// key has no live scroll and is a scroll of its own.
+    ///
     /// The document keeps the reading position itself, in the same pass that
     /// changes row geometry. This controller only separates the reader's
     /// intent from the clip moves layout makes, and lands the first rows on
@@ -18,17 +22,15 @@
         // AppKit owns this opaque token. All mutation is main-actor confined;
         // deinit only needs to unregister it from AppKit.
         nonisolated(unsafe) private var inputEventMonitor: Any?
-        private var isMonitoringScrollWheel = false
         private var isDiscreteScrollFinishScheduled = false
         private var userScrollStartY: CGFloat?
-        /// Between AppKit's start and end of a live scroll of this
-        /// transcript: the reader's gesture and its momentum, wherever the
-        /// pointer is.
         private var isLiveScrolling = false
-        /// Set by a move to the end during a live scroll, until its
-        /// momentum ends. The momentum would carry the reader off the end
-        /// the app just showed, and AppKit has no call that stops it; its
-        /// events are not delivered.
+        /// From the reader's live scroll's momentum starting until it ends.
+        private var isCoasting = false
+        /// Set by a move to the end while the reader's scroll coasts, until
+        /// the momentum ends. It would carry the reader off the end the app
+        /// just showed, and AppKit has no call that stops it; its events
+        /// are not delivered.
         private var dropsMomentum = false
         private var handlers = ChatScrollIntentHandlers()
 
@@ -43,8 +45,8 @@
                 NotificationCenter.default.removeObserver(self)
                 removeInputEventMonitor()
                 userScrollStartY = nil
-                isMonitoringScrollWheel = false
                 isLiveScrolling = false
+                isCoasting = false
                 dropsMomentum = false
                 self.document = document
                 scrollView = document.enclosingScrollView
@@ -83,7 +85,7 @@
         /// Returns false until a document with rows is attached.
         @discardableResult
         func pinToBottom() -> Bool {
-            if isLiveScrolling {
+            if isCoasting {
                 dropsMomentum = true
                 finishUserScroll()
             }
@@ -108,6 +110,7 @@
                 return
             }
             isLiveScrolling = false
+            isCoasting = false
             dropsMomentum = false
             finishUserScroll()
         }
@@ -169,43 +172,40 @@
         /// app's move to the end ended.
         private func deliversScrollWheel(_ event: NSEvent) -> Bool {
             guard let scrollView, event.window === scrollView.window else { return true }
-            if dropsMomentum, !event.momentumPhase.isEmpty {
-                // The last event lets the scroll view end its live scroll.
+            if !event.momentumPhase.isEmpty {
+                // AppKit latches momentum to the scroll view its gesture
+                // began in; while this one live-scrolls, it is this one's.
+                guard isLiveScrolling else { return true }
                 let ends =
                     event.momentumPhase.contains(.ended)
                     || event.momentumPhase.contains(.cancelled)
+                if event.momentumPhase.contains(.began) {
+                    isCoasting = true
+                    dropsMomentum = false
+                }
+                if ends { isCoasting = false }
+                guard dropsMomentum else { return true }
+                // The last event lets the scroll view end its live scroll.
                 if ends { dropsMomentum = false }
                 return ends
             }
-            handleScrollWheel(event)
-            return true
-        }
-
-        private func handleScrollWheel(_ event: NSEvent) {
-            guard let scrollView else { return }
-            let point = scrollView.convert(event.locationInWindow, from: nil)
-            guard scrollView.bounds.contains(point) else { return }
-
-            if event.phase == .ended || event.phase == .cancelled {
-                guard isMonitoringScrollWheel else { return }
-                isMonitoringScrollWheel = false
-                finishUserScroll()
-                return
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+                // Content that can't scroll gets no live scroll to end it.
+                if !isLiveScrolling { finishUserScroll() }
+                return true
             }
-
-            let isVertical = abs(event.scrollingDeltaY)
-                >= abs(event.scrollingDeltaX)
-                && event.scrollingDeltaY != 0
-            guard isVertical else { return }
-
+            let point = scrollView.convert(event.locationInWindow, from: nil)
+            guard scrollView.bounds.contains(point),
+                abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
+                event.scrollingDeltaY != 0
+            else { return true }
+            // A gesture's movement is the reader's even after a move to the
+            // end finished their scroll; its live scroll's end finishes it.
             beginUserScroll()
-            if event.phase == .began || event.phase == .changed
-                || event.phase == .mayBegin
-            {
-                isMonitoringScrollWheel = true
-            } else {
+            if event.phase.isEmpty {
                 scheduleDiscreteScrollFinish()
             }
+            return true
         }
 
         /// A mouse wheel notch or a key has no end event; the scroll it
@@ -221,18 +221,22 @@
             }
         }
 
+        /// Safe to repeat: the live scroll's end can follow a finish the
+        /// app's move to the end already made.
         private func finishUserScroll() {
-            let startY = userScrollStartY
-            let endY = scrollView?.contentView.documentVisibleRect.minY
+            guard let startY = userScrollStartY else { return }
             userScrollStartY = nil
             document?.isReaderScrolling = false
             handlers.finishUserScroll(
-                startY: startY, endY: endY, isNearBottom: document?.isNearBottom ?? false)
+                startY: startY,
+                endY: scrollView?.contentView.documentVisibleRect.minY ?? startY,
+                isNearBottom: document?.isNearBottom ?? false)
         }
 
         private func beginUserScroll() {
+            guard let scrollView else { return }
             if userScrollStartY == nil {
-                userScrollStartY = scrollView?.contentView.documentVisibleRect.minY
+                userScrollStartY = scrollView.contentView.documentVisibleRect.minY
             }
             document?.isReaderScrolling = true
             handlers.noteUserScrollActivity(true)
