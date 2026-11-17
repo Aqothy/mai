@@ -80,7 +80,14 @@
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
             var initialBottomAlignmentCompletion: (() -> Void)?
-            private(set) var isAdjustingScrollPosition = false
+            var onReaderScroll: ((_ fromTop: CGFloat) -> Void)?
+            /// True while the document itself moves the content offset.
+            private var isAdjustingScrollPosition = false
+            /// The viewport the last move was seen in, and its top then.
+            /// UIKit moves the offset itself, inside the assignment, when
+            /// the insets or the size change; such a move is not the reader's.
+            private var lastViewport: Viewport?
+            private var lastViewportTop: CGFloat = 0
             private var scrollAnimation: ScrollAnimation?
             private(set) var rowRevisions = ChatTranscriptRowRevisions()
             var content: ((Int) -> Content)?
@@ -104,6 +111,11 @@
 
             /// The keyboard's own animation, so the transcript's end rises
             /// and falls with it instead of jumping to where it will stop.
+            private struct Viewport: Equatable {
+                let size: CGSize
+                let insets: UIEdgeInsets
+            }
+
             private struct KeyboardTransition {
                 let end: CFTimeInterval
                 let options: UIView.AnimationOptions
@@ -328,6 +340,30 @@
                 }
             }
 
+            /// Called for every content offset change. One the document did
+            /// not make, in an unchanged viewport, is the reader's.
+            func noteOffsetChange() {
+                let viewport = Viewport(size: bounds.size, insets: adjustedContentInset)
+                guard !isAdjustingScrollPosition, viewport == lastViewport else {
+                    recordViewport()
+                    return
+                }
+                let from = lastViewportTop
+                let top = contentOffset.y + adjustedContentInset.top
+                // Small steps add up: a slow scroll moves less than this each frame.
+                guard abs(top - from) > ChatScrollFollowPolicy.minimumMovement else { return }
+                lastViewportTop = top
+                // The reader took over from a jump to the end.
+                endScrollAnimation()
+                onReaderScroll?(from)
+            }
+
+            /// After the viewport changed, moved or not.
+            private func recordViewport() {
+                lastViewport = Viewport(size: bounds.size, insets: adjustedContentInset)
+                lastViewportTop = contentOffset.y + adjustedContentInset.top
+            }
+
             /// Stops a jump to the end where it is; the reader took over.
             func endScrollAnimation() {
                 scrollAnimation?.link.invalidate()
@@ -359,6 +395,7 @@
                         applyGeometryToViews()
                         keepViewportInRange()
                     }
+                    recordViewport()
                     tiledViewport = nil
                     alignInitialBottomIfPossible()
                 }
@@ -410,6 +447,7 @@
             override func adjustedContentInsetDidChange() {
                 super.adjustedContentInsetDidChange()
                 keepViewportInRange()
+                recordViewport()
                 setNeedsLayout()
             }
 

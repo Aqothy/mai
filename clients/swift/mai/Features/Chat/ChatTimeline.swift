@@ -143,9 +143,9 @@ struct ChatTimeline: View {
         .modifier(
             ChatBottomScrollRequestModifier(scrollState: scrollState) { animated in
                 #if os(macOS)
-                    scrollPositionPreserver.pinToBottom()
+                    _ = scrollPositionPreserver.pinToBottom()
                 #else
-                    scrollPositionPreserver.pinToBottom(animated: animated)
+                    _ = scrollPositionPreserver.pinToBottom(animated: animated)
                 #endif
             }
         )
@@ -272,7 +272,7 @@ struct ChatTimeline: View {
                 isBottomFollowingEnabled: {
                     scrollState.shouldFollowBottom
                 },
-                noteReaderLeftEnd: {
+                noteReaderAwayFromEnd: {
                     scrollState.noteScrollAwayFromEnd()
                 },
                 noteReaderReachedEnd: {

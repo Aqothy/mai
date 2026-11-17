@@ -283,11 +283,12 @@
                     }
                     return
                 }
+                // Small steps add up: a slow scroll moves less than this each event.
                 let fromY = lastClipY
+                guard abs(clip.bounds.minY - fromY) > ChatScrollFollowPolicy.minimumMovement
+                else { return }
                 lastClipY = clip.bounds.minY
-                if abs(lastClipY - fromY) > ChatScrollFollowPolicy.minimumMovement {
-                    onReaderScroll?(fromY + clip.contentInsets.top)
-                }
+                onReaderScroll?(fromY + clip.contentInsets.top)
             }
 
             /// Geometry changes move every resident row, including prepared neighbors.

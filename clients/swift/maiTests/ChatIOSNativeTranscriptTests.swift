@@ -94,7 +94,7 @@
             var moves: [ChatScrollFollowPolicy.ReaderScroll] = []
             preserver.configure(
                 ChatScrollIntentHandlers(
-                    noteReaderLeftEnd: { moves.append(.leftEnd) },
+                    noteReaderAwayFromEnd: { moves.append(.awayFromEnd) },
                     noteReaderReachedEnd: { moves.append(.reachedEnd) }))
             preserver.attach(to: document)
 
@@ -102,12 +102,12 @@
             document.contentOffset = CGPoint(x: 0, y: 300)
             document.contentOffset = CGPoint(x: 0, y: 600)
             document.contentOffset = CGPoint(x: 0, y: 800)
-            #expect(moves == [.leftEnd, .reachedEnd])
+            #expect(moves == [.awayFromEnd, .awayFromEnd, .reachedEnd])
 
             document.noteHeight(
                 200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
             #expect(document.contentOffset.y == 900)
-            #expect(moves == [.leftEnd, .reachedEnd])
+            #expect(moves == [.awayFromEnd, .awayFromEnd, .reachedEnd])
         }
 
         /// The jump lands on the end as it is when it arrives, and the
@@ -126,7 +126,7 @@
             preserver.configure(
                 ChatScrollIntentHandlers(
                     isBottomFollowingEnabled: { true },
-                    noteReaderLeftEnd: { moves.append(.leftEnd) },
+                    noteReaderAwayFromEnd: { moves.append(.awayFromEnd) },
                     noteReaderReachedEnd: { moves.append(.reachedEnd) }))
             preserver.attach(to: document)
             document.contentOffset = CGPoint(x: 0, y: 100)

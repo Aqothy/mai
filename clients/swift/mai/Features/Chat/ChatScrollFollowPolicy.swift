@@ -9,22 +9,25 @@ nonisolated enum ChatScrollFollowPolicy {
     static let minimumMovement: CGFloat = 0.5
 
     enum ReaderScroll: Equatable {
-        /// Toward older content: the reader stops following the end.
-        case leftEnd
-        /// Toward the end, arriving where it shows: following resumes.
+        /// The reader moved and does not show the end, or moved toward
+        /// older content: following stops.
+        case awayFromEnd
+        /// The reader moved toward the end and shows it: following resumes.
         case reachedEnd
     }
 
     /// What the reader moving the viewport's top from `from` to `to` means
-    /// for following. Positions past `endTop`, where the viewport shows the
-    /// end, count as the end, so an overscroll settling back is no move.
+    /// for following. Positions past the content's start or past `endTop`,
+    /// where the viewport shows the end, count as that edge, so an
+    /// overscroll settling back, or any pull on content shorter than the
+    /// viewport, is no move.
     static func readerScroll(
         from: CGFloat, to: CGFloat, endTop: CGFloat, isNearBottom: Bool
     ) -> ReaderScroll? {
-        let start = min(from, endTop)
-        let stop = min(to, endTop)
-        if stop < start - minimumMovement { return .leftEnd }
-        if stop > start + minimumMovement, isNearBottom { return .reachedEnd }
-        return nil
+        func clamped(_ top: CGFloat) -> CGFloat { min(max(top, 0), endTop) }
+        let start = clamped(from)
+        let stop = clamped(to)
+        guard abs(stop - start) > minimumMovement else { return nil }
+        return stop > start && isNearBottom ? .reachedEnd : .awayFromEnd
     }
 }

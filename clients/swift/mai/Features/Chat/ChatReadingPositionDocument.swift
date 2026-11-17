@@ -21,6 +21,10 @@ protocol ChatReadingPositionDocument: AnyObject {
     var bottomViewportTop: CGFloat? { get }
     /// Whether the viewport shows the content's end, or nearly.
     var isNearBottom: Bool { get }
+    /// Called with the viewport top a move began at when the viewport moves
+    /// and neither the document nor a viewport change moved it: the reader
+    /// did, by whatever input. Small steps add up until they count.
+    var onReaderScroll: ((_ fromTop: CGFloat) -> Void)? { get set }
     /// Moves the uncovered top of the viewport to `top`, kept inside the
     /// content unless the reader is holding it past an end.
     func setViewportTop(_ top: CGFloat)

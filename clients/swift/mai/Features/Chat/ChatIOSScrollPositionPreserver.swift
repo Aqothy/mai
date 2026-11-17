@@ -5,9 +5,9 @@
     /// and lands the first rows on the transcript's end.
     ///
     /// The document keeps the reading position itself, in the same pass that
-    /// changes row geometry, and flags the offset changes it makes. Any other
-    /// move in an unchanged viewport is the reader's, whatever the input: a
-    /// drag, a fling, a status-bar tap, a hardware keyboard or VoiceOver.
+    /// changes row geometry, and reports any offset change that neither it
+    /// nor a viewport change made: the reader's, whatever the input, a drag,
+    /// a fling, a status-bar tap, a hardware keyboard or VoiceOver.
     @MainActor
     final class ChatIOSScrollPositionPreserver: NSObject, UIScrollViewDelegate {
         // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -17,16 +17,7 @@
         /// Held until a document exists to carry the alignment out.
         private var pendingInitialBottomAlignment: (() -> Void)?
         private var viewportInsets = UIEdgeInsets.zero
-        private var lastViewportTop: CGFloat?
-        private var lastViewport: Viewport?
         private var handlers = ChatScrollIntentHandlers()
-
-        /// The viewport a move happened in. An offset that moves along with
-        /// it is the keyboard or a rotation, not the reader.
-        private struct Viewport: Equatable {
-            let size: CGSize
-            let insets: UIEdgeInsets
-        }
 
         func configure(_ handlers: ChatScrollIntentHandlers) {
             self.handlers = handlers
@@ -37,10 +28,13 @@
         func attach(to document: any ChatIOSScrollDocument) {
             if self.document !== document {
                 self.document?.delegate = nil
-                lastViewportTop = nil
-                lastViewport = nil
+                self.document?.onReaderScroll = nil
                 self.document = document
                 document.delegate = self
+                document.onReaderScroll = { [weak self, weak document] top in
+                    guard let self, let document else { return }
+                    self.handlers.noteReaderScroll(from: top, in: document)
+                }
             }
             document.isBottomFollowingEnabled = handlers.isBottomFollowingEnabled
             document.setViewportInsets(viewportInsets)
@@ -84,20 +78,7 @@
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let document, let top = document.viewportTop else { return }
-            let viewport = Viewport(
-                size: document.bounds.size, insets: document.adjustedContentInset)
-            defer {
-                lastViewportTop = top
-                lastViewport = viewport
-            }
-            guard !document.isAdjustingScrollPosition, viewport == lastViewport,
-                let lastViewportTop,
-                abs(top - lastViewportTop) > ChatScrollFollowPolicy.minimumMovement
-            else { return }
-            // The reader took over from a jump to the end.
-            document.endScrollAnimation()
-            handlers.noteReaderScroll(from: lastViewportTop, in: document)
+            document?.noteOffsetChange()
         }
     }
 #endif

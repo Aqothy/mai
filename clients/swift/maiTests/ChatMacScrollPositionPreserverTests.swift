@@ -17,24 +17,26 @@
                     topInset: 14, bottomInset: 102) == -14)
         }
 
-        /// A move toward older content leaves the end even inside the end
-        /// zone; only a move toward the end that shows it follows again, and
-        /// an overscroll settling back on the end is no move.
+        /// Only a move toward the end that shows it follows; any other move
+        /// stops following, even inside the end zone. Overscroll past either
+        /// edge, and any pull on content shorter than the viewport, is no move.
         @Test
-        func readerScrollsLeaveOrReachTheEndByDirection() {
+        func readerScrollsFollowOnlyWhenTheyReachTheEnd() {
             typealias Policy = ChatScrollFollowPolicy
-            let cases: [(name: String, from: CGFloat, to: CGFloat, isNearBottom: Bool, expected: Policy.ReaderScroll?)] = [
-                ("up inside the end zone", 1_000, 990, true, .leftEnd),
-                ("up far from the end", 500, 200, false, .leftEnd),
-                ("down onto the end", 900, 1_000, true, .reachedEnd),
-                ("down short of the end", 200, 500, false, nil),
-                ("overscroll settling back", 1_040, 1_000, true, nil),
-                ("subpixel noise", 1_000, 999.8, true, nil),
+            let cases: [(name: String, from: CGFloat, to: CGFloat, endTop: CGFloat, isNearBottom: Bool, expected: Policy.ReaderScroll?)] = [
+                ("up inside the end zone", 1_000, 990, 1_000, true, .awayFromEnd),
+                ("up far from the end", 500, 200, 1_000, false, .awayFromEnd),
+                ("down onto the end", 900, 1_000, 1_000, true, .reachedEnd),
+                ("down short of the end", 200, 500, 1_000, false, .awayFromEnd),
+                ("overscroll settling back on the end", 1_040, 1_000, 1_000, true, nil),
+                ("overscroll settling back on the start", -60, 0, 1_000, false, nil),
+                ("pull on short content", 0, -60, 0, true, nil),
+                ("subpixel noise", 1_000, 999.8, 1_000, true, nil),
             ]
             for testCase in cases {
                 #expect(
                     Policy.readerScroll(
-                        from: testCase.from, to: testCase.to, endTop: 1_000,
+                        from: testCase.from, to: testCase.to, endTop: testCase.endTop,
                         isNearBottom: testCase.isNearBottom) == testCase.expected,
                     "\(testCase.name)")
             }
@@ -59,19 +61,19 @@
             var moves: [ChatScrollFollowPolicy.ReaderScroll] = []
             preserver.configure(
                 ChatScrollIntentHandlers(
-                    noteReaderLeftEnd: { moves.append(.leftEnd) },
+                    noteReaderAwayFromEnd: { moves.append(.awayFromEnd) },
                     noteReaderReachedEnd: { moves.append(.reachedEnd) }))
             preserver.attach(to: document)
             #expect(preserver.pinToBottom())
 
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 500))
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 800))
-            #expect(moves == [.leftEnd, .reachedEnd])
+            #expect(moves == [.awayFromEnd, .reachedEnd])
 
             document.noteHeight(200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
             #expect(scroll.contentView.bounds.minY == 900)
             scroll.setFrameSize(NSSize(width: 300, height: 150))
-            #expect(moves == [.leftEnd, .reachedEnd])
+            #expect(moves == [.awayFromEnd, .reachedEnd])
         }
 
         @Test @MainActor

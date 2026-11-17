@@ -1,10 +1,10 @@
 import Foundation
 
 /// Where both platforms' scroll-intent controllers report what the reader
-/// did with the transcript. Only how each platform sees a move differs.
+/// did with the transcript.
 struct ChatScrollIntentHandlers {
     var isBottomFollowingEnabled: () -> Bool = { false }
-    var noteReaderLeftEnd: () -> Void = {}
+    var noteReaderAwayFromEnd: () -> Void = {}
     var noteReaderReachedEnd: () -> Void = {}
 
     /// The reader moved `document`'s viewport, by any input, from the
@@ -17,7 +17,7 @@ struct ChatScrollIntentHandlers {
         switch ChatScrollFollowPolicy.readerScroll(
             from: top, to: now, endTop: endTop, isNearBottom: document.isNearBottom)
         {
-        case .leftEnd: noteReaderLeftEnd()
+        case .awayFromEnd: noteReaderAwayFromEnd()
         case .reachedEnd: noteReaderReachedEnd()
         case nil: break
         }
