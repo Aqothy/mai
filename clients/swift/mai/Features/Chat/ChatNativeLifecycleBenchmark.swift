@@ -34,12 +34,10 @@
             }
             let initialRows = document.numberOfRows
             var visible = window.occlusionState.contains(.visible)
-            Self.beginSyntheticUserScroll(on: scroll)
             Self.setContentOffsetY(100, on: scroll)
             let oldRow = document.rows(in: scroll.contentView.documentVisibleRect).location
             let anchorID = document.stableIdentity(forRow: oldRow)
             let within = scroll.contentView.bounds.minY - document.rect(ofRow: oldRow).minY
-            Self.endSyntheticUserScroll(on: scroll)
             let deadline = ContinuousClock.now + .seconds(30)
             while document.numberOfRows <= initialRows, ContinuousClock.now < deadline {
                 visible = visible && window.occlusionState.contains(.visible)
@@ -51,9 +49,7 @@
                 document: document, scroll: scroll, id: anchorID, within: within)
 
             // Put the viewport away from the history trigger before reflowing.
-            Self.beginSyntheticUserScroll(on: scroll)
             Self.setContentOffsetY(document.bounds.height / 2, on: scroll)
-            Self.endSyntheticUserScroll(on: scroll)
             await waitForStableGeometry(document: document, scroll: scroll)
             let resizeRow = document.rows(in: scroll.contentView.documentVisibleRect).location
             let resizeID = document.stableIdentity(forRow: resizeRow)

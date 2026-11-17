@@ -1,13 +1,13 @@
 #if os(iOS)
     import UIKit
 
-    /// Tells the chat's scroll state what the reader did with the transcript:
-    /// a drag, a keyboard or accessibility scroll, or reaching the end.
+    /// Tells the chat's scroll state what the reader did with the transcript,
+    /// and lands the first rows on the transcript's end.
     ///
     /// The document keeps the reading position itself, in the same pass that
-    /// changes row geometry. This controller only separates the reader's
-    /// intent from the offset changes layout makes, and lands the first rows
-    /// on the transcript's end.
+    /// changes row geometry, and flags the offset changes it makes. Any other
+    /// move in an unchanged viewport is the reader's, whatever the input: a
+    /// drag, a fling, a status-bar tap, a hardware keyboard or VoiceOver.
     @MainActor
     final class ChatIOSScrollPositionPreserver: NSObject, UIScrollViewDelegate {
         // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -17,12 +17,11 @@
         /// Held until a document exists to carry the alignment out.
         private var pendingInitialBottomAlignment: (() -> Void)?
         private var viewportInsets = UIEdgeInsets.zero
-        private var userScrollStartY: CGFloat?
-        private var lastOffsetY: CGFloat?
+        private var lastViewportTop: CGFloat?
         private var lastViewport: Viewport?
         private var handlers = ChatScrollIntentHandlers()
 
-        /// The viewport a scroll happened in. An offset that moves along with
+        /// The viewport a move happened in. An offset that moves along with
         /// it is the keyboard or a rotation, not the reader.
         private struct Viewport: Equatable {
             let size: CGSize
@@ -38,8 +37,7 @@
         func attach(to document: any ChatIOSScrollDocument) {
             if self.document !== document {
                 self.document?.delegate = nil
-                userScrollStartY = nil
-                lastOffsetY = nil
+                lastViewportTop = nil
                 lastViewport = nil
                 self.document = document
                 document.delegate = self
@@ -78,79 +76,28 @@
             if !document.isTracking {
                 // Moving to the end ends whatever the reader's last scroll
                 // still does: a fling, or UIKit's own scroll animation (a
-                // status-bar tap), which assigning the offset leaves running.
-                // UIKit reports no end for either when stopped this way.
+                // status-bar tap), which would otherwise carry on from the
+                // end and take the reader away from it again.
                 document.setContentOffset(document.contentOffset, animated: false)
-                finishUserScroll(in: document)
             }
             return document.scrollToBottom(animated: animated)
         }
 
-        // MARK: Reader input
-
-        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-            document?.endScrollAnimation()
-            document?.completeInitialBottomAlignment()
-            if userScrollStartY == nil {
-                userScrollStartY = scrollView.contentOffset.y
-            }
-            handlers.noteUserScrollActivity(true)
-        }
-
-        func scrollViewDidEndDragging(
-            _ scrollView: UIScrollView,
-            willDecelerate decelerate: Bool
-        ) {
-            if !decelerate {
-                finishUserScroll(in: scrollView)
-            }
-        }
-
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-            finishUserScroll(in: scrollView)
-        }
-
-        /// The tap's own scroll takes over from a running jump to the end
-        /// or a fling, whose end UIKit then does not report.
-        func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
-            document?.endScrollAnimation()
-            if !scrollView.isTracking {
-                finishUserScroll(in: scrollView)
-            }
-            return true
-        }
-
-        private func finishUserScroll(in scrollView: UIScrollView) {
-            guard let startY = userScrollStartY else { return }
-            userScrollStartY = nil
-            handlers.finishUserScroll(
-                startY: startY, endY: scrollView.contentOffset.y,
-                isNearBottom: document?.isNearBottom ?? false)
-        }
-
-        /// A status-bar tap, a hardware keyboard and VoiceOver scroll without
-        /// a drag. Movement toward older content still means the reader left
-        /// the end; movement the document or a viewport change made does not.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            let offsetY = scrollView.contentOffset.y
+            guard let document, let top = document.viewportTop else { return }
             let viewport = Viewport(
-                size: scrollView.bounds.size, insets: scrollView.adjustedContentInset)
+                size: document.bounds.size, insets: document.adjustedContentInset)
             defer {
-                lastOffsetY = offsetY
+                lastViewportTop = top
                 lastViewport = viewport
             }
-            guard userScrollStartY == nil,
-                !scrollView.isTracking, !scrollView.isDecelerating,
-                document?.isAdjustingScrollPosition == false,
-                viewport == lastViewport,
-                let lastOffsetY
+            guard !document.isAdjustingScrollPosition, viewport == lastViewport,
+                let lastViewportTop,
+                abs(top - lastViewportTop) > ChatScrollFollowPolicy.minimumMovement
             else { return }
-
-            if offsetY < lastOffsetY - ChatScrollFollowPolicy.minimumMovement {
-                handlers.noteKeyboardScrollIntent(false)
-            } else if offsetY > lastOffsetY + ChatScrollFollowPolicy.minimumMovement {
-                handlers.noteKeyboardScrollIntent(true)
-            }
+            // The reader took over from a jump to the end.
+            document.endScrollAnimation()
+            handlers.noteReaderScroll(from: lastViewportTop, in: document)
         }
     }
 #endif

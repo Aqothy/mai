@@ -9,11 +9,10 @@
         /// True while the document itself moves the content offset, which
         /// is layout and not the reader's intent.
         var isAdjustingScrollPosition: Bool { get }
-        var isNearBottom: Bool { get }
         /// Moves to the exact end of the content, animated for a reader's
         /// request. Returns false until the document has rows and a
-        /// viewport. The scroll-intent controller, which owns the reader's
-        /// scroll, ends any fling or scroll animation first.
+        /// viewport. The scroll-intent controller, which sees the reader's
+        /// moves, ends any fling or scroll animation first.
         @discardableResult
         func scrollToBottom(animated: Bool) -> Bool
         /// Stops an animated jump to the end where it is; the reader took

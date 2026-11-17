@@ -91,7 +91,7 @@
             let geometryReporter = ChatScrollGeometryReporter()
             var isBottomFollowingEnabled: () -> Bool = { false }
             var initialBottomAlignmentCompletion: (() -> Void)?
-            var isReaderScrolling = false
+            var onReaderScroll: ((_ fromTop: CGFloat) -> Void)?
             /// The clip's size and insets when last seen, and where its
             /// origin was. A change to the first is layout, not the reader.
             private var lastViewport: Viewport?
@@ -265,22 +265,28 @@
             /// A resize or an inset change moves the clip without the reader:
             /// AppKit keeps its origin or constrains it to the new extent.
             /// While following, the viewport lands on the new end; otherwise
-            /// the clip stays where the reader left it.
-            private func keepReadingPositionThroughViewportChange(_ scroll: NSScrollView) {
+            /// the clip stays where it was. Any other move the document did
+            /// not make is the reader's.
+            private func noteClipMove(_ scroll: NSScrollView) {
                 let clip = scroll.contentView
                 let viewport = Viewport(clip)
-                guard let lastViewport, lastViewport != viewport else {
+                guard let lastViewport else {
                     self.lastViewport = viewport
                     lastClipY = clip.bounds.minY
                     return
                 }
-                if isFollowingBottom {
-                    scrollToBottom()
-                } else if !isReaderScrolling {
-                    moveClip(toY: lastClipY, in: scroll)
-                } else {
-                    self.lastViewport = viewport
-                    lastClipY = clip.bounds.minY
+                if lastViewport != viewport {
+                    if isFollowingBottom {
+                        scrollToBottom()
+                    } else {
+                        moveClip(toY: lastClipY, in: scroll)
+                    }
+                    return
+                }
+                let fromY = lastClipY
+                lastClipY = clip.bounds.minY
+                if abs(lastClipY - fromY) > ChatScrollFollowPolicy.minimumMovement {
+                    onReaderScroll?(fromY + clip.contentInsets.top)
                 }
             }
 
@@ -344,7 +350,7 @@
             @objc func viewportChanged() {
                 guard !isApplyingHeights, let scroll = enclosingScrollView else { return }
                 matchViewportWidth(scroll)
-                keepReadingPositionThroughViewportChange(scroll)
+                noteClipMove(scroll)
                 // The first install can come before the viewport has a size.
                 alignInitialBottomIfPossible()
                 notifyGeometryChange()

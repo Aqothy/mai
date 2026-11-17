@@ -19,6 +19,8 @@ protocol ChatReadingPositionDocument: AnyObject {
     /// The `viewportTop` that shows the content's end, or nil until there
     /// are rows and a viewport.
     var bottomViewportTop: CGFloat? { get }
+    /// Whether the viewport shows the content's end, or nearly.
+    var isNearBottom: Bool { get }
     /// Moves the uncovered top of the viewport to `top`, kept inside the
     /// content unless the reader is holding it past an end.
     func setViewportTop(_ top: CGFloat)
@@ -68,18 +70,11 @@ extension ChatReadingPositionDocument {
         alignInitialBottomIfPossible()
     }
 
-    /// Ends a pending alignment where the viewport is; the reader took over
-    /// before the first rows arrived.
-    func completeInitialBottomAlignment() {
-        guard let completion = initialBottomAlignmentCompletion else { return }
+    func alignInitialBottomIfPossible() {
+        guard let completion = initialBottomAlignmentCompletion, scrollToBottom() else { return }
         initialBottomAlignmentCompletion = nil
         // This can run inside a layout pass, where the completion's SwiftUI
         // state change must not land.
         Task { @MainActor in completion() }
-    }
-
-    func alignInitialBottomIfPossible() {
-        guard initialBottomAlignmentCompletion != nil, scrollToBottom() else { return }
-        completeInitialBottomAlignment()
     }
 }

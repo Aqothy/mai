@@ -13,7 +13,6 @@ final class ChatScrollState {
     var isNearBottom = true
     private(set) var shouldFollowBottom = true
     private var resumesWhenEndBecomesVisible = true
-    private(set) var isUserScrolling = false
     private(set) var bottomScrollRequest = BottomScrollRequest()
 
     func requestScrollToBottom(animated: Bool = false) {
@@ -51,40 +50,17 @@ final class ChatScrollState {
         }
     }
 
-    /// Records explicit native input toward older content without leaving the
-    /// state stuck in an active-scroll phase. Layout geometry alone must not
-    /// call this: row-height correction can move the viewport without intent.
+    /// The reader moved toward older content. Layout must not call this:
+    /// row-height correction can move the viewport without intent. Whether
+    /// the end is still in view comes from the next geometry report.
     func noteScrollAwayFromEnd() {
         resumesWhenEndBecomesVisible = false
-        if isNearBottom {
-            isNearBottom = false
-        }
         if shouldFollowBottom {
             shouldFollowBottom = false
         }
     }
 
-    /// Records an explicit keyboard request toward the end without jumping.
-    /// Visibility restores following only if the native scroll actually
-    /// reaches the end.
-    func noteScrollTowardEnd() {
-        resumesWhenEndBecomesVisible = true
-    }
-
-    func noteUserScrollActivity(isActive: Bool) {
-        if isUserScrolling != isActive {
-            isUserScrolling = isActive
-        }
-        if isActive {
-            resumesWhenEndBecomesVisible = false
-            if shouldFollowBottom {
-                shouldFollowBottom = false
-            }
-        }
-    }
-
-    /// Restores automatic following after keyboard or accessibility scrolling
-    /// reaches the end without participating in a live-scroll phase.
+    /// The reader's scroll toward the end arrived where it shows.
     func noteScrollReturnedToEnd() {
         resumesWhenEndBecomesVisible = true
         if !isNearBottom {
@@ -97,8 +73,5 @@ final class ChatScrollState {
 
     func reset() {
         noteScrollReturnedToEnd()
-        if isUserScrolling {
-            isUserScrolling = false
-        }
     }
 }

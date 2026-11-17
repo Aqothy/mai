@@ -6,9 +6,9 @@
     /// document follows.
     @MainActor
     protocol ChatMacScrollDocument: NSView, ChatReadingPositionDocument {
-        var isNearBottom: Bool { get }
-        /// Set while the reader scrolls. A resize then leaves the clip
-        /// where the reader's scroll put it.
-        var isReaderScrolling: Bool { get set }
+        /// Called with the viewport top a move began at when the clip moves
+        /// and neither the document nor a viewport change moved it: the
+        /// reader did, by whatever input.
+        var onReaderScroll: ((_ fromTop: CGFloat) -> Void)? { get set }
     }
 #endif

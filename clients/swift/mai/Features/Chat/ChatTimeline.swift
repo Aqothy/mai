@@ -270,18 +270,11 @@ struct ChatTimeline: View {
                 isBottomFollowingEnabled: {
                     scrollState.shouldFollowBottom
                 },
-                noteUserScrollActivity: { isActive in
-                    scrollState.noteUserScrollActivity(isActive: isActive)
+                noteReaderLeftEnd: {
+                    scrollState.noteScrollAwayFromEnd()
                 },
-                noteUserReachedEnd: {
+                noteReaderReachedEnd: {
                     scrollState.noteScrollReturnedToEnd()
-                },
-                noteKeyboardScrollIntent: { towardEnd in
-                    if towardEnd {
-                        scrollState.noteScrollTowardEnd()
-                    } else {
-                        scrollState.noteScrollAwayFromEnd()
-                    }
                 }
             )
         )

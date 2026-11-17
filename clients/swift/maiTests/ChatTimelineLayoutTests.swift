@@ -82,24 +82,20 @@ struct ChatTimelineLayoutTests {
         }
     #endif
 
-    /// Follow intent after sequences of native scroll, visibility and
+    /// Follow intent after sequences of reader scroll, visibility and
     /// expansion signals.
     @Test
     func scrollIntentFollowsOnlyWhenTheReaderIsAtTheEnd() {
         typealias Step = (ChatScrollState) -> Void
-        let userScroll: (Bool) -> Step = { active in { $0.noteUserScrollActivity(isActive: active) } }
         let endVisible: (Bool) -> Step = { visible in { $0.noteEndVisibility(visible) } }
         let away: Step = { $0.noteScrollAwayFromEnd() }
-        let towardEnd: Step = { $0.noteScrollTowardEnd() }
         let returned: Step = { $0.noteScrollReturnedToEnd() }
         let expansion: Step = { $0.noteContentExpansion() }
         let cases: [(name: String, steps: [Step], follows: Bool, nearBottom: Bool)] = [
-            ("jump to bottom during a gesture", [userScroll(true), { $0.requestScrollToBottom(animated: true) }], true, true),
-            ("scroll away and release", [userScroll(true), endVisible(false), userScroll(false)], false, false),
-            ("scroll ending at the end", [userScroll(true), endVisible(true), userScroll(false), returned], true, true),
-            ("transient end visibility mid-gesture", [userScroll(true), endVisible(false), endVisible(true), userScroll(false)], false, true),
-            ("keyboard toward end before reaching it", [away, towardEnd], false, false),
-            ("keyboard toward end then reaching it", [away, towardEnd, endVisible(true)], true, true),
+            ("jump to bottom after scrolling away", [away, endVisible(false), { $0.requestScrollToBottom(animated: true) }, endVisible(true)], true, true),
+            ("scroll away", [away, endVisible(false)], false, false),
+            ("scroll away inside the end zone", [away], false, true),
+            ("scroll away and back to the end", [away, endVisible(false), returned], true, true),
             ("content growth while following", [endVisible(false)], true, true),
             ("expansion", [expansion], false, true),
             ("expansion pushing the end away", [expansion, endVisible(false)], false, false),

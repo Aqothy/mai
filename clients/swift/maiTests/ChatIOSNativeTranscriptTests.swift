@@ -81,8 +81,8 @@
             #expect(completed == 1)
         }
 
-        /// Offset changes the reader makes without a drag (a status-bar tap,
-        /// a hardware keyboard) are intent; the document's own are not.
+        /// Offset changes the reader makes, by any input, are intent; the
+        /// document's own are not.
         @Test func onlyTheReadersOwnScrollsCountAsIntent() {
             let document = makeDocument()
             defer { document.tearDown() }
@@ -91,20 +91,23 @@
                 heights: Array(repeating: 100, count: 10), width: 300, ids: ids,
                 content: rowContent)
             let preserver = ChatIOSScrollPositionPreserver()
-            var intents: [Bool] = []
+            var moves: [ChatScrollFollowPolicy.ReaderScroll] = []
             preserver.configure(
-                ChatScrollIntentHandlers(noteKeyboardScrollIntent: { intents.append($0) }))
+                ChatScrollIntentHandlers(
+                    noteReaderLeftEnd: { moves.append(.leftEnd) },
+                    noteReaderReachedEnd: { moves.append(.reachedEnd) }))
             preserver.attach(to: document)
 
             document.contentOffset = CGPoint(x: 0, y: 500)
             document.contentOffset = CGPoint(x: 0, y: 300)
             document.contentOffset = CGPoint(x: 0, y: 600)
-            #expect(intents == [false, true])
+            document.contentOffset = CGPoint(x: 0, y: 800)
+            #expect(moves == [.leftEnd, .reachedEnd])
 
             document.noteHeight(
                 200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
-            #expect(document.contentOffset.y == 700)
-            #expect(intents == [false, true])
+            #expect(document.contentOffset.y == 900)
+            #expect(moves == [.leftEnd, .reachedEnd])
         }
 
         /// The jump lands on the end as it is when it arrives, and the
@@ -119,14 +122,15 @@
                 heights: Array(repeating: 100, count: 10), width: 300, ids: ids,
                 content: rowContent)
             let preserver = ChatIOSScrollPositionPreserver()
-            var intents: [Bool] = []
+            var moves: [ChatScrollFollowPolicy.ReaderScroll] = []
             preserver.configure(
                 ChatScrollIntentHandlers(
                     isBottomFollowingEnabled: { true },
-                    noteKeyboardScrollIntent: { intents.append($0) }))
+                    noteReaderLeftEnd: { moves.append(.leftEnd) },
+                    noteReaderReachedEnd: { moves.append(.reachedEnd) }))
             preserver.attach(to: document)
             document.contentOffset = CGPoint(x: 0, y: 100)
-            intents.removeAll()
+            moves.removeAll()
 
             #expect(preserver.pinToBottom(animated: true))
             // A row grows while the jump flies; the jump, not a pin, moves
@@ -135,7 +139,7 @@
             #expect(document.contentOffset.y == 100)
             document.advanceScrollAnimation(to: CACurrentMediaTime() + 1)
             #expect(document.contentOffset.y == document.contentSize.height - 200)
-            #expect(intents.isEmpty)
+            #expect(moves.isEmpty)
         }
 
         /// A streaming reply's live row becomes its settled blocks while the

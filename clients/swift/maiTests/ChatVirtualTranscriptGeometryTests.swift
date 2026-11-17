@@ -190,29 +190,5 @@ import Testing
             #expect(abs(scroll.contentView.bounds.maxY - document.bounds.maxY) < 0.000001)
             document.preparationTask?.cancel()
         }
-
-        @Test @MainActor func userScrollCancelsInitialAlignmentWithoutHidingTimeline() async {
-            let document = ChatNativeTranscript<Text>.VirtualDocument()
-            document.nativeRowFactory = { _, reused in reused ?? NSView() }
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
-            scroll.documentView = document
-            document.install(heights: Array(repeating: 100, count: 10), width: 300) {
-                Text("Row \($0)")
-            }
-            let preserver = ChatMacScrollPositionPreserver()
-            preserver.attach(to: document)
-            var completed = 0
-            preserver.beginInitialBottomAlignment { completed += 1 }
-            NotificationCenter.default.post(
-                name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: 350))
-            for _ in 0..<20 { await Task.yield() }
-            #expect(completed == 1)
-            #expect(scroll.contentView.bounds.minY == 350)
-            NotificationCenter.default.post(
-                name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-            document.preparationTask?.cancel()
-        }
-
     }
 #endif

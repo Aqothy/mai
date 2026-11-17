@@ -323,11 +323,7 @@ final class ChatBenchmarkModel {
         #endif
         Self.note("benchmark start: \(label)")
         isRunning = true
-        Self.beginSyntheticUserScroll(on: scrollView)
-        defer {
-            Self.endSyntheticUserScroll(on: scrollView)
-            isRunning = false
-        }
+        defer { isRunning = false }
 
         let document = Self.transcriptDocument(of: scrollView)
         let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
@@ -411,32 +407,6 @@ final class ChatBenchmarkModel {
             scrubPeriod > 0
             ? "full-history-scrub-\(scrubPeriod)s-\(maximumSweepSeconds * 2)s" : label
         return finish(monitor, label: measuredLabel)
-    }
-
-    /// The benchmark writes native offsets directly, so bracket the sweep in
-    /// the same AppKit live-scroll lifecycle as a real trackpad gesture. This
-    /// keeps production intent detection enabled without making layout-only
-    /// bounds changes look like user input.
-    static func beginSyntheticUserScroll(
-        on scrollView: ChatBenchmarkScrollView
-    ) {
-        #if os(macOS)
-            NotificationCenter.default.post(
-                name: NSScrollView.willStartLiveScrollNotification,
-                object: scrollView
-            )
-        #endif
-    }
-
-    static func endSyntheticUserScroll(
-        on scrollView: ChatBenchmarkScrollView
-    ) {
-        #if os(macOS)
-            NotificationCenter.default.post(
-                name: NSScrollView.didEndLiveScrollNotification,
-                object: scrollView
-            )
-        #endif
     }
 
     #if os(macOS)
