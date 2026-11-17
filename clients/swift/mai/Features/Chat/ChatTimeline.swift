@@ -250,7 +250,9 @@ struct ChatTimeline: View {
                     }
                 #endif
             }
-            isAwaitingInitialBottom = true
+            // Once aligned, the transcript keeps the reader's place when the
+            // chat is shown again.
+            guard isAwaitingInitialBottom else { return }
             scrollPositionPreserver.beginInitialBottomAlignment {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
