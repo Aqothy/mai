@@ -30,12 +30,15 @@ def main():
     parser.add_argument("app", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize"], default="scroll")
+    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize", "resize"], default="scroll")
     parser.add_argument("--turns", type=int, default=300)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--scrub-period", type=float, default=0)
     parser.add_argument("--paginated", action="store_true")
     parser.add_argument("--float-window", action="store_true", help="Float only the launched app window in AeroSpace for resize testing.")
+    parser.add_argument("--with-chrome", action="store_true", help="Keep the sidebar, composer and toolbar; by default only the transcript shows.")
+    parser.add_argument("--app-arg", action="append", default=[], metavar="ARG",
+                        help="Extra launch argument for the app, repeatable, e.g. --app-arg=-ChatTranscriptEngine --app-arg=new.")
     args = parser.parse_args()
     if args.plan == "scrub" and args.scrub_period <= 0:
         parser.error("The scrub plan requires a positive --scrub-period.")
@@ -73,6 +76,7 @@ def main():
                         if args.plan in ("sessions", "sessionsResize") else
                         "display-link callback pacing, not presented FPS"),
         "paginated": args.paginated, "floatingBenchmarkWindow": args.float_window,
+        "transcriptOnly": not args.with_chrome, "appArguments": args.app_arg,
     }
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     for run in range(1, args.runs + 1):
@@ -85,7 +89,9 @@ def main():
                    "-ChatBenchmarkAnchorRow", "4800",
                    "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO",
                    "-ChatBenchmarkScrubPeriod", str(args.scrub_period),
-                   "-ChatBenchmarkSyntheticTurns", str(args.turns)]
+                   "-ChatBenchmarkSyntheticTurns", str(args.turns),
+                   "-ChatBenchmarkTranscriptOnly", "NO" if args.with_chrome else "YES",
+                   *args.app_arg]
         subprocess.run(command, check=True)
         started = time.monotonic()
         woke = False

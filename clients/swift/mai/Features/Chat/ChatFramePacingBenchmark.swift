@@ -49,6 +49,12 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     let framesOver120HzBudget: Int
     /// Frames whose main-thread work alone exceeds one 60 Hz refresh.
     let framesOver60HzBudget: Int
+    /// The new transcript's rows drawn on screen instead of ahead of it, and
+    /// visible rows laid out on the main thread, during the pass (PLAN D3).
+    /// Nil for the old transcript.
+    var syncFallbackDraws: Int?
+    var syncLayouts: Int?
+    var arrivalDraws: Int?
 
     var summary: String {
         """
@@ -292,6 +298,16 @@ final class ChatBenchmarkModel {
     )
 
     private(set) var isRunning = false
+    @ObservationIgnored private var fallbackDrawsAtStart = 0
+    @ObservationIgnored private var syncLayoutsAtStart = 0
+    @ObservationIgnored private var arrivalDrawsAtStart = 0
+
+    private func noteStart(_ label: String) {
+        fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
+        syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
+        arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
+        Self.note("benchmark start: \(label)")
+    }
 
     private static func note(_ message: String) {
         logger.notice("\(message, privacy: .public)")
@@ -321,7 +337,7 @@ final class ChatBenchmarkModel {
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate()
         #endif
-        Self.note("benchmark start: \(label)")
+        noteStart(label)
         isRunning = true
         defer { isRunning = false }
 
@@ -339,6 +355,11 @@ final class ChatBenchmarkModel {
                 "anchor row=\(anchorRow) x=\(horizontalOrigin) preservedX=true offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
             )
         }
+        // The anchor jump lands somewhere unseen on purpose; only the sweep
+        // after it counts toward rows drawn on screen instead of ahead.
+        fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
+        syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
+        arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
         let monitor = ChatFramePacingMonitor()
         var scrollsUpward = true
         let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
@@ -433,6 +454,59 @@ final class ChatBenchmarkModel {
         }
     #endif
 
+    #if os(macOS)
+        /// Narrows the window from its pinned width to `minimumWidth` and back
+        /// over `seconds`, one step per display frame, while recording frame
+        /// pacing: the transcript reflows below its content cap. A scripted
+        /// resize is not AppKit live resize (no `inLiveResize`), so a
+        /// transcript that waits for the end of live resize sees every step
+        /// as a width change.
+        func runResizeBenchmark(
+            in window: NSWindow, minimumWidth: CGFloat, seconds: TimeInterval, label: String
+        ) async -> ChatFramePacingReport? {
+            guard !isRunning else { return nil }
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate()
+            noteStart(label)
+            isRunning = true
+            defer { isRunning = false }
+            let startSize = window.contentRect(forFrameRect: window.frame).size
+            window.contentMinSize = NSSize(width: minimumWidth, height: startSize.height)
+            window.contentMaxSize = startSize
+            let monitor = ChatFramePacingMonitor()
+            var started: CFTimeInterval?
+            var finished = false
+            var encounteredOcclusion = false
+            await withCheckedContinuation { continuation in
+                monitor.start(
+                    in: window, maximumWallSeconds: seconds + 15,
+                    onFailure: { reason in
+                        guard !finished else { return }
+                        finished = true
+                        Self.note("invalid measurement: \(reason)")
+                        continuation.resume()
+                    }
+                ) { link in
+                    guard !finished else { return }
+                    if !Self.isWindowVisible(window) { encounteredOcclusion = true }
+                    started = started ?? link.timestamp
+                    let progress = (link.timestamp - (started ?? link.timestamp)) / seconds
+                    let fraction = progress <= 0.5 ? progress * 2 : max(0, 2 - progress * 2)
+                    let width = (startSize.width - (startSize.width - minimumWidth) * fraction)
+                        .rounded()
+                    window.setContentSize(NSSize(width: width, height: startSize.height))
+                    if progress >= 1 {
+                        finished = true
+                        continuation.resume()
+                    }
+                }
+            }
+            window.setContentSize(startSize)
+            if encounteredOcclusion { Self.note("invalid measurement: visible=false during resize") }
+            return finish(monitor, label: label)
+        }
+    #endif
+
     /// Records frame pacing while something else (a streaming reply) drives
     /// the content, until `isDone` reports completion or the cap elapses.
     func runStreamingBenchmark(
@@ -450,7 +524,7 @@ final class ChatBenchmarkModel {
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate()
         #endif
-        Self.note("benchmark start: \(label)")
+        noteStart(label)
         isRunning = true
         defer { isRunning = false }
 
@@ -487,7 +561,12 @@ final class ChatBenchmarkModel {
         _ monitor: ChatFramePacingMonitor,
         label: String
     ) -> ChatFramePacingReport? {
-        guard let report = monitor.stop(label: label) else { return nil }
+        guard var report = monitor.stop(label: label) else { return nil }
+        if TranscriptEngine.isNewEngineEnabled {
+            report.syncFallbackDraws = TranscriptDebugCounters.syncFallbackDraws - fallbackDrawsAtStart
+            report.syncLayouts = TranscriptDebugCounters.syncLayouts - syncLayoutsAtStart
+            report.arrivalDraws = TranscriptDebugCounters.arrivalDraws - arrivalDrawsAtStart
+        }
         Self.logger.notice("\(report.summary, privacy: .public)")
         Self.logger.notice(
             "CHAT_BENCHMARK_RESULT \(report.machineReadable, privacy: .public)"
@@ -710,6 +789,18 @@ nonisolated enum ChatBenchmarkAutoRun {
         setvbuf(stdout, nil, _IOLBF, 0)
     }()
 
+    /// Opened once for the process: opening, seeking and closing a handle per
+    /// line cost the streaming benchmark ~2 % of its main thread.
+    private static let traceFile: FileHandle? = {
+        let url = URL(fileURLWithPath: "/tmp/mai-chat-benchmark.log")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
+        return handle
+    }()
+
     /// Headless runs append results to a file and echo them to stdout: a
     /// sandboxed build cannot write outside its container, stdout is lost
     /// under `open`, and ad-hoc launched builds may not reach the unified log.
@@ -717,15 +808,18 @@ nonisolated enum ChatBenchmarkAutoRun {
         guard plan != nil else { return }
         _ = lineBufferedStandardOutput
         print("CHAT_BENCHMARK_TRACE \(message)")
-        let url = URL(fileURLWithPath: "/tmp/mai-chat-benchmark.log")
-        let line = Data((message + "\n").utf8)
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: line)
-        } else {
-            try? line.write(to: url)
+        try? traceFile?.write(contentsOf: Data((message + "\n").utf8))
+    }
+
+    /// `-ChatBenchmarkTranscriptOnly NO` keeps the sidebar, composer and
+    /// toolbar in a benchmark run; by default a run shows the transcript
+    /// alone so its numbers measure the chat and nothing else.
+    static var isTranscriptOnly: Bool {
+        guard plan != nil else { return false }
+        guard UserDefaults.standard.object(forKey: "ChatBenchmarkTranscriptOnly") != nil else {
+            return true
         }
+        return UserDefaults.standard.bool(forKey: "ChatBenchmarkTranscriptOnly")
     }
 }
 

@@ -9,7 +9,11 @@
         nonisolated deinit {}
 
         private let store: ThreadStore
-        private let turnID = "synthetic-stream-turn"
+        private let turnID: String
+        /// How fast the reply arrives: 16-character chunks, one per
+        /// `1000 / (charactersPerSecond / 16)` ms. The benchmark streams
+        /// 1000/s (~250 tokens/s); chat apps stream ~200-400/s.
+        private let charactersPerSecond: Double
         private let messageID = "synthetic-stream-assistant"
         private let characters: [Character]
         private let includesActivity: Bool
@@ -27,9 +31,14 @@
                 .prefix(1_600))
         private(set) var isFinished = false
 
-        init(store: ThreadStore, includesActivity: Bool = false) {
+        init(
+            store: ThreadStore, includesActivity: Bool = false, charactersPerSecond: Double = 1_000,
+            turnID: String = "synthetic-stream-turn"
+        ) {
             self.store = store
             self.includesActivity = includesActivity
+            self.charactersPerSecond = max(16, charactersPerSecond)
+            self.turnID = turnID
             characters = Array(
                 (ChatMarkdownFixtures.codeHeavy + "\n\n" + ChatMarkdownFixtures.longMarkdown)
                     .prefix(20_000))
@@ -89,7 +98,7 @@
             for offset in stride(from: min(16, characters.count), to: characters.count, by: 16) {
                 guard !Task.isCancelled else { return }
                 sendText(messageID, String(characters[offset..<min(offset + 16, characters.count)]))
-                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+                do { try await Task.sleep(for: .seconds(16 / charactersPerSecond)) } catch { return }
             }
             sendTurn(.completed)
             if includesActivity { traceActivity("turn-completed") }

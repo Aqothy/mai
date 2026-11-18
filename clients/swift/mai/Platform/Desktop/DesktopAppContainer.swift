@@ -9,9 +9,18 @@ struct DesktopAppContainer: View {
     /// The open terminal, if any. Chat selection lives in ThreadStore; only
     /// presentation merges the two domains.
     @State private var terminalRoute: TerminalOpenRequest?
+    @State private var columnVisibility = Self.initialColumnVisibility
+
+    /// A transcript-only benchmark shows the detail column alone.
+    private static var initialColumnVisibility: NavigationSplitViewVisibility {
+        #if DEBUG
+            if ChatBenchmarkAutoRun.isTranscriptOnly { return .detailOnly }
+        #endif
+        return .automatic
+    }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             DesktopSidebarView(
                 store: store,
                 terminalStore: terminalStore,

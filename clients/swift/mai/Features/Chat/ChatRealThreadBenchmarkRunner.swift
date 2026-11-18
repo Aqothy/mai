@@ -86,6 +86,21 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
 
         #if os(macOS)
+            if ChatBenchmarkAutoRun.plan == "resize", let window = ChatBenchmarkModel.appWindow() {
+                _ = await benchmark.runResizeBenchmark(
+                    in: window, minimumWidth: 600, seconds: 2, label: "live-resize-2s")
+                // How long the transcript takes to show the final width's
+                // layout once the resize stops.
+                let settleStarted = ContinuousClock.now
+                try? await Task.sleep(for: .milliseconds(50))
+                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+                let settle = settleStarted.duration(to: .now).components
+                ChatBenchmarkAutoRun.trace(
+                    "resize settled ms=\(Double(settle.seconds) * 1000 + Double(settle.attoseconds) / 1e15)"
+                )
+                finish("CHAT_BENCHMARK_COMPLETE")
+                return
+            }
             if ChatBenchmarkAutoRun.plan == "lifecycle" {
                 await benchmark.runNativeLifecycleBenchmark()
                 finish("CHAT_BENCHMARK_COMPLETE")
@@ -174,6 +189,15 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                     ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
                     selectThread(identity)
                 }
+                // The end screen shows when the transcript lands on its end,
+                // before the rest of its history is prepared.
+                let visibleDeadline = ContinuousClock.now + .seconds(30)
+                while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+                    ContinuousClock.now < visibleDeadline
+                {
+                    try? await Task.sleep(for: .milliseconds(2))
+                }
+                let visible = started.duration(to: .now).components
                 await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
                 let deadline = ContinuousClock.now + .seconds(30)
                 while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
@@ -213,6 +237,8 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                     "phase": checkpoint < 5 ? "open" : "revisit",
                     "preparedAndSettledMilliseconds": Double(elapsed.seconds) * 1000 + Double(
                         elapsed.attoseconds) / 1e15,
+                    "visibleMilliseconds": Double(visible.seconds) * 1000 + Double(
+                        visible.attoseconds) / 1e15,
                     "selectedLayoutCount": store.selectedThreadTextLayoutStore?.cachedLayoutCount
                         ?? 0,
                     "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,

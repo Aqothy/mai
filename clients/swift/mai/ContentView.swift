@@ -61,5 +61,10 @@ struct MaiApp: App {
                 }
             }
         }
+        #if DEBUG
+            .commands {
+                if usesSyntheticBenchmarkStore { ChatPlaygroundCommands(store: threadStore) }
+            }
+        #endif
     }
 }

@@ -55,6 +55,11 @@ struct ChatView: View {
         Group {
             if let errorMessage = store.selectedThreadLoadErrorMessage, store.selectedThread == nil {
                 ThreadLoadErrorView(store: store, errorMessage: errorMessage)
+            } else if TranscriptEngine.isNewEngineEnabled, let threadID = store.selectedThread?.id {
+                TranscriptChatView(
+                    store: store, threadID: threadID, scrollState: scrollState, annotationModel: annotationModel,
+                    forkAction: forkAction)
+                    .id(threadID)
             } else if let thread = store.selectedThread,
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
@@ -126,23 +131,25 @@ struct ChatView: View {
             .safeAreaPadding(.bottom)
         }
         .modifier(
-            ChatComposerSafeAreaBar(
-                composer: ChatComposerStack(
-                    store: store,
-                    draftModel: draftModel,
-                    chatModel: chatModel,
-                    annotationModel: annotationModel,
-                    scrollState: scrollState,
-                    promptText: promptText,
-                    promptCompletion: promptCompletion,
-                    openThread: openThread
+            ChatBenchmarkChrome(
+                chrome: ChatComposerSafeAreaBar(
+                    composer: ChatComposerStack(
+                        store: store,
+                        draftModel: draftModel,
+                        chatModel: chatModel,
+                        annotationModel: annotationModel,
+                        scrollState: scrollState,
+                        promptText: promptText,
+                        promptCompletion: promptCompletion,
+                        openThread: openThread
+                    )
                 )
             )
         )
         .navigationTitle(selectedThreadTitle)
         .inlineNavigationBarTitle()
         .toolbar {
-            if let chatModel, let forkAction {
+            if let chatModel, let forkAction, ChatBenchmarkChrome<EmptyModifier>.isShown {
                 ToolbarItem(placement: .primaryAction) {
                     Menu("Fork Chat", systemImage: "arrow.triangle.branch") {
                         ForEach(forkAction.otherAgents) { agent in
