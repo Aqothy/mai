@@ -229,6 +229,7 @@ extension TranscriptController {
                 index += 1
             }
         }
+        let selectionFollows = selectionEnd(atEndOf: existing)
         var heights: [String: CGFloat] = [:]
         for (index, kind, layout) in result.layouts where index < newRows.count && newRows[index].kind == kind {
             heights[newRows[index].id] = layout.height
@@ -254,6 +255,16 @@ extension TranscriptController {
             layouts[id] = RowLayout(rowID: id, key: key, height: layout.height, content: layout.content)
             measuredKeys[id] = key
         }
+        if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),
+            let length = selectableLength(ofRowAt: index), var selection
+        {
+            // A selection that reached the streamed text's end grows with
+            // it, as text selected to the end of a page does in a browser.
+            let end = TextPosition(rowID: last.id, offset: length)
+            if selectionFollows == .anchor { selection.anchor = end } else { selection.focus = end }
+            self.selection = selection
+            host?.setNeedsSelectionDisplay()
+        }
         // Code the stream closed (or the end of the turn did) gets its
         // colors; the open block stays plain until then.
         submitHighlights(forRowIDs: newRows.compactMap { row in
@@ -262,4 +273,18 @@ extension TranscriptController {
         host?.setNeedsRowPlacement()
     }
 
+    private enum SelectionEnd { case anchor, focus }
+
+    /// Which end of the selection, if any, sits at the end of the text of
+    /// the rows at `indices` (a streamed message's).
+    private func selectionEnd(atEndOf indices: [Int]) -> SelectionEnd? {
+        guard let selection, !selection.isEmpty, let last = indices.last,
+            let length = selectableLength(ofRowAt: last)
+        else { return nil }
+        let end = TextPosition(rowID: rows[last].id, offset: length)
+        guard let ordered = orderedSelection(), ordered.end.index == last, ordered.end.offset == length else {
+            return nil
+        }
+        return selection.focus == end ? .focus : .anchor
+    }
 }
