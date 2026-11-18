@@ -166,11 +166,12 @@ extension TranscriptController {
             let released = String(stream.release(text, reducesMotion: reducesMotion))
             stream.isInFlight = true
             streams[messageID] = stream
+            // A closed block laid out again (a new width) keeps its colors.
             var codeColors: [String: CodeColors] = [:]
             for (index, block) in stream.blocks.enumerated() {
-                guard case .code = block else { continue }
-                let id = "\(messageID)#\(index)"
-                codeColors[id] = codeColorSource(forRowID: id)
+                guard case .code = block, let colors = layouts["\(messageID)#\(index)"]?.content.codeLayout?.colors
+                else { continue }
+                codeColors["\(messageID)#\(index)"] = colors
             }
             let update = TranscriptStreamWorker.Update(
                 messageID: messageID, text: released, isFinished: stream.isFinishing, width: columnWidth, style: style,
@@ -253,12 +254,12 @@ extension TranscriptController {
             layouts[id] = RowLayout(rowID: id, key: key, height: layout.height, content: layout.content)
             measuredKeys[id] = key
         }
-        // Grown code is colored up to its last highlight; this colors the
-        // rest (one highlight at a time, the newest code replacing a queued
-        // one).
-        submitHighlights(forRowIDs: result.layouts.compactMap { index, kind, _ in
-            if case .markdownBlock(.code, _) = kind, index < newRows.count { newRows[index].id } else { nil }
+        // Code the stream closed (or the end of the turn did) gets its
+        // colors; the open block stays plain until then.
+        submitHighlights(forRowIDs: newRows.compactMap { row in
+            if case .markdownBlock(.code, _) = row.kind { row.id } else { nil }
         })
         host?.setNeedsRowPlacement()
     }
+
 }

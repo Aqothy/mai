@@ -52,20 +52,17 @@ struct TranscriptResizeTests {
         #expect(reflowed < .infinity)
     }
 
-    /// A streamed code block keeps the colors of its last highlight for the
-    /// code they were made for, and is not highlighted until the rest is.
-    @Test func grownCodeKeepsItsColorsForThePartTheyCover() {
+    /// Colors are for one text: code that changed (a streamed block that
+    /// grew) is plain until highlighted again, never partly colored.
+    @Test func colorsApplyOnlyToTheCodeTheyWereMadeFor() {
         let old = "let x = 1"
         let colors = CodeColors(
             code: old, runs: [.init(range: 0..<3, color: .rgba(red: 1, green: 0, blue: 0, alpha: 1))], isDark: true)
-        let grown = old + "\nprint(x)"
-        #expect(colors.apply(to: grown, isDark: true))
-        #expect(!colors.apply(to: grown, isDark: false))
-        #expect(!colors.apply(to: "var y", isDark: true))
-        let layout = CodeLayout.make(code: grown, language: "swift", colors: colors, width: 600, style: style)
-        #expect(!layout.isHighlighted)
-        #expect(layout.colorsAreDark == true)
-        let red = TextColor.rgba(red: 1, green: 0, blue: 0, alpha: 1)
-        #expect(layout.body.runs.contains { $0.color == red })
+        #expect(colors.matches(code: old, isDark: true))
+        #expect(!colors.matches(code: old, isDark: false))
+        #expect(!colors.matches(code: old + "\nprint(x)", isDark: true))
+        let grown = CodeLayout.make(code: old + "\nprint(x)", language: "swift", colors: colors, width: 600, style: style)
+        #expect(!grown.isHighlighted)
+        #expect(CodeLayout.make(code: old, language: "swift", colors: colors, width: 600, style: style).isHighlighted)
     }
 }

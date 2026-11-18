@@ -20,10 +20,10 @@ nonisolated struct CodeLayout: Sendable {
     /// scrolls over.
     let contentWidth: CGFloat
     /// The syntax colors drawn, kept so the same code laid out again (a new
-    /// width or text size, or grown by a stream) keeps them.
+    /// width or text size) keeps them; nil while plain.
     let colors: CodeColors?
-    /// Whether the colors were made for all of the code, not a prefix.
-    let isHighlighted: Bool
+
+    var isHighlighted: Bool { colors != nil }
 
     /// The theme its syntax colors are for (dark or not); nil while plain.
     var colorsAreDark: Bool? { colors?.isDark }
@@ -33,6 +33,7 @@ nonisolated struct CodeLayout: Sendable {
     static func make(
         code: String, language: String?, colors: CodeColors?, width: CGFloat, style: TextStyle
     ) -> CodeLayout {
+        let colors = colors?.code == code ? colors : nil
         let label = TextLayoutEngine.layout(
             AttributedTextBuilder.plain(displayName(language), role: .callout, color: .secondary, style: style),
             width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
@@ -61,8 +62,7 @@ nonisolated struct CodeLayout: Sendable {
         return CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
             bodyOrigin: CGPoint(x: style.codeHorizontalInset, y: headerHeight),
-            size: CGSize(width: width, height: ceil(height)), contentWidth: contentWidth, colors: colors,
-            isHighlighted: colors?.code == code)
+            size: CGSize(width: width, height: ceil(height)), contentWidth: contentWidth, colors: colors)
     }
 
     /// The same block at another row width: code never wraps, so its text
@@ -71,7 +71,7 @@ nonisolated struct CodeLayout: Sendable {
         CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: labelTop,
             bodyOrigin: bodyOrigin, size: CGSize(width: width, height: size.height), contentWidth: contentWidth,
-            colors: colors, isHighlighted: isHighlighted)
+            colors: colors)
     }
 
     private static func substring(_ code: String, _ utf16: String.UTF16View, _ range: Range<Int>) -> String {

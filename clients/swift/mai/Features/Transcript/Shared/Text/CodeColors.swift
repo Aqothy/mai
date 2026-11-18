@@ -1,9 +1,8 @@
 import Foundation
 
-/// Syntax colors made for one version of a code block's text, in one theme
-/// (colors are concrete per theme). They still color a block that grew past
-/// that text, as a streamed block does: the part they cover stays colored
-/// instead of flashing plain until highlighted again (PLAN 6.7).
+/// Syntax colors made for one code block's text, in one theme (colors are
+/// concrete per theme). Kept with the block's layout so a new width or text
+/// size lays it out colored again instead of plain then colored.
 nonisolated struct CodeColors: Sendable {
     /// A run of syntax color over UTF-16 offsets of the code.
     struct Run: Sendable {
@@ -16,8 +15,7 @@ nonisolated struct CodeColors: Sendable {
     let runs: [Run]
     let isDark: Bool
 
-    /// Whether these colors apply to `code`: made for it or for a prefix.
-    func apply(to code: String, isDark: Bool) -> Bool {
-        self.isDark == isDark && code.hasPrefix(self.code)
+    func matches(code: String, isDark: Bool) -> Bool {
+        self.isDark == isDark && self.code == code
     }
 }

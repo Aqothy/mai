@@ -61,11 +61,6 @@ final class TranscriptController {
     /// Layouts of rows in and near the viewport (state: being shown or about
     /// to be). Others are dropped; the layout cache may keep them.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
-    /// The newest syntax colors of code rows whose highlight finished after
-    /// the row changed (a streamed block grew meanwhile): they still color
-    /// the part of the code they were made for. Dropped once a current
-    /// highlight lands.
-    @ObservationIgnored var codeColors: [String: CodeColors] = [:]
     /// The key each row's height was measured at.
     @ObservationIgnored var measuredKeys: [String: RowLayoutKey] = [:]
     @ObservationIgnored var synchronousHeights: [String: CGFloat] = [:]

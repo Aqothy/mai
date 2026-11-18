@@ -38,7 +38,6 @@ nonisolated final class TextLayoutCache: Sendable {
     }
 
     func layout(for request: RowLayoutRequest) -> RowLayout? {
-        guard Self.isCacheable(request) else { return nil }
         let key = Self.key(request)
         return state.withLock { state in
             guard var entry = state.entries[key] else { return nil }
@@ -50,7 +49,6 @@ nonisolated final class TextLayoutCache: Sendable {
     }
 
     func insert(_ layout: RowLayout, for request: RowLayoutRequest) {
-        guard Self.isCacheable(request) else { return }
         let key = Self.key(request)
         let bytes = Self.bytes(of: layout.content)
         guard bytes < budget / 8 else { return }
@@ -78,16 +76,6 @@ nonisolated final class TextLayoutCache: Sendable {
         Key(
             kind: request.kind, width: request.key.width, styleVersion: request.key.styleVersion,
             highlightTheme: request.codeColors?.isDark)
-    }
-
-    /// Code colored for a prefix of its text (a streamed block that grew)
-    /// is shown only until highlighted again: not worth keeping, and its
-    /// colors are not in the key.
-    private static func isCacheable(_ request: RowLayoutRequest) -> Bool {
-        guard let colors = request.codeColors, case .markdownBlock(.code(_, let code), _) = request.kind else {
-            return true
-        }
-        return colors.code == code
     }
 
     private static func bytes(of content: RowContentLayout) -> Int {

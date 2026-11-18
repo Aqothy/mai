@@ -21,24 +21,20 @@ extension TranscriptController {
         let key = currentKey(row)
         var request = RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)
         guard case .markdownBlock(.code(_, let code), _) = row.kind, let palette,
-            let colors = codeColorSource(forRowID: row.id), colors.apply(to: code, isDark: palette.isDark)
+            let colors = codeColors(forRowID: row.id, code: code, isDark: palette.isDark)
         else { return request }
         request.codeColors = colors
-        if let current = layouts[row.id], current.key.styleVersion == key.styleVersion,
-            let layout = current.content.codeLayout, layout.code == code, layout.colors?.code == colors.code
-        {
-            request.previousCode = layout
+        if let current = layouts[row.id], current.key.styleVersion == key.styleVersion {
+            request.previousCode = current.content.codeLayout
         }
         return request
     }
 
-    /// The newest colors a code row has had, for whatever version of its
-    /// code: its layout's, or a later highlight's that landed too late.
-    func codeColorSource(forRowID id: String) -> CodeColors? {
-        let shown = layouts[id]?.content.codeLayout?.colors
-        guard let late = codeColors[id] else { return shown }
-        guard let shown else { return late }
-        return late.code.utf16.count > shown.code.utf16.count ? late : shown
+    /// The colors a code row's layout has, if made for `code` in this theme.
+    func codeColors(forRowID id: String, code: String, isDark: Bool) -> CodeColors? {
+        guard let colors = layouts[id]?.content.codeLayout?.colors, colors.matches(code: code, isDark: isDark)
+        else { return nil }
+        return colors
     }
 
     /// Highlights for the code rows among `rowIDs` whose colors are not
@@ -197,12 +193,21 @@ extension TranscriptController {
             window?.contains(geometry.offset(at: index)) ?? true, let palette,
             let layout = layouts[row.id], layout.key == currentKey(row),
             let codeLayout = layout.content.codeLayout,
-            !(codeLayout.isHighlighted && codeLayout.colorsAreDark == palette.isDark)
+            !(codeLayout.isHighlighted && codeLayout.colorsAreDark == palette.isDark),
+            !isOpenStreamTail(at: index)
         else { return nil }
         return LayoutQueue.Job(
             id: "highlight|\(row.id)",
             work: .highlight(request(row), code: code, language: language, isDark: palette.isDark),
             priority: priority)
+    }
+
+    /// A code block a stream is still writing: highlighted once it closes
+    /// (the stream moves past it or ends), not again on every update.
+    private func isOpenStreamTail(at index: Int) -> Bool {
+        let row = rows[index]
+        guard isStreaming(row) else { return false }
+        return index + 1 == rows.count || rows[index + 1].messageID != row.messageID
     }
 
     /// Layouts are state only near the viewport; the rest are dropped (the
@@ -275,11 +280,6 @@ extension TranscriptController {
                 parsedAny = true
             case .layout(let layout):
                 guard let index = geometry.index(for: layout.rowID), layout.key == currentKey(rows[index]) else {
-                    // A highlight for code that changed since still colors
-                    // the part it was made for.
-                    if let code = layout.content.codeLayout, code.isHighlighted, let colors = code.colors {
-                        codeColors[layout.rowID] = colors
-                    }
                     continue
                 }
                 measuredKeys[layout.rowID] = layout.key
@@ -294,10 +294,7 @@ extension TranscriptController {
                 let frame = geometry.frame(at: index)
                 if keep.map({ frame.minY < $0.upperBound && frame.minY + frame.height > $0.lowerBound }) ?? true {
                     layouts[layout.rowID] = layout
-                    if let code = layout.content.codeLayout {
-                        if code.isHighlighted { codeColors[layout.rowID] = nil }
-                        landedCode.append(layout.rowID)
-                    }
+                    if layout.content.codeLayout != nil { landedCode.append(layout.rowID) }
                 }
             }
         }

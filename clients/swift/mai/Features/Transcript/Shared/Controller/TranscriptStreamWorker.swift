@@ -11,9 +11,8 @@ actor TranscriptStreamWorker {
         let isFinished: Bool
         let width: CGFloat
         let style: TextStyle
-        /// The newest colors of the message's code rows, by row id, and the
-        /// theme shown: a code block laid out again keeps the colors made
-        /// for the code it had (PLAN 6.7).
+        /// The colors of the message's highlighted code rows, by row id, and
+        /// the theme shown: a closed block laid out again keeps them.
         let codeColors: [String: CodeColors]
         let isDark: Bool?
     }
@@ -50,7 +49,7 @@ actor TranscriptStreamWorker {
                 key: RowLayoutKey(contentVersion: -1, width: update.width, styleVersion: update.style.version),
                 style: update.style)
             if case .markdownBlock(.code(_, let code), _) = kind, let isDark = update.isDark,
-                let colors = update.codeColors[rowID], colors.apply(to: code, isDark: isDark)
+                let colors = update.codeColors[rowID], colors.matches(code: code, isDark: isDark)
             {
                 request.codeColors = colors
             }
