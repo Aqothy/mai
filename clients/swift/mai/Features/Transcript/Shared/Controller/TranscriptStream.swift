@@ -30,7 +30,10 @@ struct TranscriptStream {
 
     /// The part of `text` to show this frame (PLAN 6.2): bursts arrive
     /// paced, the backlog released over about 12 frames (100 ms at 120 Hz),
-    /// ending at the end of a word. Everything at once when the turn ended or
+    /// ending at the end of a word. White space goes with the word after it,
+    /// so a new line, or a code line's indent, shows with its first word
+    /// instead of as an empty line before it; until that word arrives the
+    /// release does not move. Everything at once when the turn ended or
     /// motion is reduced.
     mutating func release(_ text: String, reducesMotion: Bool) -> Substring {
         let utf8 = text.utf8
@@ -39,16 +42,22 @@ struct TranscriptStream {
             releasedLength = total
             return text[...]
         }
+        func isSpace(_ byte: UInt8) -> Bool { byte == 0x20 || byte == 0x0A || byte == 0x09 || byte == 0x0D }
         let step = max(Self.minimumPerFrame, (total - releasedLength) / 12)
         var end = utf8.index(utf8.startIndex, offsetBy: min(total, releasedLength + step))
-        // On to the end of the word in progress, a few bytes at most.
+        // Past white space, then on to the end of the word in progress, a few
+        // bytes at most.
+        while end < utf8.endIndex, isSpace(utf8[end]) { utf8.formIndex(after: &end) }
         var scanned = 0
-        while end < utf8.endIndex, scanned < 24, utf8[end] != 0x20, utf8[end] != 0x0A {
+        while end < utf8.endIndex, scanned < 24, !isSpace(utf8[end]) {
             utf8.formIndex(after: &end)
             scanned += 1
         }
         // Whole characters only.
         while end < utf8.endIndex, end.samePosition(in: text) == nil { utf8.formIndex(after: &end) }
+        // The text so far ends in white space: it waits for its word.
+        let start = utf8.index(utf8.startIndex, offsetBy: releasedLength)
+        while end > start, isSpace(utf8[utf8.index(before: end)]) { utf8.formIndex(before: &end) }
         releasedLength = utf8.distance(from: utf8.startIndex, to: end)
         return text[..<end]
     }

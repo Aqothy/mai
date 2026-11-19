@@ -38,6 +38,18 @@ struct TranscriptStreamPacingTests {
         #expect(String(finishing.release(text, reducesMotion: false)) == text)
     }
 
+    /// A code line's indent arrives before its text: it shows with the text,
+    /// not as an empty line first.
+    @Test func whiteSpaceWaitsForTheWordAfterIt() {
+        var stream = TranscriptStream(text: nil, entryText: "")
+        let code = "```go\nfunc f() {\n    "
+        var released = ""
+        for _ in 0..<20 { released = String(stream.release(code, reducesMotion: false)) }
+        #expect(released == "```go\nfunc f() {")
+        for _ in 0..<20 { released = String(stream.release(code + "return", reducesMotion: false)) }
+        #expect(released == code + "return")
+    }
+
     @Test func aTrickleStillMoves() {
         var stream = TranscriptStream(text: nil, entryText: "ab")
         let released = stream.release("ab", reducesMotion: false)

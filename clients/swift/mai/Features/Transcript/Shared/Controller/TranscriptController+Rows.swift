@@ -163,7 +163,9 @@ extension TranscriptController {
         for (messageID, var stream) in streams where !stream.isInFlight {
             let text = stream.currentText
             guard stream.isFinishing || stream.releasedLength < text.utf8.count else { continue }
+            let shown = stream.releasedLength
             let released = String(stream.release(text, reducesMotion: reducesMotion))
+            guard stream.isFinishing || stream.releasedLength > shown else { continue }
             stream.isInFlight = true
             streams[messageID] = stream
             // A closed block laid out again (a new width) keeps its colors.
