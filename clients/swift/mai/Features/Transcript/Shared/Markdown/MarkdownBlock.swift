@@ -15,16 +15,3 @@ nonisolated indirect enum MarkdownBlock: Hashable, Sendable {
     case rule(spelling: String)
 }
 
-nonisolated extension MarkdownBlock {
-    /// A code block or table: drawn in a box of its own, not as prose.
-    var isHeading: Bool {
-        if case .heading = self { true } else { false }
-    }
-
-    var isRich: Bool {
-        switch self {
-        case .code, .table: true
-        default: false
-        }
-    }
-}

@@ -25,8 +25,6 @@ nonisolated struct TextStyle: Sendable {
     // Prose (the chat's existing metrics).
     let lineSpacing: CGFloat = 2
     let blockSpacing: CGFloat = 16
-    /// Between a code block or table and its neighbors.
-    let richBlockSpacing: CGFloat = 8
     let listIndent: CGFloat = 20
     let listItemSpacing: CGFloat = 8
     let quoteIndent: CGFloat = 14
