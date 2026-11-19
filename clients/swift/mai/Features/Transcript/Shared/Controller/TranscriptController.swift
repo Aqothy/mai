@@ -61,7 +61,7 @@ final class TranscriptController {
     @ObservationIgnored var palette: TextPalette?
     @ObservationIgnored var columnWidth: CGFloat = 0
     /// Layouts of rows in and near the viewport (state: being shown or about
-    /// to be). Others are dropped; the layout cache may keep them.
+    /// to be). Others are dropped.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
     /// The key each row's height was measured at.
     @ObservationIgnored var measuredKeys: [String: RowLayoutKey] = [:]
@@ -72,9 +72,7 @@ final class TranscriptController {
     @ObservationIgnored var backgroundSweepTask: Task<Void, Never>?
     @ObservationIgnored var isWarm = false
     @ObservationIgnored var openStarted = ContinuousClock.now
-    @ObservationIgnored lazy var queue = LayoutQueue(
-        concurrency: configuration.concurrency, cache: configuration.cachesEnabled ? TextLayoutCache.shared : nil
-    ) { [weak self] result in
+    @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) { [weak self] result in
         Task { @MainActor in self?.receive(result) }
     }
 

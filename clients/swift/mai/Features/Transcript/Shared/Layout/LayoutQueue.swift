@@ -36,12 +36,10 @@ actor LayoutQueue {
     private var running: Set<String> = []
     private var isHighlighting = false
     private let concurrency: Int
-    private let cache: TextLayoutCache?
     private let deliver: @Sendable (Result) -> Void
 
-    init(concurrency: Int, cache: TextLayoutCache?, deliver: @escaping @Sendable (Result) -> Void) {
+    init(concurrency: Int, deliver: @escaping @Sendable (Result) -> Void) {
         self.concurrency = concurrency
-        self.cache = cache
         self.deliver = deliver
     }
 
@@ -71,19 +69,17 @@ actor LayoutQueue {
     private func pump() {
         while running.count < concurrency, let job = takeNext() {
             running.insert(job.id)
-            let cache = cache
             let isUrgent = job.priority < Self.backgroundPriority
             Task.detached(priority: isUrgent ? .userInitiated : .utility) { [weak self] in
-                let result = Self.perform(job.work, cache: cache)
+                let result = Self.perform(job.work)
                 await self?.finish(job.id, result)
             }
         }
         if !isHighlighting, let job = highlights.values.min(by: { $0.priority < $1.priority }) {
             highlights[job.id] = nil
             isHighlighting = true
-            let cache = cache
             Task.detached(priority: .userInitiated) { [weak self] in
-                let result = await Self.highlight(job.work, cache: cache)
+                let result = await Self.highlight(job.work)
                 await self?.finishHighlight(result)
             }
         }
@@ -121,13 +117,10 @@ actor LayoutQueue {
         pump()
     }
 
-    private nonisolated static func perform(_ work: Work, cache: TextLayoutCache?) -> Result? {
+    private nonisolated static func perform(_ work: Work) -> Result? {
         switch work {
         case .layout(let request):
-            if let cached = cache?.layout(for: request) { return .layout(cached) }
-            let layout = RowLayoutBuilder.layout(request)
-            cache?.insert(layout, for: request)
-            return .layout(layout)
+            return .layout(RowLayoutBuilder.layout(request))
         case .parse(let messageID, let source):
             return .parsed(messageID: messageID, source: source, blocks: MarkdownPlanner.blocks(from: source))
         case .highlight:
@@ -135,15 +128,12 @@ actor LayoutQueue {
         }
     }
 
-    private nonisolated static func highlight(_ work: Work, cache: TextLayoutCache?) async -> Result? {
+    private nonisolated static func highlight(_ work: Work) async -> Result? {
         guard case .highlight(var request, let code, let language, let isDark) = work,
             let colors = await CodeHighlightColors.colors(code: code, language: language, isDark: isDark)
         else { return nil }
         request.codeColors = colors
         request.previousCode = nil
-        if let cached = cache?.layout(for: request) { return .layout(cached) }
-        let layout = RowLayoutBuilder.layout(request)
-        cache?.insert(layout, for: request)
-        return .layout(layout)
+        return .layout(RowLayoutBuilder.layout(request))
     }
 }

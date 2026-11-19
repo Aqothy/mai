@@ -85,10 +85,6 @@ extension TranscriptController {
     private func blocks(forMessage messageID: String, source: String) -> [MarkdownBlock]? {
         if let stream = streams[messageID] { return stream.blocks }
         if let parsed = parsedMessages[messageID], parsed.source == source { return parsed.blocks }
-        if configuration.cachesEnabled, let blocks = MarkdownBlockCache.shared.blocks(for: source) {
-            parsedMessages[messageID] = (source, blocks)
-            return blocks
-        }
         return nil
     }
 
@@ -200,7 +196,6 @@ extension TranscriptController {
         if result.isFinished {
             streams[result.messageID] = nil
             parsedMessages[result.messageID] = (stream.entryText, result.blocks)
-            if configuration.cachesEnabled { MarkdownBlockCache.shared.insert(result.blocks, for: stream.entryText) }
             updateFrameUpdates()
         } else {
             guard result.textLength >= stream.shownLength else {

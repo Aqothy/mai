@@ -24,7 +24,7 @@
         }
 
         private func make() -> Fixture {
-            var configuration = TranscriptConfiguration(laysOutRows: true, cachesEnabled: false)
+            var configuration = TranscriptConfiguration(laysOutRows: true)
             configuration.concurrency = 1
             let controller = TranscriptController(configuration: configuration)
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))

@@ -60,9 +60,7 @@ extension TranscriptController {
         if let layout = layouts[row.id] { return layout }
         guard synchronously, configuration.laysOutRows, columnWidth > 0 else { return nil }
         let request = request(row)
-        let layout =
-            (configuration.cachesEnabled ? TextLayoutCache.shared.layout(for: request) : nil)
-            ?? RowLayoutBuilder.layout(request)
+        let layout = RowLayoutBuilder.layout(request)
         #if DEBUG
             TranscriptDebugCounters.syncLayouts += 1
         #endif
@@ -276,7 +274,6 @@ extension TranscriptController {
             case .parsed(let messageID, let source, let blocks):
                 guard parsedMessages[messageID]?.source != source else { continue }
                 parsedMessages[messageID] = (source, blocks)
-                if configuration.cachesEnabled { MarkdownBlockCache.shared.insert(blocks, for: source) }
                 parsedAny = true
             case .layout(let layout):
                 guard let index = geometry.index(for: layout.rowID), layout.key == currentKey(rows[index]) else {
