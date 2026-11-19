@@ -102,7 +102,7 @@ actor LayoutQueue {
             backgroundCursor += 1
             if let job = background.removeValue(forKey: id), !running.contains(id) { return job }
         }
-        if backgroundCursor >= backgroundOrder.count, !backgroundOrder.isEmpty {
+        if !backgroundOrder.isEmpty {
             backgroundOrder.removeAll()
             backgroundCursor = 0
         }

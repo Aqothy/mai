@@ -23,8 +23,6 @@ nonisolated enum TranscriptRowKind: Hashable, Sendable {
     /// Warnings and errors, and in Phase 1 the kinds still to be drawn
     /// natively (requests, handoffs, envelopes, stop notes, plans).
     case notice(title: String, text: String?)
-    /// Marks the top while older turns may load; never a reading place.
-    case historyMarker
 }
 
 nonisolated extension TranscriptRowKind {
@@ -34,7 +32,7 @@ nonisolated extension TranscriptRowKind {
     var isSelectable: Bool {
         switch self {
         case .userMessage, .markdownBlock, .pendingMessage, .thought, .notice: true
-        case .activity, .turnHeader, .turnActions, .working, .historyMarker: false
+        case .activity, .turnHeader, .turnActions, .working: false
         }
     }
 }

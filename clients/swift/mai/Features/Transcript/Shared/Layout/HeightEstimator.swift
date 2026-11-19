@@ -47,8 +47,6 @@ nonisolated enum HeightEstimator {
             return 17 + style.font(.callout).lineHeight
         case .turnActions:
             return RowAccessory.size + 6
-        case .historyMarker:
-            return 1
         }
     }
 

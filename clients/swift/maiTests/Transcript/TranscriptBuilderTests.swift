@@ -49,7 +49,6 @@ struct TranscriptBuilderTests {
         case .turnActions: "actions"
         case .working: "working"
         case .notice: "notice"
-        case .historyMarker: "marker"
         }
     }
 

@@ -6,7 +6,7 @@ import Foundation
 /// re-lay out. Platform hosts turn input into positions here and draw what
 /// `selectedRange(inRowAt:)` says.
 extension TranscriptController {
-    /// Replaces the selection. Starting one stops following (rule 10).
+    /// Replaces the selection; following is unaffected, as in browsers.
     func setSelection(_ newSelection: TranscriptSelection?) {
         guard newSelection != selection else { return }
         selection = newSelection

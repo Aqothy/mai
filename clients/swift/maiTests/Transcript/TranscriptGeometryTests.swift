@@ -15,7 +15,7 @@ struct TranscriptGeometryTests {
 
     @Test func preservesAnchorAcrossPrependAndHeightCorrection() throws {
         var geometry = geometry(["a", "b", "c"], height: 100)
-        let place = try #require(geometry.readingPlace(atViewportTop: 125, markerHeight: 1))
+        let place = try #require(geometry.readingPlace(atViewportTop: 125))
         geometry.replace(ids: ["older", "a", "b", "c"], sources: ["older", "a", "b", "c"]) { _ in 70 }
         #expect(geometry.offset(for: place) == 195)
         geometry.setHeights(["older": 90, "a": 120, "c": 500])
@@ -30,8 +30,8 @@ struct TranscriptGeometryTests {
             ["user", "header", "work", "live", "working"],
             sources: ["user", "header", "work", "m", "working"], height: 100)
         geometry.setHeights(["user": 100, "header": 40, "work": 300, "live": 900, "working": 40])
-        let inReply = try #require(geometry.readingPlace(atViewportTop: 940, markerHeight: 1))
-        let inWork = try #require(geometry.readingPlace(atViewportTop: 200, markerHeight: 1))
+        let inReply = try #require(geometry.readingPlace(atViewportTop: 940))
+        let inWork = try #require(geometry.readingPlace(atViewportTop: 200))
 
         geometry.replace(
             ids: ["user", "header", "m#0", "m#1"], sources: ["user", "header", "m", "m"]
@@ -48,7 +48,7 @@ struct TranscriptGeometryTests {
         #expect(geometry.index(at: -1) == 0)
         #expect(geometry.index(at: 100) == 1)
         #expect(geometry.index(at: 300) == 2)
-        let removed = try #require(geometry.readingPlace(atViewportTop: 150, markerHeight: 1))
+        let removed = try #require(geometry.readingPlace(atViewportTop: 150))
         geometry.replace(ids: ["a", "c"], sources: ["a", "c"]) { _ in 100 }
         // "b" left, and its content with it: the reader lands below "a".
         #expect(geometry.offset(for: removed) == 100)
@@ -79,20 +79,6 @@ struct TranscriptGeometryTests {
         }
     }
 
-    @Test func appendingKeepsOffsetsAndLookupExact() {
-        var geometry = geometry((0..<37).map { "row-\($0)" }, height: 30)
-        for index in 37..<300 {
-            geometry.append(id: "row-\(index)", source: "row-\(index)", height: CGFloat(10 + index % 7))
-        }
-        var expected: CGFloat = 0
-        for index in 0..<300 {
-            #expect(geometry.offset(at: index) == expected)
-            #expect(geometry.index(at: expected) == index)
-            expected += geometry.height(at: index)
-        }
-        #expect(geometry.totalHeight == expected)
-    }
-
     /// Replacing a range (a streamed message gaining blocks) gives the same
     /// offsets and lookups as rebuilding everything.
     @Test(arguments: [0, 5, 37, 63, 64])
@@ -103,8 +89,7 @@ struct TranscriptGeometryTests {
         let replaced = ["new-a", "new-b", "new-c"]
         let end = min(ids.count, start + 2)
         incremental.replaceRows(
-            start..<end, ids: replaced, sources: ["m", "m", "m"], heights: [30, 40, 50],
-            measured: [true, true, true])
+            start..<end, ids: replaced, sources: ["m", "m", "m"], heights: [30, 40, 50])
         let finalIDs = Array(ids[..<start]) + replaced + Array(ids[end...])
         let finalSources = Array(ids[..<start]) + ["m", "m", "m"] + Array(ids[end...])
         var rebuilt = TranscriptGeometry()
@@ -120,26 +105,16 @@ struct TranscriptGeometryTests {
         for y in stride(from: CGFloat(0), to: rebuilt.totalHeight, by: 7) {
             #expect(incremental.index(at: y) == rebuilt.index(at: y))
         }
-        let place = rebuilt.readingPlace(atViewportTop: 100, markerHeight: 1)
+        let place = rebuilt.readingPlace(atViewportTop: 100)
         #expect(place.flatMap(incremental.offset(for:)) == place.flatMap(rebuilt.offset(for:)))
     }
 
     @Test func reflowKeepsRowAnchorAndClampsShrinkingRowOffset() throws {
         var geometry = geometry(["a", "b", "c"], height: 100)
-        let place = try #require(geometry.readingPlace(atViewportTop: 175, markerHeight: 1))
+        let place = try #require(geometry.readingPlace(atViewportTop: 175))
         geometry.setHeights(["a": 200, "b": 30])
         #expect(geometry.offset(for: place) == 230)
         geometry.setHeights(["a": .nan, "b": .infinity, "absent": 500])
         #expect(geometry.totalHeight == 330)
-    }
-
-    /// The history marker stays first when older rows arrive below it, so
-    /// it cannot say where the reader was.
-    @Test func readingPlaceSkipsTheHistoryMarker() throws {
-        var geometry = geometry(["marker", "a", "b"], height: 100)
-        geometry.setHeights(["marker": 1])
-        let place = try #require(geometry.readingPlace(atViewportTop: 0, markerHeight: 1))
-        #expect(place.anchorID == "a")
-        #expect(place.offsetIntoRow == -1)
     }
 }

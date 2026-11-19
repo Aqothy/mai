@@ -8,5 +8,4 @@ nonisolated struct TranscriptTurnHeader: Hashable, Sendable {
     let title: String
     let isRunning: Bool
     let isExpanded: Bool
-    let hasFailure: Bool
 }

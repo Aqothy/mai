@@ -16,8 +16,7 @@ import Observation
 /// following; (4) every geometry change keeps the reading place; (5) end
 /// visibility comes from the same pass; (6) expanding stops following until
 /// the end shows; (7) a jump follows; (9) the transcript shows once its
-/// first rows land on the end, and keeps its place when shown again; (10) a
-/// selection stops following.
+/// first rows land on the end, and keeps its place when shown again.
 @MainActor
 @Observable
 final class TranscriptController {
@@ -154,7 +153,7 @@ final class TranscriptController {
             move(to: endTop(viewport))
         }
         detachedTop = host.viewportTop
-        detachedPlace = geometry.readingPlace(atViewportTop: detachedTop, markerHeight: 1)
+        detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
         host.setNeedsFrameUpdates(false)
         self.host = nil
     }
@@ -229,35 +228,26 @@ final class TranscriptController {
     /// touches only the rows from `range` on: a streamed message gaining a
     /// block. A row that stays keeps its height unless `heights` has one.
     func replaceRows(_ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat]) {
-        var old: [String: (row: TranscriptRow, height: CGFloat, measured: Bool)] = [:]
-        for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index), geometry.isMeasured[index]) }
+        var old: [String: (row: TranscriptRow, height: CGFloat)] = [:]
+        for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index)) }
         let width = columnWidth > 0 ? columnWidth : 600
         var versioned = replacement
         var newHeights: [CGFloat] = []
-        var measured: [Bool] = []
         for index in versioned.indices {
             let id = versioned[index].id
             if let previous = old[id] {
                 versioned[index].contentVersion =
                     previous.row.kind == versioned[index].kind ? previous.row.contentVersion : previous.row.contentVersion + 1
             }
-            if let height = heights[id] {
-                newHeights.append(height)
-                measured.append(true)
-            } else if let previous = old[id] {
-                newHeights.append(previous.height)
-                measured.append(previous.measured)
-            } else {
-                newHeights.append(HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
-                measured.append(false)
-            }
+            newHeights.append(
+                heights[id] ?? old[id]?.height
+                    ?? HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
         }
         arrivedRowIDs = Set(versioned.lazy.map(\.id).filter { old[$0] == nil })
         changeGeometry {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
-                range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights,
-                measured: measured)
+                range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
         }
         scheduleWork()
     }
@@ -293,7 +283,7 @@ final class TranscriptController {
     func changeGeometry(_ change: () -> Void) {
         let follows = isFollowingEnd
         let top = host?.viewportTop ?? detachedTop
-        let place = follows ? nil : geometry.readingPlace(atViewportTop: top, markerHeight: 1)
+        let place = follows ? nil : geometry.readingPlace(atViewportTop: top)
         change()
         guard let host else { return }
         adjusting { host.setDocumentHeight(geometry.totalHeight) }

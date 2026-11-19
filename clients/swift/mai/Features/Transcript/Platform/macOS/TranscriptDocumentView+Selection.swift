@@ -215,7 +215,6 @@
             onComment?(quote, target.messageID, target.role)
         }
 
-
         // MARK: Positions
 
         /// The column's left edge in the document.

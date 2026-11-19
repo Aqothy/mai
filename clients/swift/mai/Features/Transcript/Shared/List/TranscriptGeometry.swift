@@ -15,8 +15,6 @@ nonisolated struct TranscriptGeometry {
     /// into share it: a reply's blocks all show the same message.
     private(set) var sources: [String] = []
     private(set) var heights: [CGFloat] = []
-    /// Whether a row's height came from its layout rather than an estimate.
-    private(set) var isMeasured: [Bool] = []
     private(set) var totalHeight: CGFloat = 0
     /// 1-based Fenwick tree over `heights`.
     private var tree: [CGFloat] = [0]
@@ -38,53 +36,28 @@ nonisolated struct TranscriptGeometry {
     ) {
         let previous = indices
         let oldHeights = heights
-        let oldMeasured = isMeasured
         self.ids = ids
         self.sources = sources.count == ids.count ? sources : ids
         heights = []
         heights.reserveCapacity(ids.count)
-        isMeasured = []
-        isMeasured.reserveCapacity(ids.count)
         for (index, id) in ids.enumerated() {
             if let height = measured[id], height.isFinite {
                 heights.append(Self.clamped(height))
-                isMeasured.append(true)
             } else if let old = previous[id] {
                 heights.append(oldHeights[old])
-                isMeasured.append(oldMeasured[old])
             } else {
                 heights.append(Self.clamped(estimate(index)))
-                isMeasured.append(false)
             }
         }
         rebuildIndex()
         rebuildTree()
     }
 
-    /// Adds a row after the last one in O(log n): a streamed block or a new
-    /// turn arriving at the end.
-    mutating func append(id: String, source: String, height: CGFloat, measured: Bool = false) {
-        let height = Self.clamped(height)
-        ids.append(id)
-        sources.append(source)
-        heights.append(height)
-        isMeasured.append(measured)
-        let count = ids.count
-        if indices[id] == nil { indices[id] = count - 1 }
-        if sourceStarts[source] == nil { sourceStarts[source] = count - 1 }
-        // The new node covers (count - lowbit, count]: this height plus the
-        // rows before it that the node also spans.
-        let lowbit = count & -count
-        tree.append(height + prefix(count - 1) - prefix(count - lowbit))
-        totalHeight += height
-    }
-
     /// Replaces the rows in `range` with new ones, in O(rows after
     /// `range.lowerBound` × log n): a streamed message gaining a block near
     /// the end touches only the rows from there on.
     mutating func replaceRows(
-        _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat],
-        measured newMeasured: [Bool]
+        _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat]
     ) {
         let start = range.lowerBound
         // Forget the index entries that point at or after the change.
@@ -95,7 +68,6 @@ nonisolated struct TranscriptGeometry {
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
         heights.replaceSubrange(range, with: newHeights.map(Self.clamped))
-        isMeasured.replaceSubrange(range, with: newMeasured)
         for index in start..<ids.count {
             if indices[ids[index]] == nil { indices[ids[index]] = index }
             if sourceStarts[sources[index]] == nil { sourceStarts[sources[index]] = index }
@@ -126,9 +98,8 @@ nonisolated struct TranscriptGeometry {
         }
     }
 
-    mutating func setHeight(_ height: CGFloat, at index: Int, measured: Bool = true) {
+    private mutating func setHeight(_ height: CGFloat, at index: Int) {
         let height = Self.clamped(height)
-        isMeasured[index] = isMeasured[index] || measured
         let delta = height - heights[index]
         guard delta != 0 else { return }
         heights[index] = height
@@ -176,12 +147,9 @@ nonisolated struct TranscriptGeometry {
 
     // MARK: Reading place
 
-    /// The place of a reader whose viewport top is at `top`. Rows no taller
-    /// than `markerHeight` are passed over: the history marker stays first
-    /// when older rows arrive below it, so it cannot say where the reader was.
-    func readingPlace(atViewportTop top: CGFloat, markerHeight: CGFloat) -> ReadingPlace? {
-        guard var index = index(at: max(0, top)) else { return nil }
-        while index < ids.count - 1, heights[index] <= markerHeight { index += 1 }
+    /// The place of a reader whose viewport top is at `top`.
+    func readingPlace(atViewportTop top: CGFloat) -> ReadingPlace? {
+        guard let index = index(at: max(0, top)) else { return nil }
         let rowTop = prefix(index)
         let source = sources[index]
         let sourceStart = sourceStarts[source] ?? index

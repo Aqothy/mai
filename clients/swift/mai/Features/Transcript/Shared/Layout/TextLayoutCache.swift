@@ -68,10 +68,6 @@ nonisolated final class TextLayoutCache: Sendable {
         }
     }
 
-    func removeAll() {
-        state.withLock { $0 = State() }
-    }
-
     private static func key(_ request: RowLayoutRequest) -> Key {
         Key(
             kind: request.kind, width: request.key.width, styleVersion: request.key.styleVersion,

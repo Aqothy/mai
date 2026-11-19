@@ -16,7 +16,7 @@ nonisolated enum RowLayoutBuilder {
 
     private static func body(
         _ kind: TranscriptRowKind, width: CGFloat, style: TextStyle, codeColors: CodeColors?,
-        previousCode: CodeLayout? = nil
+        previousCode: CodeLayout?
     ) -> (CGFloat, RowContentLayout) {
         switch kind {
         case .markdownBlock(let block, let position):
@@ -95,8 +95,6 @@ nonisolated enum RowLayoutBuilder {
                 styled, width: max(1, width - 24), options: .init(lineSpacing: style.lineSpacing))
             let frame = CGRect(x: 0, y: 6, width: width, height: layout.size.height + 24)
             return (frame.height + 12, .notice(layout, frame: frame, textOrigin: CGPoint(x: 12, y: 18)))
-        case .historyMarker:
-            return (1, .empty)
         }
     }
 

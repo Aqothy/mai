@@ -22,7 +22,7 @@ nonisolated enum RowSelectableText {
         case .notice(let title, let text):
             guard let text, !text.isEmpty else { return title }
             return title + "\n" + text
-        case .activity, .turnHeader, .turnActions, .working, .historyMarker:
+        case .activity, .turnHeader, .turnActions, .working:
             return nil
         }
     }

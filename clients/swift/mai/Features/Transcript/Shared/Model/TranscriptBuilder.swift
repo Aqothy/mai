@@ -97,8 +97,7 @@ nonisolated struct TranscriptBuilder {
             kind: .turnHeader(
                 TranscriptTurnHeader(
                     turnID: turn.id, title: turn.isRunning ? "Working" : turn.workTitle, isRunning: turn.isRunning,
-                    isExpanded: isExpanded,
-                    hasFailure: turn.entries.contains { $0.status == .failed })))
+                    isExpanded: isExpanded)))
         var didAddHeader = false
         for (index, block) in blocks.enumerated() {
             if block.isFoldable, index != finalMessage {
