@@ -25,9 +25,17 @@ nonisolated final class RowBandLayer: CALayer {
         super.init()
         needsDisplayOnBoundsChange = false
         isOpaque = false
-        // A bitmap from before a width change stays unscaled, pinned to the
-        // row's top left, until the new one lands.
-        contentsGravity = .topLeft
+        // An older bitmap (another width, or a streamed block before it grew
+        // or shrank) stays unscaled at the slice's visual top left until the
+        // new one lands, clipped to the slice so it never spills over the row
+        // below. Gravity is in the layer's own coordinates: rows sit in a
+        // flipped container on the Mac, where "bottom" is the visual top.
+        #if os(macOS)
+            contentsGravity = .bottomLeft
+        #else
+            contentsGravity = .topLeft
+        #endif
+        masksToBounds = true
     }
 
     override init(layer: Any) {
