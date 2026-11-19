@@ -39,9 +39,13 @@
             self.includesActivity = includesActivity
             self.charactersPerSecond = max(16, charactersPerSecond)
             self.turnID = turnID
+            // `-ChatBenchmarkStreamCharacters <n>`: a longer reply, the
+            // fixtures repeated.
+            let requested = UserDefaults.standard.integer(forKey: "ChatBenchmarkStreamCharacters")
+            let length = requested > 0 ? requested : 20_000
+            let source = ChatMarkdownFixtures.codeHeavy + "\n\n" + ChatMarkdownFixtures.longMarkdown
             characters = Array(
-                (ChatMarkdownFixtures.codeHeavy + "\n\n" + ChatMarkdownFixtures.longMarkdown)
-                    .prefix(20_000))
+                String(repeating: source + "\n\n", count: length / source.count + 1).prefix(length))
         }
 
         private var turn: TurnView? {

@@ -15,13 +15,24 @@
     /// fixture, chunk size and mode.
     enum ChatMarkdownReplayBenchmark {
         @MainActor static func run() async {
-            let fixtures: [(name: String, text: String)] = [
-                ("code-heavy", ChatMarkdownFixtures.codeHeavy),
-                ("long-markdown", ChatMarkdownFixtures.longMarkdown),
-                ("essay", ChatMarkdownFixtures.essay(wordCount: 3000)),
-                ("long-fence", longFence(lines: 800)),
-                ("long-paragraph", longParagraph(words: 2500)),
-            ]
+            // `-ChatMarkdownReplayExtreme YES`: replies far past normal, to
+            // find where the per-update cost stops being acceptable.
+            let isExtreme = UserDefaults.standard.bool(forKey: "ChatMarkdownReplayExtreme")
+            let fixtures: [(name: String, text: String)] =
+                isExtreme
+                ? [
+                    ("fence-3000-lines", longFence(lines: 3000)),
+                    ("paragraph-60kb", longParagraph(words: 10_000)),
+                    ("table-400-rows", longTable(rows: 400)),
+                    ("reply-200kb", String(repeating: ChatMarkdownFixtures.longMarkdown + "\n\n", count: 12)),
+                ]
+                : [
+                    ("code-heavy", ChatMarkdownFixtures.codeHeavy),
+                    ("long-markdown", ChatMarkdownFixtures.longMarkdown),
+                    ("essay", ChatMarkdownFixtures.essay(wordCount: 3000)),
+                    ("long-fence", longFence(lines: 800)),
+                    ("long-paragraph", longParagraph(words: 2500)),
+                ]
             let style = TextStyle.current()
             #if os(macOS)
                 let palette = TextPalette.resolve(for: NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing())
@@ -36,8 +47,8 @@
                 let parse = milliseconds(started.duration(to: .now))
                 print(result(["fixture": fixture.name, "mode": "one-shot parse", "bytes": bytes, "totalMilliseconds": parse,
                     "mebibytesPerSecond": Double(bytes) / 1_048_576 / max(parse / 1000, 1e-9)]))
-                for chunk in [24, 256] {
-                    for draws in [false, true] {
+                for chunk in isExtreme ? [256] : [24, 256] {
+                    for draws in isExtreme ? [true] : [false, true] {
                         let times = await replay(
                             fixture.text, chunk: chunk, style: style, drawing: draws ? drawing : nil)
                         let sorted = times.sorted()
@@ -87,6 +98,12 @@
                 text += "\tvalue\(line) := compute(input[\(line)], \"step \(line)\") // keep \(line % 7)\n"
             }
             return text + "```\n\nThat is all."
+        }
+
+        private static func longTable(rows: Int) -> String {
+            var text = "| Option | Default | Effect |\n| --- | --- | --- |\n"
+            for row in 0..<rows { text += "| `option\(row)` | \(row % 5) | changes **step \(row)** of the stream |\n" }
+            return text + "\nThat is the table."
         }
 
         private static func longParagraph(words: Int) -> String {

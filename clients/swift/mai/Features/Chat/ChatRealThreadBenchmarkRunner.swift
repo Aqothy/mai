@@ -116,9 +116,12 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         if ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil,
             let plan = ChatBenchmarkAutoRun.plan, plan == "stream" || plan == "streamScroll"
         {
+            // `-ChatBenchmarkStreamCharactersPerSecond <n>` (1000 by default).
+            let rate = UserDefaults.standard.double(forKey: "ChatBenchmarkStreamCharactersPerSecond")
             let driver = ChatSyntheticStreamingBenchmark(
                 store: store,
-                includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"))
+                includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"),
+                charactersPerSecond: rate > 0 ? rate : 1_000)
             driver.prepare()
             try? await Task.sleep(for: .milliseconds(500))
             await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
@@ -159,10 +162,13 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             label: "real-scroll-3000pps"
         )
         try? await Task.sleep(for: .seconds(1))
+        // `-ChatBenchmarkFlingPointsPerSecond <n>` replaces the 8000 pt/s fling.
+        let fling = UserDefaults.standard.integer(forKey: "ChatBenchmarkFlingPointsPerSecond")
+        let flingSpeed = fling > 0 ? fling : 8_000
         _ = await benchmark.runScrollBenchmark(
-            pointsPerSecond: 8_000,
+            pointsPerSecond: CGFloat(flingSpeed),
             maximumSweepSeconds: 8,
-            label: "real-fling-8000pps"
+            label: "real-fling-\(flingSpeed)pps"
         )
         finish("CHAT_BENCHMARK_COMPLETE")
     }
