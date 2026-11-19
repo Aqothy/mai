@@ -55,6 +55,9 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     var syncFallbackDraws: Int?
     var syncLayouts: Int?
     var arrivalDraws: Int?
+    /// Visible rows placed at another height than their layout's (overlap or
+    /// gap); 0 when correct.
+    var misplacedRows: Int?
 
     var summary: String {
         """
@@ -301,11 +304,13 @@ final class ChatBenchmarkModel {
     @ObservationIgnored private var fallbackDrawsAtStart = 0
     @ObservationIgnored private var syncLayoutsAtStart = 0
     @ObservationIgnored private var arrivalDrawsAtStart = 0
+    @ObservationIgnored private var misplacedRowsAtStart = 0
 
     private func noteStart(_ label: String) {
         fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
         syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
         arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
+        misplacedRowsAtStart = TranscriptDebugCounters.misplacedRows
         Self.note("benchmark start: \(label)")
     }
 
@@ -360,6 +365,7 @@ final class ChatBenchmarkModel {
         fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
         syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
         arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
+        misplacedRowsAtStart = TranscriptDebugCounters.misplacedRows
         let monitor = ChatFramePacingMonitor()
         var scrollsUpward = true
         let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
@@ -482,6 +488,12 @@ final class ChatBenchmarkModel {
             var staleFrames = 0
             var staleRun = 0
             var longestStaleRun = 0
+            // Frames whose text trails the column by more than 16 points (a
+            // visible reflow lag, not one frame behind), and the longest run.
+            var laggingFrames = 0
+            var lagRun = 0
+            var longestLagRun = 0
+            var lagSum: CGFloat = 0
             var frames = 0
             await withCheckedContinuation { continuation in
                 monitor.start(
@@ -504,6 +516,15 @@ final class ChatBenchmarkModel {
                         } else {
                             staleRun = 0
                         }
+                        let lag = TranscriptDebugCounters.visibleWidthLag
+                        lagSum += lag
+                        if lag > 16 {
+                            laggingFrames += 1
+                            lagRun += 1
+                            longestLagRun = max(longestLagRun, lagRun)
+                        } else {
+                            lagRun = 0
+                        }
                     }
                     started = started ?? link.timestamp
                     let progress = (link.timestamp - (started ?? link.timestamp)) / seconds
@@ -519,7 +540,10 @@ final class ChatBenchmarkModel {
             }
             window.setContentSize(startSize)
             if TranscriptEngine.isNewEngineEnabled {
-                ChatBenchmarkAutoRun.trace("resize reflow staleFrames=\(staleFrames) of \(frames) longestStaleRun=\(longestStaleRun)")
+                ChatBenchmarkAutoRun.trace(
+                    "resize reflow staleFrames=\(staleFrames) of \(frames) longestStaleRun=\(longestStaleRun)"
+                        + " laggingFrames=\(laggingFrames) longestLagRun=\(longestLagRun)"
+                        + " meanLag=\(Int(lagSum / CGFloat(max(1, frames))))")
             }
             if encounteredOcclusion { Self.note("invalid measurement: visible=false during resize") }
             return finish(monitor, label: label)
@@ -585,6 +609,7 @@ final class ChatBenchmarkModel {
             report.syncFallbackDraws = TranscriptDebugCounters.syncFallbackDraws - fallbackDrawsAtStart
             report.syncLayouts = TranscriptDebugCounters.syncLayouts - syncLayoutsAtStart
             report.arrivalDraws = TranscriptDebugCounters.arrivalDraws - arrivalDrawsAtStart
+            report.misplacedRows = TranscriptDebugCounters.misplacedRows - misplacedRowsAtStart
         }
         Self.logger.notice("\(report.summary, privacy: .public)")
         Self.logger.notice(

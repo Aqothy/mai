@@ -118,6 +118,7 @@ final class TranscriptRowMounter {
         var missingLayouts: [Int] = []
         #if DEBUG
             var staleVisibleRows = 0
+            var visibleWidthLag: CGFloat = 0
         #endif
         if let range = geometry.indices(overlapping: max(0, drawn.minY), drawn.maxY) {
             for index in range {
@@ -137,7 +138,13 @@ final class TranscriptRowMounter {
                     continue
                 }
                 #if DEBUG
-                    if layout.key.width != controller.columnWidth, frame.intersects(visible) { staleVisibleRows += 1 }
+                    if layout.key.width != controller.columnWidth, frame.intersects(visible) {
+                        staleVisibleRows += 1
+                        visibleWidthLag = max(visibleWidthLag, abs(layout.key.width - controller.columnWidth))
+                    }
+                    if layout.height != frame.height, frame.intersects(visible) {
+                        TranscriptDebugCounters.misplacedRows += 1
+                    }
                 #endif
                 mount(
                     controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
@@ -148,6 +155,7 @@ final class TranscriptRowMounter {
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
         #if DEBUG
             TranscriptDebugCounters.staleVisibleRows = staleVisibleRows
+            TranscriptDebugCounters.visibleWidthLag = visibleWidthLag
         #endif
         if !missingLayouts.isEmpty { controller.prefetch(missingLayouts) }
 
@@ -205,7 +213,7 @@ final class TranscriptRowMounter {
             isNew = true
         }
         layer.placementStamp = stamp
-        let target = CGRect(x: x, y: frame.minY, width: width, height: max(frame.height, layout.height))
+        let target = CGRect(x: x, y: frame.minY, width: width, height: frame.height)
         if layer.placedFrame != target {
             layer.placedFrame = target
             layer.frame = target
