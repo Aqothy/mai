@@ -350,12 +350,6 @@ final class TranscriptController {
         follow.noteExpansion()
     }
 
-    /// Rule 10 (Q1).
-    func noteSelectionStarted() {
-        follow.noteSelectionStarted()
-        updateEndVisibility()
-    }
-
     // MARK: Viewport math
 
     static func columnWidth(for viewportWidth: CGFloat) -> CGFloat {

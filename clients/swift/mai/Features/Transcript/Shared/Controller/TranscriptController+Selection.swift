@@ -9,7 +9,6 @@ extension TranscriptController {
     /// Replaces the selection. Starting one stops following (rule 10).
     func setSelection(_ newSelection: TranscriptSelection?) {
         guard newSelection != selection else { return }
-        if selection == nil, newSelection != nil { noteSelectionStarted() }
         selection = newSelection
         host?.setNeedsSelectionDisplay()
     }

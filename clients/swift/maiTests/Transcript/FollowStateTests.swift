@@ -43,13 +43,4 @@ struct FollowStateTests {
         state.noteEndVisible(true)
         #expect(state.isFollowing)
     }
-
-    /// Rule 10 (Q1): starting a selection stops following like a reader move.
-    @Test func startingASelectionStopsFollowing() {
-        var state = FollowState()
-        state.noteSelectionStarted()
-        #expect(!state.isFollowing)
-        state.noteEndVisible(true)
-        #expect(!state.isFollowing)
-    }
 }

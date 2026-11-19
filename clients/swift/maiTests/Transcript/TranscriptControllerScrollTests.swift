@@ -291,12 +291,16 @@ struct TranscriptControllerScrollTests {
 
     // MARK: Rule 10: selection
 
-    @Test func startingASelectionStopsFollowing() {
+    /// Selecting is not a reader move: a reply streaming at the end keeps
+    /// following under a selection, as in the Claude and ChatGPT apps.
+    @Test func aSelectionKeepsFollowing() {
         let (controller, host) = make()
         controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
-        controller.noteSelectionStarted()
+        controller.setSelection(
+            TranscriptSelection(
+                anchor: TextPosition(rowID: "row-8", offset: 0), focus: TextPosition(rowID: "row-9", offset: 1)))
         controller.setHeights(["row-9": 300])
-        #expect(host.viewportTop == 800)
-        #expect(!controller.isFollowing)
+        #expect(host.viewportTop == 1_000)
+        #expect(controller.isFollowing)
     }
 }

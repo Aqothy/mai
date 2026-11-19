@@ -38,9 +38,4 @@ nonisolated struct FollowState: Equatable, Sendable {
         isFollowing = true
         resumesWhenEndBecomesVisible = true
     }
-
-    /// Content must not move under a selection being made (Q1).
-    mutating func noteSelectionStarted() {
-        note(.awayFromEnd)
-    }
 }
