@@ -47,8 +47,8 @@ final class TranscriptController {
     /// far from the end the viewport was.
     @ObservationIgnored private(set) var endJump: (start: ContinuousClock.Instant, distance: CGFloat)?
     /// Rows added by the latest change to a message's rows (a block streamed
-    /// in): the host fades their text in and draws them as they arrive,
-    /// which is not a failure to draw ahead. Cleared once placed.
+    /// in): drawn as they arrive, which the benchmark counts apart from
+    /// failures to draw ahead. Cleared once placed.
     @ObservationIgnored var arrivedRowIDs: Set<String> = []
     #if DEBUG
         @ObservationIgnored var debugReaderMoves: [ScrollFollowPolicy.ReaderScroll] = []

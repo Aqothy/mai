@@ -5,9 +5,8 @@ import Testing
 
 @testable import mai
 
-/// A streamed message's text lands in the order it was written (PLAN 6.6):
-/// a band takes any bitmap newer than the one it shows, and its fades start
-/// with the bitmap that has their text.
+/// A streamed message's text lands in the order it was written (PLAN 6.5):
+/// a band takes any bitmap newer than the one it shows.
 @MainActor
 struct TranscriptStreamOrderTests {
     @Test func aBandTakesAnyBitmapNewerThanItShowsButNotOlder() {
@@ -36,17 +35,4 @@ struct TranscriptStreamOrderTests {
         #expect(band.wants(band.generation))
     }
 
-    @Test func fadesStartWithTheBitmapThatHasTheirText() {
-        let band = RowBandLayer()
-        band.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
-        band.invalidate()
-        let first = band.generation
-        band.fadeIn([CGRect(x: 0, y: 0, width: 10, height: 10)])
-        band.invalidate()
-        band.fadeIn([CGRect(x: 0, y: 20, width: 10, height: 10)])
-        band.show(nil, generation: first)
-        #expect(band.mask?.sublayers?.count == 2, "the solid plus the first generation's one piece")
-        band.show(nil, generation: band.generation)
-        #expect(band.mask?.sublayers?.count == 3)
-    }
 }

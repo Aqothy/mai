@@ -41,9 +41,6 @@ final class TranscriptRowMounter {
     /// Whether any row may show a highlight, so rows without a selection
     /// skip the lookup.
     private var hasSelection = false
-    /// Read once per placement: streamed text fades in unless motion is
-    /// reduced.
-    private var reducesMotion = false
     private var pool: [RowLayer] = []
     private var stamp = 0
     private var isStale = true
@@ -97,7 +94,6 @@ final class TranscriptRowMounter {
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
         scale: CGFloat, showsContent: Bool
     ) {
-        reducesMotion = TranscriptMotion.isReduced
         hasSelection = drawsSelection && controller.selection != nil
         isStale = false
         let geometry = controller.geometry
@@ -208,8 +204,7 @@ final class TranscriptRowMounter {
         let isStreaming = controller.isStreaming(row)
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
-            isGrowing: isStreaming, fadesNewText: isStreaming && !reducesMotion,
-            isArrival: controller.arrivedRowIDs.contains(row.id))
+            isGrowing: isStreaming)
         if hasSelection {
             layer.showSelection(controller.selectedRange(inRowAt: index), color: selectionColor)
         }

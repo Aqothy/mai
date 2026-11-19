@@ -8,7 +8,7 @@ import Foundation
 #endif
 
 /// Whether the reader asked for less motion: streamed text then shows at
-/// once, without pacing or fading in (PLAN D2).
+/// once, without pacing (PLAN D2).
 @MainActor
 enum TranscriptMotion {
     static var isReduced: Bool {

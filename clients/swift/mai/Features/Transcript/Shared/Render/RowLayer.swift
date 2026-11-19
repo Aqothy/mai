@@ -60,12 +60,11 @@ nonisolated final class RowLayer: CALayer {
 
     /// Shows `layout` for `rowID`. Bands redraw only when the layout or the
     /// palette changed. `isGrowing`: the row is streaming and grows at its
-    /// bottom. `fadesNewText`: text it did not show before fades in once its
-    /// bitmap lands (PLAN 6.6), all of it for a row that just arrived.
+    /// bottom.
     @MainActor
     func show(
         rowID: String, layout: RowLayout, palette: TextPalette, drawsWideBody: Bool, scale: CGFloat,
-        isGrowing: Bool = false, fadesNewText: Bool = false, isArrival: Bool = false
+        isGrowing: Bool = false
     ) {
         let sameRow =
             self.rowID == rowID && self.palette.map { $0.isDark == palette.isDark } == true
@@ -79,12 +78,6 @@ nonisolated final class RowLayer: CALayer {
         // The same row with new content (a streamed block growing) keeps the
         // bands that still draw the same.
         let unchanged = sameRow ? RowContentDiff.unchangedHeight(content, layout.content) : 0
-        var revealed: Range<Int>?
-        if fadesNewText {
-            let old = sameRow ? content.selectableLength : (isArrival ? 0 : layout.content.selectableLength)
-            let new = layout.content.selectableLength
-            if new > old { revealed = old..<new }
-        }
         self.rowID = rowID
         layoutKey = layout.key
         self.palette = palette
@@ -94,22 +87,7 @@ nonisolated final class RowLayer: CALayer {
         content = layout.content
         configureShape(palette: palette)
         configureBands(height: layout.height, width: bounds.width, scale: scale, unchangedHeight: unchanged)
-        if let revealed { fadeIn(content.selectionRects(for: revealed)) }
         if selectedRange != nil { drawSelection() }
-    }
-
-    /// Hands each band the part of `rects` (row coordinates) it draws, to
-    /// fade in when its next bitmap lands.
-    @MainActor
-    private func fadeIn(_ rects: [CGRect]) {
-        guard drawsWideBody || content.wideBody == nil else { return }
-        for band in bands {
-            let local = rects.compactMap { rect -> CGRect? in
-                let part = rect.intersection(band.frame)
-                return part.isNull || part.isEmpty ? nil : part.offsetBy(dx: -band.frame.minX, dy: -band.frame.minY)
-            }
-            if !local.isEmpty { band.fadeIn(local) }
-        }
     }
 
     /// Highlights `range` of the row's text (nil: none). A wide block's body
@@ -216,11 +194,11 @@ nonisolated final class RowLayer: CALayer {
             {
                 // Draws the same: at another width (the lines broke where
                 // they did) it keeps its bitmap, pinned top left.
-                if band.frame.width != frame.width { band.resize(to: frame) }
+                if band.frame.width != frame.width { band.frame = frame }
                 continue
             }
             // The old bitmap stays until the new one lands: no blank frame.
-            if band.frame != frame { band.resize(to: frame) }
+            if band.frame != frame { band.frame = frame }
             band.contentsScale = scale
             band.invalidate()
         }
