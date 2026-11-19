@@ -279,7 +279,8 @@
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
                 scroller.transcriptScrollView = enclosingScrollView
-                addSubview(scroller)
+                if scroller.superview == nil { addSubview(scroller) }
+                scroller.isHidden = false
             }
             let frame = body.frame.offsetBy(dx: origin.x, dy: origin.y)
             if scroller.frame != frame { scroller.frame = frame }
@@ -298,7 +299,7 @@
             while buttons.count > accessories.count { recycle(buttons.removeLast()) }
             while buttons.count < accessories.count {
                 let button = accessoryPool.popLast() ?? TranscriptAccessoryButton()
-                addSubview(button)
+                if button.superview == nil { addSubview(button) }
                 buttons.append(button)
             }
             for (button, accessory) in zip(buttons, accessories) {
@@ -322,17 +323,28 @@
             for button in accessoryButtons.removeValue(forKey: rowID) ?? [] { recycle(button) }
         }
 
+        /// Pooled controls stay in the view tree, hidden: adding or removing
+        /// a subview makes SwiftUI's hosting view lay the chat screen out
+        /// again, which in a fast scroll was most of a slow frame.
         private func recycle(_ button: TranscriptAccessoryButton) {
-            button.removeFromSuperview()
             button.resetForReuse()
-            if accessoryPool.count < 16 { accessoryPool.append(button) }
+            button.isHidden = true
+            if accessoryPool.count < 16 {
+                accessoryPool.append(button)
+            } else {
+                button.removeFromSuperview()
+            }
         }
 
         func removeWideBlock(rowID: String) {
             guard let scroller = wideBlocks.removeValue(forKey: rowID) else { return }
-            scroller.removeFromSuperview()
             scroller.resetForReuse()
-            if wideBlockPool.count < 8 { wideBlockPool.append(scroller) }
+            scroller.isHidden = true
+            if wideBlockPool.count < 8 {
+                wideBlockPool.append(scroller)
+            } else {
+                scroller.removeFromSuperview()
+            }
         }
 
         #if DEBUG
