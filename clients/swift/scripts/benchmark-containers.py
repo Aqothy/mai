@@ -30,7 +30,7 @@ def main():
     parser.add_argument("app", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize", "resize"], default="scroll")
+    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize", "sessionsRevisit", "resize"], default="scroll")
     parser.add_argument("--turns", type=int, default=300)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--scrub-period", type=float, default=0)
@@ -73,7 +73,7 @@ def main():
         "syntheticTurns": args.turns,
         "measurement": ("prepared aligned viewport" if args.plan == "open" else
                         "session checkpoints, sampled RSS and final/peak physical footprint"
-                        if args.plan in ("sessions", "sessionsResize") else
+                        if args.plan in ("sessions", "sessionsResize", "sessionsRevisit") else
                         "display-link callback pacing, not presented FPS"),
         "paginated": args.paginated, "floatingBenchmarkWindow": args.float_window,
         "transcriptOnly": not args.with_chrome, "appArguments": args.app_arg,
@@ -111,7 +111,7 @@ def main():
                                "visible=false", "transcript warm timed out"):
                     if marker in text:
                         raise RuntimeError(f"Invalid benchmark ({marker}): {log}")
-                if args.plan in ("sessions", "sessionsResize"):
+                if args.plan in ("sessions", "sessionsResize", "sessionsRevisit"):
                     resident = {}
                     for pid in app_pids(executable):
                         sample = subprocess.run(["ps", "-p", str(pid), "-o", "rss="], text=True, capture_output=True)
@@ -124,10 +124,10 @@ def main():
                     reports = [json.loads(line.removeprefix("CHAT_BENCHMARK_RESULT "))
                                for line in text.splitlines()
                                if line.startswith("CHAT_BENCHMARK_RESULT ")]
-                    expected = 11 if args.plan == "sessionsResize" else 5 if args.plan == "sessions" else 3 if args.plan == "scroll" else 1
+                    expected = 11 if args.plan in ("sessionsResize", "sessionsRevisit") else 5 if args.plan == "sessions" else 3 if args.plan == "scroll" else 1
                     if len(reports) != expected:
                         raise RuntimeError(f"Expected {expected} reports, got {len(reports)}: {log}")
-                    if args.plan in ("open", "sessions", "sessionsResize") and any(not r.get("aligned") or not r.get("visible") for r in reports):
+                    if args.plan in ("open", "sessions", "sessionsResize", "sessionsRevisit") and any(not r.get("aligned") or not r.get("visible") for r in reports):
                         raise RuntimeError(f"Unaligned or hidden opening invalidates run: {log}")
                     if args.plan == "lifecycle" and any(not r.get("passed") for r in reports):
                         raise RuntimeError(f"Lifecycle correctness failure: {log}")

@@ -38,6 +38,11 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
     }
 
     private func run(query: String) async {
+        if ChatBenchmarkAutoRun.plan == "markdown" {
+            await ChatMarkdownReplayBenchmark.run()
+            finish("CHAT_BENCHMARK_COMPLETE")
+            return
+        }
         let started = ContinuousClock.now
         ChatBenchmarkAutoRun.trace("real-thread benchmark start: \(query)")
         guard await pinWindowForDeterministicRuns() else {
@@ -73,7 +78,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             }
         #endif
         #if os(macOS)
-            if ["sessions", "sessionsResize"].contains(ChatBenchmarkAutoRun.plan ?? "") {
+            if ["sessions", "sessionsResize", "sessionsRevisit"].contains(ChatBenchmarkAutoRun.plan ?? "") {
                 await runSessionMemoryBenchmark()
                 finish("CHAT_BENCHMARK_COMPLETE")
                 return
@@ -173,7 +178,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 window.contentMinSize = NSSize(width: 600, height: 400)
                 window.contentMaxSize = NSSize(width: 2000, height: 2000)
             }
-            let visits = ChatBenchmarkAutoRun.plan == "sessionsResize"
+            // `sessionsRevisit`: the same visits without resizing, to time
+            // chats opened again.
+            let visits = ["sessionsResize", "sessionsRevisit"].contains(ChatBenchmarkAutoRun.plan ?? "")
                 ? [1, 2, 3, 4, 5, 1, 5, 2, 4, 3, 1] : [1, 2, 3, 4, 5]
             for (checkpoint, index) in visits.enumerated() {
                 let started = ContinuousClock.now

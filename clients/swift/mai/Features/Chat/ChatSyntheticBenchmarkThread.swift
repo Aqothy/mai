@@ -39,8 +39,12 @@
                 for step in 0..<3 {
                     entries.append(toolEntry(turnID: turnID, turn: turn, step: step))
                 }
+                var answer = assistantAnswer(turn: turn)
+                if UserDefaults.standard.bool(forKey: "ChatBenchmarkUniqueAnswers") {
+                    answer = unique(answer, tag: "\(prefix)-\(turn)")
+                }
                 entries.append(
-                    ThreadFixtures.entry(ref: "\(turnID)-assistant", kind: .assistantMessage, text: assistantAnswer(turn: turn))
+                    ThreadFixtures.entry(ref: "\(turnID)-assistant", kind: .assistantMessage, text: answer)
                 )
                 turns.append(
                     ThreadFixtures.turn(
@@ -75,6 +79,28 @@
                     + "`ThreadStore.applyThreadEvent` and keeps the timeline "
                     + "buffer uniquely referenced while text streams."
             }
+        }
+
+        /// `-ChatBenchmarkUniqueAnswers YES`: every line of an answer carries
+        /// `tag`, so no block repeats across turns or chats, as in real chats
+        /// (the rotating fixtures otherwise repeat six answers, which flatters
+        /// anything keyed by content).
+        private static func unique(_ answer: String, tag: String) -> String {
+            answer.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                // Fences, rules and setext underlines keep their meaning.
+                if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+                    || trimmed.allSatisfy({ "-*_= ".contains($0) })
+                {
+                    return String(line)
+                }
+                if trimmed.hasPrefix("|") {
+                    // A table's delimiter row stays; a cell row tags its first cell.
+                    if trimmed.allSatisfy({ "|:- ".contains($0) }) { return String(line) }
+                    return String(line.replacing("|", with: "| \(tag)", maxReplacements: 1))
+                }
+                return line + " \(tag)"
+            }.joined(separator: "\n")
         }
 
         private static func reasoningEntry(turnID: String, turn: Int) -> EntryView {
