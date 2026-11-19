@@ -113,11 +113,12 @@ nonisolated enum MarkdownTailHealer {
     @discardableResult
     private static func simplifyIncompleteLink(_ text: inout String) -> Bool {
         let paragraph = trailingParagraphStart(of: text)
+        let ticks = backticks(in: text)
         var searchEnd = text.endIndex
         while let open = text[paragraph..<searchEnd].lastIndex(of: "[") {
             searchEnd = open
             if open > text.startIndex, text[text.index(before: open)] == "!" { continue }
-            if isEscaped(open, in: text) || isInsideInlineCode(open, in: text) { continue }
+            if isEscaped(open, in: text) || isInsideInlineCode(open, backticks: ticks) { continue }
             let labelStart = text.index(after: open)
             guard let close = text[labelStart...].firstIndex(of: "]") else {
                 text.remove(at: open)
@@ -220,10 +221,11 @@ nonisolated enum MarkdownTailHealer {
 
     private static func delimiterRanges(_ delimiter: String, in text: String) -> [Range<String.Index>] {
         var result: [Range<String.Index>] = []
+        let ticks = backticks(in: text)
         var cursor = text.startIndex
         while cursor < text.endIndex, let range = text.range(of: delimiter, range: cursor..<text.endIndex) {
             cursor = range.upperBound
-            guard !isEscaped(range.lowerBound, in: text), !isInsideInlineCode(range.lowerBound, in: text)
+            guard !isEscaped(range.lowerBound, in: text), !isInsideInlineCode(range.lowerBound, backticks: ticks)
             else { continue }
             if delimiter.count == 1 {
                 // `*` inside `**` belongs to the double delimiter.
@@ -242,14 +244,29 @@ nonisolated enum MarkdownTailHealer {
         text.range(of: "\n\n", options: .backwards)?.upperBound ?? text.startIndex
     }
 
-    private static func isInsideInlineCode(_ index: String.Index, in text: String) -> Bool {
-        var count = 0
+    /// The unescaped backticks of the last paragraph, in order: found once
+    /// per pass and searched, since a long paragraph has hundreds of
+    /// delimiters to check.
+    private static func backticks(in text: String) -> [String.Index] {
+        var result: [String.Index] = []
         var cursor = trailingParagraphStart(of: text)
-        while cursor < index {
-            if text[cursor] == "`", !isEscaped(cursor, in: text) { count += 1 }
+        while cursor < text.endIndex {
+            if text[cursor] == "`", !isEscaped(cursor, in: text) { result.append(cursor) }
             cursor = text.index(after: cursor)
         }
-        return count % 2 == 1
+        return result
+    }
+
+    /// Inside inline code: an odd number of the last paragraph's backticks
+    /// come before `index`.
+    private static func isInsideInlineCode(_ index: String.Index, backticks: [String.Index]) -> Bool {
+        var low = 0
+        var high = backticks.count
+        while low < high {
+            let middle = (low + high) / 2
+            if backticks[middle] < index { low = middle + 1 } else { high = middle }
+        }
+        return low % 2 == 1
     }
 
     private static func isEscaped(_ index: String.Index, in text: String) -> Bool {
