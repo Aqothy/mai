@@ -96,7 +96,7 @@
             fatalError("init(coder:) has not been implemented")
         }
 
-        private var scale: CGFloat { max(1, traitCollection.displayScale) }
+        var scale: CGFloat { max(1, traitCollection.displayScale) }
 
         // MARK: Lifecycle
 

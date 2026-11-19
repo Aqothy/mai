@@ -11,6 +11,8 @@ protocol TranscriptViewportHost: AnyObject {
     /// Nil until layout gives the viewport a size.
     var viewport: TranscriptViewport? { get }
     var viewportTop: CGFloat { get }
+    /// Pixels per point of the display the transcript is on.
+    var scale: CGFloat { get }
     /// May move the viewport to keep it inside the content (UIKit does, in
     /// the setter).
     func setDocumentHeight(_ height: CGFloat)

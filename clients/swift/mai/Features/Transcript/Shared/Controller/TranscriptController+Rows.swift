@@ -173,9 +173,13 @@ extension TranscriptController {
                 else { continue }
                 codeColors["\(messageID)#\(index)"] = colors
             }
+            let drawing = palette.map { palette in
+                TranscriptStreamWorker.Drawing(
+                    palette: palette, scale: host?.scale ?? 2, colorSpace: RowLayer.colorSpace)
+            }
             let update = TranscriptStreamWorker.Update(
                 messageID: messageID, text: released, isFinished: stream.isFinishing, width: columnWidth, style: style,
-                codeColors: codeColors, isDark: palette?.isDark)
+                codeColors: codeColors, isDark: palette?.isDark, drawing: drawing)
             let worker = streamWorker
             Task { [weak self] in
                 let result = await worker.run(update)
@@ -230,16 +234,19 @@ extension TranscriptController {
             }
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
+        // Laid out at a width the column no longer has (a resize meanwhile):
+        // the rows still change, their layouts come from the layout queue.
+        let laidOut = result.width == columnWidth ? result.rows : []
         var heights: [String: CGFloat] = [:]
-        for (index, kind, layout) in result.layouts where index < newRows.count && newRows[index].kind == kind {
-            heights[newRows[index].id] = layout.height
+        for row in laidOut where row.index < newRows.count && newRows[row.index].kind == row.kind {
+            heights[newRows[row.index].id] = row.layout.height
         }
         let sameIDs = existing.count == newRows.count && zip(existing, newRows).allSatisfy { rows[$0].id == $1.id }
         if sameIDs {
             // Only the blocks the worker laid out changed (finished blocks
             // never do): the rest are not compared again every frame.
-            let changed = result.layouts.compactMap { index, _, _ in
-                index < newRows.count ? (existing[index], newRows[index]) : nil
+            let changed = result.rows.compactMap { row in
+                row.index < newRows.count ? (existing[row.index], newRows[row.index]) : nil
             }
             updateRows(changed, heights: heights)
         } else if let first = existing.first, let last = existing.last {
@@ -248,12 +255,15 @@ extension TranscriptController {
             rebuildRows()
             setHeights(heights)
         }
-        for (index, kind, layout) in result.layouts where index < newRows.count {
-            let id = newRows[index].id
-            guard let rowIndex = geometry.index(for: id), rows[rowIndex].kind == kind else { continue }
+        if laidOut.isEmpty, !result.rows.isEmpty { scheduleWork() }
+        for row in laidOut where row.index < newRows.count {
+            let id = newRows[row.index].id
+            guard let rowIndex = geometry.index(for: id), rows[rowIndex].kind == row.kind else { continue }
             let key = currentKey(rows[rowIndex])
-            layouts[id] = RowLayout(rowID: id, key: key, height: layout.height, content: layout.content)
+            let layout = RowLayout(rowID: id, key: key, height: row.layout.height, content: row.layout.content)
+            layouts[id] = layout
             measuredKeys[id] = key
+            if let drawn = row.drawn { streamedBands[id] = (layout, drawn) }
         }
         if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),
             let length = selectableLength(ofRowAt: index), var selection

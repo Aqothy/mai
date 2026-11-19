@@ -6,10 +6,15 @@ import QuartzCore
 /// lays text out.
 nonisolated final class RowLayer: CALayer {
     static let bandHeight: CGFloat = 512
-    /// A growing row's last band grows in steps of this, so a streamed
-    /// reply reuses its band's backing store for several lines instead of
-    /// Core Animation allocating a new surface for each.
-    static let growthStep: CGFloat = 128
+
+    /// The frames of a row's bands, in row coordinates.
+    static func bandFrames(height: CGFloat, width: CGFloat) -> [CGRect] {
+        let count = max(1, Int(ceil(height / bandHeight)))
+        return (0..<count).map { index in
+            let top = CGFloat(index) * bandHeight
+            return CGRect(x: 0, y: top, width: width, height: min(bandHeight, height - top))
+        }
+    }
 
     private(set) var rowID: String?
     private(set) var layoutKey: RowLayoutKey?
@@ -32,7 +37,6 @@ nonisolated final class RowLayer: CALayer {
     /// The layout and place the accessories were shown for.
     var accessoriesKey: RowLayoutKey?
     var accessoriesOrigin: CGPoint?
-    private var isGrowing = false
 
     override init() {
         super.init()
@@ -59,12 +63,12 @@ nonisolated final class RowLayer: CALayer {
     override func action(forKey event: String) -> (any CAAction)? { nil }
 
     /// Shows `layout` for `rowID`. Bands redraw only when the layout or the
-    /// palette changed. `isGrowing`: the row is streaming and grows at its
-    /// bottom.
+    /// palette changed; `drawn` has bitmaps of the new layout made with it,
+    /// shown now.
     @MainActor
     func show(
         rowID: String, layout: RowLayout, palette: TextPalette, drawsWideBody: Bool, scale: CGFloat,
-        isGrowing: Bool = false
+        drawn: DrawnBands? = nil
     ) {
         let sameRow =
             self.rowID == rowID && self.palette.map { $0.isDark == palette.isDark } == true
@@ -82,11 +86,12 @@ nonisolated final class RowLayer: CALayer {
         layoutKey = layout.key
         self.palette = palette
         self.drawsWideBody = drawsWideBody
-        self.isGrowing = isGrowing
         contentsScale = scale
         content = layout.content
         configureShape(palette: palette)
-        configureBands(height: layout.height, width: bounds.width, scale: scale, unchangedHeight: unchanged)
+        let bitmaps = drawn.flatMap { $0.palette === palette && $0.scale == scale ? $0.bands : nil } ?? []
+        configureBands(
+            height: layout.height, width: bounds.width, scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
         if selectedRange != nil { drawSelection() }
     }
 
@@ -128,11 +133,8 @@ nonisolated final class RowLayer: CALayer {
         guard let palette else { return 0 }
         var drawnNow = 0
         for band in bands where !band.isCurrent && band.frame.intersects(rect) {
-            // On screen with nothing to show, even if its job is queued; but
-            // a streamed message's bands always queue, so they land in order
-            // (`RasterQueue`): a new block drawn now would show before the
-            // last words of the block above it.
-            let drawsNow = !offMain || (band.contents == nil && band.frame.intersects(visible) && !isGrowing)
+            // On screen with nothing to show, even if its job is queued.
+            let drawsNow = !offMain || (band.contents == nil && band.frame.intersects(visible))
             guard drawsNow || !band.isPending else { continue }
             let raster = BandRaster(
                 content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
@@ -142,7 +144,7 @@ nonisolated final class RowLayer: CALayer {
                 drawnNow += 1
             } else {
                 let distance = max(0, band.frame.minY - visible.maxY, visible.minY - band.frame.maxY)
-                RasterQueue.shared.submit(band, raster: raster, priority: distance, isOrdered: isGrowing)
+                RasterQueue.shared.submit(band, raster: raster, priority: distance)
             }
         }
         return drawnNow
@@ -174,21 +176,25 @@ nonisolated final class RowLayer: CALayer {
     }
 
     @MainActor
-    private func configureBands(height: CGFloat, width: CGFloat, scale: CGFloat, unchangedHeight: CGFloat) {
-        let count = max(1, Int(ceil(height / Self.bandHeight)))
-        while bands.count < count {
+    private func configureBands(
+        height: CGFloat, width: CGFloat, scale: CGFloat, unchangedHeight: CGFloat,
+        drawn: [(frame: CGRect, bitmap: BandBitmap?)]
+    ) {
+        let frames = Self.bandFrames(height: height, width: width)
+        while bands.count < frames.count {
             let band = RowBandLayer()
             bands.append(band)
             addSublayer(band)
         }
-        while bands.count > count { bands.removeLast().removeFromSuperlayer() }
-        for (index, band) in bands.enumerated() {
-            let top = CGFloat(index) * Self.bandHeight
-            var bandHeight = min(Self.bandHeight, height - top)
-            if isGrowing {
-                bandHeight = min(Self.bandHeight, (bandHeight / Self.growthStep).rounded(.up) * Self.growthStep)
+        while bands.count > frames.count { bands.removeLast().removeFromSuperlayer() }
+        for (band, frame) in zip(bands, frames) {
+            if let bitmap = drawn.first(where: { $0.frame == frame })?.bitmap {
+                band.frame = frame
+                band.contentsScale = scale
+                band.invalidate()
+                band.show(bitmap, generation: band.generation)
+                continue
             }
-            let frame = CGRect(x: 0, y: top, width: width, height: bandHeight)
             if band.isCurrent || band.isPending, band.frame.minY == frame.minY, band.frame.height == frame.height,
                 frame.maxY <= unchangedHeight
             {

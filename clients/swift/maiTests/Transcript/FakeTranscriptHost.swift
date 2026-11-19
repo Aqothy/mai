@@ -25,6 +25,7 @@ final class FakeTranscriptHost: TranscriptViewportHost {
     }
 
     var viewportTop: CGFloat { offset + topInset }
+    var scale: CGFloat { 2 }
 
     private var maximumOffset: CGFloat {
         max(-topInset, documentHeight + bottomInset - size.height)

@@ -169,6 +169,7 @@ final class TranscriptRowMounter {
         }
         // Arrived rows are mounted now; later mounts are misses again.
         controller.arrivedRowIDs.removeAll()
+        controller.streamedBands.removeAll()
     }
 
     /// Redraws the selection highlight on every mounted row, and the code
@@ -210,10 +211,15 @@ final class TranscriptRowMounter {
             layer.frame = target
         }
         let wideBody = layout.content.wideBody
-        let isStreaming = controller.isStreaming(row)
+        // Bands drawn with a streamed layout, if this is the layout shown
+        // (not one that replaced it since, such as its colors).
+        let streamed = controller.streamedBands[row.id].flatMap { streamed in
+            streamed.layout.key == layout.key && streamed.layout.content.isHighlighted == layout.content.isHighlighted
+                ? streamed.drawn : nil
+        }
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
-            isGrowing: isStreaming)
+            drawn: streamed)
         if hasSelection {
             layer.showSelection(controller.selectedRange(inRowAt: index), color: selectionColor)
         }

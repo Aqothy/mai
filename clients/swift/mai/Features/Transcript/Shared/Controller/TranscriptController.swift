@@ -50,6 +50,9 @@ final class TranscriptController {
     /// in): drawn as they arrive, which the benchmark counts apart from
     /// failures to draw ahead. Cleared once placed.
     @ObservationIgnored var arrivedRowIDs: Set<String> = []
+    /// Bands the stream worker drew with a streamed row's new layout, for
+    /// the row's next placement; cleared by it.
+    @ObservationIgnored var streamedBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
     #if DEBUG
         @ObservationIgnored var debugReaderMoves: [ScrollFollowPolicy.ReaderScroll] = []
     #endif

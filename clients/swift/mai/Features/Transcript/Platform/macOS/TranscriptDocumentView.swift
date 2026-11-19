@@ -65,7 +65,7 @@
         override func updateLayer() {}
 
         private var clip: NSClipView? { enclosingScrollView?.contentView }
-        private var scale: CGFloat { window?.backingScaleFactor ?? 2 }
+        var scale: CGFloat { window?.backingScaleFactor ?? 2 }
 
         // MARK: Lifecycle
 

@@ -25,8 +25,8 @@ nonisolated final class RowBandLayer: CALayer {
         super.init()
         needsDisplayOnBoundsChange = false
         isOpaque = false
-        // An older bitmap (another width, or a streamed block before it grew
-        // or shrank) stays unscaled at the slice's visual top left until the
+        // An older bitmap (another width, or a layout landing with a new
+        // height) stays unscaled at the slice's visual top left until the
         // new one lands, clipped to the slice so it never spills over the row
         // below. Gravity is in the layer's own coordinates: rows sit in a
         // flipped container on the Mac, where "bottom" is the visual top.
@@ -55,9 +55,9 @@ nonisolated final class RowBandLayer: CALayer {
     }
 
     /// Whether a bitmap of `generation` moves the band forward: newer than
-    /// what it shows, even if no longer current. While a stream changes a
-    /// band every frame its jobs finish already outdated; showing each one
-    /// keeps the text moving instead of waiting for a pause.
+    /// what it shows, even if no longer current. While a live resize changes
+    /// a band every frame its jobs finish already outdated; showing each one
+    /// keeps the text reflowing instead of waiting for the resize to end.
     func wants(_ generation: Int) -> Bool {
         generation >= oldestWanted && shownGeneration.map { generation > $0 } ?? true
     }
