@@ -116,6 +116,9 @@ final class TranscriptRowMounter {
         var spanTop = drawn.minY
         var spanBottom = drawn.maxY
         var missingLayouts: [Int] = []
+        #if DEBUG
+            var staleVisibleRows = 0
+        #endif
         if let range = geometry.indices(overlapping: max(0, drawn.minY), drawn.maxY) {
             for index in range {
                 let (minY, height) = geometry.frame(at: index)
@@ -133,6 +136,9 @@ final class TranscriptRowMounter {
                     }
                     continue
                 }
+                #if DEBUG
+                    if layout.key.width != controller.columnWidth, frame.intersects(visible) { staleVisibleRows += 1 }
+                #endif
                 mount(
                     controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
@@ -140,6 +146,9 @@ final class TranscriptRowMounter {
             }
         }
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
+        #if DEBUG
+            TranscriptDebugCounters.staleVisibleRows = staleVisibleRows
+        #endif
         if !missingLayouts.isEmpty { controller.prefetch(missingLayouts) }
 
         for (id, layer) in mounted where layer.placementStamp != stamp {

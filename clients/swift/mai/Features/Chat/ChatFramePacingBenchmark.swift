@@ -477,6 +477,12 @@ final class ChatBenchmarkModel {
             var started: CFTimeInterval?
             var finished = false
             var encounteredOcclusion = false
+            // Frames showing some visible row at an older width, and the
+            // longest run of them: how far reflow trails the window edge.
+            var staleFrames = 0
+            var staleRun = 0
+            var longestStaleRun = 0
+            var frames = 0
             await withCheckedContinuation { continuation in
                 monitor.start(
                     in: window, maximumWallSeconds: seconds + 15,
@@ -489,6 +495,16 @@ final class ChatBenchmarkModel {
                 ) { link in
                     guard !finished else { return }
                     if !Self.isWindowVisible(window) { encounteredOcclusion = true }
+                    if started != nil {
+                        frames += 1
+                        if TranscriptDebugCounters.staleVisibleRows > 0 {
+                            staleFrames += 1
+                            staleRun += 1
+                            longestStaleRun = max(longestStaleRun, staleRun)
+                        } else {
+                            staleRun = 0
+                        }
+                    }
                     started = started ?? link.timestamp
                     let progress = (link.timestamp - (started ?? link.timestamp)) / seconds
                     let fraction = progress <= 0.5 ? progress * 2 : max(0, 2 - progress * 2)
@@ -502,6 +518,9 @@ final class ChatBenchmarkModel {
                 }
             }
             window.setContentSize(startSize)
+            if TranscriptEngine.isNewEngineEnabled {
+                ChatBenchmarkAutoRun.trace("resize reflow staleFrames=\(staleFrames) of \(frames) longestStaleRun=\(longestStaleRun)")
+            }
             if encounteredOcclusion { Self.note("invalid measurement: visible=false during resize") }
             return finish(monitor, label: label)
         }

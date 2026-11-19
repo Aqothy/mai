@@ -14,5 +14,8 @@
         /// A visible row laid out on the main thread because no layout had
         /// landed.
         static var syncLayouts = 0
+        /// Visible rows shown at another width than the column's at the last
+        /// placement: how far reflow lags behind a resize.
+        static var staleVisibleRows = 0
     }
 #endif
