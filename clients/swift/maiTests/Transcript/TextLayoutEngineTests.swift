@@ -57,6 +57,41 @@ struct TextLayoutEngineTests {
         #expect(abs((line.caretOffsets.last ?? 0) - (line.x + line.width)) < 1)
     }
 
+    /// Carets from glyph positions match Core Text's at every character
+    /// boundary, and stay at a cluster's start inside it.
+    @Test(arguments: [
+        "Plain ASCII text, with punctuation; and (brackets) 123.",
+        "café naïve résumé and cafe\u{301} decomposed",
+        "Emoji 👩🏽‍💻 🎉 and flags 🇨🇦 in a line",
+        "漢字かな交じり文 with Latin",
+        "office fifty flow affix ffl",
+        "func consume(ctx context.Context) -> Int { 42 }",
+    ])
+    func glyphCaretsMatchCoreText(text: String) {
+        for font in [style.font(.body).font, style.font(.code).font] {
+            let attributed = NSAttributedString(
+                string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+            let line = CTLineCreateWithAttributedString(attributed)
+            let range = 0..<attributed.length
+            let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+            let glyphs = TextLayoutEngine.caretOffsets(
+                of: line, range: range, string: attributed.string as NSString, indent: 4, width: width)
+            let system = TextLayoutEngine.enumeratedCaretOffsets(of: line, range: range, indent: 4, width: width)
+            #expect(glyphs.count == system.count)
+            #expect(zip(glyphs, glyphs.dropFirst()).allSatisfy { $0 <= $1 })
+            var boundary = 0
+            for character in text {
+                #expect(abs(glyphs[boundary] - system[boundary]) < 0.5, "\(text) at \(boundary)")
+                let next = boundary + character.utf16.count
+                for inside in (boundary + 1)..<max(boundary + 1, next) {
+                    #expect(glyphs[inside] == glyphs[boundary], "inside a cluster of \(text) at \(inside)")
+                }
+                boundary = next
+            }
+            #expect(abs(glyphs[boundary] - system[boundary]) < 0.5)
+        }
+    }
+
     @Test func inlineCodeLinksAndStrikethroughGetDecorations() {
         let text = layout(
             [

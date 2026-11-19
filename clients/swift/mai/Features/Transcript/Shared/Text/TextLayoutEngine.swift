@@ -93,7 +93,8 @@ nonisolated enum TextLayoutEngine {
             lines.append(
                 TextLine(
                     top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: range,
-                    caretOffsets: caretOffsets(of: line, range: range, indent: indent, width: lineWidth),
+                    caretOffsets: TextLayoutEngine.caretOffsets(
+                        of: line, range: range, string: text.string.mutableString, indent: indent, width: lineWidth),
                     runs: firstRun..<runs.count, endsWithNewline: endsWithNewline))
             if let paragraph {
                 addParagraphDecorations(paragraph, lineHeight: height, gapAbove: gapAbove)
@@ -199,24 +200,80 @@ nonisolated enum TextLayoutEngine {
                         color: .tertiary))
             }
         }
+    }
 
-        /// The caret x before each UTF-16 offset of the line, and after its
-        /// last. Core Text reports both edges of every character in visual
-        /// order; the leading edge of a character is the caret before it.
-        private func caretOffsets(of line: CTLine, range: Range<Int>, indent: CGFloat, width: CGFloat) -> [CGFloat] {
-            var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
-            let start = range.lowerBound
-            CTLineEnumerateCaretOffsets(line) { offset, index, leadingEdge, _ in
-                let position = index - start + (leadingEdge ? 0 : 1)
-                guard offsets.indices.contains(position) else { return }
-                if leadingEdge || offsets[position].isNaN { offsets[position] = indent + CGFloat(offset) }
-            }
-            var last = indent
-            for index in offsets.indices {
-                if offsets[index].isNaN { offsets[index] = index == offsets.count - 1 ? max(last, indent + width) : last }
-                last = offsets[index]
-            }
-            return offsets
+    /// The caret x before each UTF-16 offset of `line`, and after its last.
+    /// From the glyph positions the line already has: a character's caret
+    /// is the left edge of the glyph that starts it, the letters of an ASCII
+    /// ligature share its width, and the rest of a cluster (an emoji
+    /// sequence, a combining mark) carets with its start, so hit testing
+    /// never lands inside it. Right-to-left lines ask Core Text, which knows
+    /// visual order but looks every character's cluster up: most of the
+    /// layout time of code and long paragraphs.
+    static func caretOffsets(
+        of line: CTLine, range: Range<Int>, string: NSString, indent: CGFloat, width: CGFloat
+    ) -> [CGFloat] {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        if runs.contains(where: { CTRunGetStatus($0).contains(.rightToLeft) }) {
+            return enumeratedCaretOffsets(of: line, range: range, indent: indent, width: width)
         }
+        var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
+        let start = range.lowerBound
+        for run in runs {
+            let count = CTRunGetGlyphCount(run)
+            guard count > 0 else { continue }
+            var indices = [CFIndex](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            var advances = [CGSize](repeating: .zero, count: count)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
+            CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
+            let runRange = CTRunGetStringRange(run)
+            let runEnd = runRange.location + runRange.length
+            for glyph in 0..<count {
+                let first = indices[glyph]
+                let end = glyph + 1 < count ? indices[glyph + 1] : runEnd
+                // Another glyph of the same character: its first glyph carets it.
+                guard end > first else { continue }
+                let span = end - first
+                let isLigature = span > 1 && (first..<end).allSatisfy { index in
+                    let unit = string.character(at: index)
+                    return unit < 0x80 && unit != 0x0D && unit != 0x0A
+                }
+                for index in first..<end {
+                    let position = index - start
+                    guard offsets.indices.contains(position), offsets[position].isNaN else { continue }
+                    let share = isLigature ? advances[glyph].width * CGFloat(index - first) / CGFloat(span) : 0
+                    offsets[position] = indent + positions[glyph].x + share
+                }
+            }
+        }
+        return filled(offsets, indent: indent, width: width)
+    }
+
+    /// Core Text's own caret offsets, for right-to-left lines (and to check
+    /// the glyph-based ones against). It reports both edges of every
+    /// character in visual order; the leading edge is the caret before it.
+    static func enumeratedCaretOffsets(of line: CTLine, range: Range<Int>, indent: CGFloat, width: CGFloat) -> [CGFloat] {
+        var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
+        let start = range.lowerBound
+        CTLineEnumerateCaretOffsets(line) { offset, index, leadingEdge, _ in
+            let position = index - start + (leadingEdge ? 0 : 1)
+            guard offsets.indices.contains(position) else { return }
+            if leadingEdge || offsets[position].isNaN { offsets[position] = indent + CGFloat(offset) }
+        }
+        return filled(offsets, indent: indent, width: width)
+    }
+
+    /// Offsets without a caret of their own take the one before; the end of
+    /// the line is at least its width.
+    private static func filled(_ offsets: [CGFloat], indent: CGFloat, width: CGFloat) -> [CGFloat] {
+        var offsets = offsets
+        var last = indent
+        for index in offsets.indices {
+            if offsets[index].isNaN { offsets[index] = index == offsets.count - 1 ? max(last, indent + width) : last }
+            last = offsets[index]
+        }
+        return offsets
     }
 }
