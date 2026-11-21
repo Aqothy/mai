@@ -1,8 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// Glyphs of one font and style, positioned in layout coordinates (top-down,
-/// baseline y), copied out of a `CTRun` so they can be drawn on any thread.
+/// Glyphs of one font and style, copied out of a `CTRun` so they can be
+/// drawn on any thread. Positions are as `CTFontDrawGlyphs` takes them under
+/// `TextRenderer`'s flipped text matrix: layout x, and the negated layout y
+/// of the baseline, so drawing needs no copy.
 nonisolated struct TextGlyphRun: Sendable {
     let font: TranscriptFont
     let glyphs: [CGGlyph]

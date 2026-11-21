@@ -24,7 +24,8 @@ nonisolated enum TextLayoutEngine {
         let length = text.length
         guard length > 0 else { return .empty }
         let typesetter = CTTypesetterCreateWithAttributedString(text.string)
-        var builder = Builder(text: text, options: options, availableWidth: width)
+        let nsString = text.string.mutableString
+        var builder = Builder(text: text, nsString: nsString, options: options, availableWidth: width)
         var start = 0
         var paragraphIndex = 0
         while start < length {
@@ -34,27 +35,41 @@ nonisolated enum TextLayoutEngine {
             let paragraph = text.paragraphs.isEmpty ? nil : text.paragraphs[paragraphIndex]
             let isParagraphStart = paragraph.map { $0.start == start } ?? (start == 0)
             let indent = (isParagraphStart ? paragraph?.firstLineIndent : paragraph?.headIndent) ?? 0
-            var count: Int
-            if options.wraps {
-                count = CTTypesetterSuggestLineBreak(typesetter, start, Double(max(1, width - indent)))
-            } else {
-                count = (start..<length).first { text.string.mutableString.character(at: $0) == 0x0A }
-                    .map { $0 - start + 1 } ?? (length - start)
-            }
-            count = max(1, min(count, length - start))
+            let count = nextLineLength(
+                typesetter: typesetter, nsString: nsString, start: start, length: length,
+                availableWidth: max(1, width - indent), wraps: options.wraps)
             let line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
             builder.add(
                 line, range: start..<(start + count), indent: indent, paragraph: paragraph,
                 isParagraphStart: isParagraphStart,
-                endsWithNewline: text.string.mutableString.character(at: start + count - 1) == 0x0A)
+                endsWithNewline: nsString.character(at: start + count - 1) == 0x0A)
             start += count
         }
         return builder.finish()
     }
 
+    /// The UTF-16 length of the line starting at `start`: Core Text's break
+    /// when wrapping, through the next newline when not.
+    private static func nextLineLength(
+        typesetter: CTTypesetter, nsString: NSString, start: Int, length: Int, availableWidth: CGFloat, wraps: Bool
+    ) -> Int {
+        var count: Int
+        if wraps {
+            count = CTTypesetterSuggestLineBreak(typesetter, start, Double(availableWidth))
+        } else {
+            var cursor = start
+            while cursor < length, nsString.character(at: cursor) != 0x0A { cursor += 1 }
+            count = cursor < length ? cursor - start + 1 : length - start
+        }
+        return max(1, min(count, length - start))
+    }
+
     /// Accumulates lines, runs and decorations.
     private struct Builder {
+        private static let fontKey = kCTFontAttributeName as String
+
         let text: StyledText
+        let nsString: NSString
         let options: Options
         let availableWidth: CGFloat
         var lines: [TextLine] = []
@@ -64,8 +79,9 @@ nonisolated enum TextLayoutEngine {
         var width: CGFloat = 0
         var previousQuoteBars: [CGFloat] = []
 
-        init(text: StyledText, options: Options, availableWidth: CGFloat) {
+        init(text: StyledText, nsString: NSString, options: Options, availableWidth: CGFloat) {
             self.text = text
+            self.nsString = nsString
             self.options = options
             self.availableWidth = availableWidth
         }
@@ -89,13 +105,11 @@ nonisolated enum TextLayoutEngine {
             let height = options.fixedLineHeight ?? ceil(ascent + descent + leading)
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let firstRun = runs.count
-            addRuns(of: line, indent: indent, baseline: baseline)
+            let carets = addRunsAndCarets(of: line, range: range, indent: indent, baseline: baseline, width: lineWidth)
             lines.append(
                 TextLine(
                     top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: range,
-                    caretOffsets: TextLayoutEngine.caretOffsets(
-                        of: line, range: range, string: text.string.mutableString, indent: indent, width: lineWidth),
-                    runs: firstRun..<runs.count, endsWithNewline: endsWithNewline))
+                    caretOffsets: carets, runs: firstRun..<runs.count, endsWithNewline: endsWithNewline))
             if let paragraph {
                 addParagraphDecorations(paragraph, lineHeight: height, gapAbove: gapAbove)
             }
@@ -109,32 +123,135 @@ nonisolated enum TextLayoutEngine {
                 runs: runs, decorations: decorations, links: text.links)
         }
 
-        private mutating func addRuns(of line: CTLine, indent: CGFloat, baseline: CGFloat) {
-            let fontKey = kCTFontAttributeName as String
-            for run in CTLineGetGlyphRuns(line) as? [CTRun] ?? [] {
+        /// Copies the line's runs and their decorations, and returns its
+        /// carets, in one pass over Core Text's own glyph buffers.
+        private mutating func addRunsAndCarets(
+            of line: CTLine, range: Range<Int>, indent: CGFloat, baseline: CGFloat, width: CGFloat
+        ) -> [CGFloat] {
+            let ctRuns = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+            let needsCoreTextCarets = ctRuns.contains(where: Self.needsCoreTextCarets)
+            var carets = needsCoreTextCarets ? [] : [CGFloat](repeating: .nan, count: range.count + 1)
+            let rangeStart = range.lowerBound
+
+            for run in ctRuns {
                 let count = CTRunGetGlyphCount(run)
                 guard count > 0 else { continue }
                 let attributes = CTRunGetAttributes(run) as NSDictionary
-                guard let fontValue = attributes[fontKey] as CFTypeRef?,
+                guard let fontValue = attributes[Self.fontKey] as CFTypeRef?,
                     CFGetTypeID(fontValue) == CTFontGetTypeID()
                 else { continue }
                 let font = TranscriptFont(font: unsafeDowncast(fontValue, to: CTFont.self))
                 let styleIndex = (attributes[StyledText.styleKey.rawValue] as? NSNumber)?.intValue ?? 0
                 let style = text.styles.indices.contains(styleIndex) ? text.styles[styleIndex] : TextRunStyle()
-                var glyphs = [CGGlyph](repeating: 0, count: count)
-                var positions = [CGPoint](repeating: .zero, count: count)
-                CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
-                CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
-                for index in positions.indices {
-                    positions[index] = CGPoint(x: indent + positions[index].x, y: baseline - positions[index].y)
+
+                let glyphs: [CGGlyph]
+                if let pointer = CTRunGetGlyphsPtr(run) {
+                    glyphs = Array(UnsafeBufferPointer(start: pointer, count: count))
+                } else {
+                    var buffer = [CGGlyph](repeating: 0, count: count)
+                    CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &buffer)
+                    glyphs = buffer
                 }
+                // Carets come from the same positions in the same pass. The
+                // run keeps them as `CTFontDrawGlyphs` takes them under the
+                // renderer's flipped text matrix: y negated, from the baseline.
                 let stringRange = CTRunGetStringRange(run)
+                let positions = Self.withRunPositions(run, count: count) { positions in
+                    if !needsCoreTextCarets {
+                        Self.accumulateRunCarets(
+                            run: run, count: count, positions: positions, stringRange: stringRange,
+                            rangeStart: rangeStart, nsString: nsString, indent: indent, into: &carets)
+                    }
+                    return positions.map { CGPoint(x: indent + $0.x, y: $0.y - baseline) }
+                }
+
                 runs.append(
                     TextGlyphRun(
                         font: font, glyphs: glyphs, positions: positions, color: style.color,
                         range: stringRange.location..<(stringRange.location + stringRange.length),
                         linkIndex: style.linkIndex))
                 addRunDecorations(run, style: style, font: font, start: positions[0].x, baseline: baseline)
+            }
+
+            if needsCoreTextCarets {
+                return TextLayoutEngine.enumeratedCaretOffsets(
+                    of: line, range: range, string: nsString, indent: indent, width: width)
+            }
+            return TextLayoutEngine.filled(carets, indent: indent, width: width)
+        }
+
+        /// Right-to-left runs, and runs Core Text reordered, take Core Text's
+        /// carets (`caretOffsets`).
+        static func needsCoreTextCarets(_ run: CTRun) -> Bool {
+            !CTRunGetStatus(run).isDisjoint(with: [.rightToLeft, .nonMonotonic])
+        }
+
+        /// Core Text's own positions when it has them in a buffer (usually),
+        /// a copy otherwise; valid only inside `body`.
+        static func withRunPositions<R>(_ run: CTRun, count: Int, _ body: (UnsafeBufferPointer<CGPoint>) -> R) -> R {
+            if let pointer = CTRunGetPositionsPtr(run) { return body(UnsafeBufferPointer(start: pointer, count: count)) }
+            var buffer = [CGPoint](repeating: .zero, count: count)
+            CTRunGetPositions(run, CFRange(location: 0, length: 0), &buffer)
+            return buffer.withUnsafeBufferPointer(body)
+        }
+
+        private static func withRunStringIndices<R>(
+            _ run: CTRun, count: Int, _ body: (UnsafeBufferPointer<CFIndex>) -> R
+        ) -> R {
+            if let pointer = CTRunGetStringIndicesPtr(run) {
+                return body(UnsafeBufferPointer(start: pointer, count: count))
+            }
+            var buffer = [CFIndex](repeating: 0, count: count)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &buffer)
+            return buffer.withUnsafeBufferPointer(body)
+        }
+
+        private static func withRunAdvances<R>(_ run: CTRun, count: Int, _ body: (UnsafeBufferPointer<CGSize>) -> R) -> R {
+            if let pointer = CTRunGetAdvancesPtr(run) { return body(UnsafeBufferPointer(start: pointer, count: count)) }
+            var buffer = [CGSize](repeating: .zero, count: count)
+            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &buffer)
+            return buffer.withUnsafeBufferPointer(body)
+        }
+
+        /// The carets of `run`'s characters (see `caretOffsets`), into
+        /// `offsets` indexed from `rangeStart`.
+        static func accumulateRunCarets(
+            run: CTRun, count: Int, positions: UnsafeBufferPointer<CGPoint>, stringRange: CFRange,
+            rangeStart: Int, nsString: NSString, indent: CGFloat, into offsets: inout [CGFloat]
+        ) {
+            withRunStringIndices(run, count: count) { indicesPtr in
+                let runEnd = stringRange.location + stringRange.length
+                var glyph = 0
+                while glyph < count {
+                    let first = indicesPtr[glyph]
+                    // A character drawn as several glyphs carets at its first.
+                    var nextGlyph = glyph + 1
+                    while nextGlyph < count, indicesPtr[nextGlyph] == first { nextGlyph += 1 }
+                    let end = nextGlyph < count ? indicesPtr[nextGlyph] : runEnd
+                    if end > first {
+                        let span = end - first
+                        var isLigature = false
+                        if span > 1 {
+                            isLigature = true
+                            for idx in first..<end {
+                                let unit = nsString.character(at: idx)
+                                if unit >= 0x80 || unit == 0x0D || unit == 0x0A {
+                                    isLigature = false
+                                    break
+                                }
+                            }
+                        }
+                        let width = isLigature ? withRunAdvances(run, count: count) { $0[glyph].width } : 0
+                        let baseX = indent + positions[glyph].x
+                        for index in first..<end {
+                            let position = index - rangeStart
+                            guard offsets.indices.contains(position), offsets[position].isNaN else { continue }
+                            let share = isLigature ? width * CGFloat(index - first) / CGFloat(span) : 0
+                            offsets[position] = baseX + share
+                        }
+                    }
+                    glyph = nextGlyph
+                }
             }
         }
 
@@ -144,13 +261,15 @@ nonisolated enum TextLayoutEngine {
             guard style.isInlineCode || style.isUnderlined || style.isStruck else { return }
             var ascent: CGFloat = 0
             var descent: CGFloat = 0
-            let runWidth = CGFloat(CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil))
+            let runWidth = CGFloat(
+                CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil))
             let thickness = max(1, CTFontGetUnderlineThickness(font.font))
             if style.isInlineCode {
                 decorations.append(
                     TextDecoration(
                         kind: .inlineCodeBackground,
-                        rect: CGRect(x: start - 3, y: baseline - ascent - 1, width: runWidth + 6, height: ascent + descent + 2),
+                        rect: CGRect(
+                            x: start - 3, y: baseline - ascent - 1, width: runWidth + 6, height: ascent + descent + 2),
                         color: .primary))
             }
             if style.isUnderlined {
@@ -215,7 +334,7 @@ nonisolated enum TextLayoutEngine {
         of line: CTLine, range: Range<Int>, string: NSString, indent: CGFloat, width: CGFloat
     ) -> [CGFloat] {
         let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-        if runs.contains(where: { !CTRunGetStatus($0).isDisjoint(with: [.rightToLeft, .nonMonotonic]) }) {
+        if runs.contains(where: Builder.needsCoreTextCarets) {
             return enumeratedCaretOffsets(of: line, range: range, string: string, indent: indent, width: width)
         }
         var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
@@ -223,34 +342,10 @@ nonisolated enum TextLayoutEngine {
         for run in runs {
             let count = CTRunGetGlyphCount(run)
             guard count > 0 else { continue }
-            var indices = [CFIndex](repeating: 0, count: count)
-            var positions = [CGPoint](repeating: .zero, count: count)
-            var advances = [CGSize](repeating: .zero, count: count)
-            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
-            CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
-            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
-            let runRange = CTRunGetStringRange(run)
-            let runEnd = runRange.location + runRange.length
-            var glyph = 0
-            while glyph < count {
-                let first = indices[glyph]
-                // A character drawn as several glyphs carets at its first.
-                var next = glyph + 1
-                while next < count, indices[next] == first { next += 1 }
-                defer { glyph = next }
-                let end = next < count ? indices[next] : runEnd
-                guard end > first else { continue }
-                let span = end - first
-                let isLigature = span > 1 && (first..<end).allSatisfy { index in
-                    let unit = string.character(at: index)
-                    return unit < 0x80 && unit != 0x0D && unit != 0x0A
-                }
-                for index in first..<end {
-                    let position = index - start
-                    guard offsets.indices.contains(position), offsets[position].isNaN else { continue }
-                    let share = isLigature ? advances[glyph].width * CGFloat(index - first) / CGFloat(span) : 0
-                    offsets[position] = indent + positions[glyph].x + share
-                }
+            Builder.withRunPositions(run, count: count) { positions in
+                Builder.accumulateRunCarets(
+                    run: run, count: count, positions: positions, stringRange: CTRunGetStringRange(run),
+                    rangeStart: start, nsString: string, indent: indent, into: &offsets)
             }
         }
         return filled(offsets, indent: indent, width: width)

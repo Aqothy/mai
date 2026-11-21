@@ -3,7 +3,8 @@ import CoreText
 import Foundation
 
 /// Draws a `TextLayout` into a top-down context, on any thread: glyphs with
-/// `CTFontDrawGlyphs` per run (the run's font and positions from layout),
+/// `CTFontDrawGlyphs` per run (the run's font and positions from layout, as
+/// the flipped text matrix wants them),
 /// decorations with Core Graphics. Only the lines crossing `clip` are drawn.
 nonisolated enum TextRenderer {
     static func draw(
@@ -21,13 +22,10 @@ nonisolated enum TextRenderer {
                 context.setFillColor(color)
                 // Core Text maps glyph positions through the text matrix
                 // (checked: with the flip and unchanged positions nothing
-                // lands in the bitmap), so y is negated to cancel the flip.
-                withUnsafeTemporaryAllocation(of: CGPoint.self, capacity: run.positions.count) { flipped in
-                    for (index, position) in run.positions.enumerated() {
-                        flipped[index] = CGPoint(x: position.x, y: -position.y)
-                    }
-                    run.glyphs.withUnsafeBufferPointer { glyphs in
-                        guard let glyphs = glyphs.baseAddress, let positions = flipped.baseAddress else { return }
+                // lands in the bitmap); runs keep y negated to match.
+                run.glyphs.withUnsafeBufferPointer { glyphs in
+                    run.positions.withUnsafeBufferPointer { positions in
+                        guard let glyphs = glyphs.baseAddress, let positions = positions.baseAddress else { return }
                         CTFontDrawGlyphs(run.font.font, glyphs, positions, run.glyphs.count, context)
                     }
                 }
