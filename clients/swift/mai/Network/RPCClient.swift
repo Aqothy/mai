@@ -208,6 +208,7 @@ final class RPCClient {
         let requestText = try await Self.encode(
             Request(id: requestID, method: method, params: params)
         )
+        try Task.checkCancellation()
         guard let socket = webSocket else {
             throw RPCError("Not connected to maiD")
         }
