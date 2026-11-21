@@ -25,6 +25,9 @@ nonisolated struct AttributedTextBuilder {
 
     let style: TextStyle
     private(set) var text = StyledText()
+    /// The font of the last text appended: the newline ending its paragraph
+    /// takes it, since a line is as tall as its tallest run.
+    private var lastFont: TranscriptFont?
 
     init(style: TextStyle) {
         self.style = style
@@ -43,7 +46,7 @@ nonisolated struct AttributedTextBuilder {
     ) -> StyledText {
         var builder = AttributedTextBuilder(style: style)
         builder.beginParagraph(Environment(blockSpacing: 0))
-        builder.text.append(string, font: style.font(role, bold: bold), style: TextRunStyle(color: color))
+        builder.appendRun(string, font: style.font(role, bold: bold), style: TextRunStyle(color: color))
         return builder.text
     }
 
@@ -64,12 +67,12 @@ nonisolated struct AttributedTextBuilder {
             append(list, environment: environment)
         case .code(_, let code):
             beginParagraph(environment)
-            text.append(code, font: style.font(.code), style: TextRunStyle())
+            appendRun(code, font: style.font(.code), style: TextRunStyle())
         case .table(let table):
             appendNested(table, environment: environment)
         case .rule(let spelling):
             beginParagraph(environment, isRule: true)
-            text.append(spelling, font: style.font(.body), style: TextRunStyle(color: .clear))
+            appendRun(spelling, font: style.font(.body), style: TextRunStyle(color: .clear))
         }
     }
 
@@ -92,10 +95,10 @@ nonisolated struct AttributedTextBuilder {
                 first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
                 beginParagraph(first, headIndent: nested.indent)
                 if let start = list.startIndex {
-                    text.append("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
+                    appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
                 } else {
                     let bullet = ["•", "◦", "▪"][depth % 3]
-                    text.append("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
+                    appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
                 }
                 if case .paragraph(let inlines) = child {
                     append(inlines, Inline())
@@ -110,10 +113,10 @@ nonisolated struct AttributedTextBuilder {
     private mutating func appendNested(_ table: MarkdownTable, environment: Environment) {
         beginParagraph(environment)
         for (rowIndex, cells) in ([table.header] + table.rows).enumerated() {
-            if rowIndex > 0 { text.append("\n", font: style.font(.body), style: TextRunStyle()) }
+            if rowIndex > 0 { appendRun("\n", font: style.font(.body), style: TextRunStyle()) }
             for (column, cell) in cells.enumerated() {
                 if column > 0 {
-                    text.append("  │  ", font: style.font(.body), style: TextRunStyle(color: .secondary))
+                    appendRun("  │  ", font: style.font(.body), style: TextRunStyle(color: .secondary))
                 }
                 append(cell, Inline(bold: rowIndex == 0))
             }
@@ -132,8 +135,14 @@ nonisolated struct AttributedTextBuilder {
                 runStyle.isUnderlined = true
                 runStyle.linkIndex = text.link(url)
             }
-            text.append(inline.text, font: font, style: runStyle)
+            appendRun(inline.text, font: font, style: runStyle)
         }
+    }
+
+    private mutating func appendRun(_ string: String, font: TranscriptFont, style: TextRunStyle) {
+        guard !string.isEmpty else { return }
+        text.append(string, font: font, style: style)
+        lastFont = font
     }
 
     /// Starts a block-level paragraph: a newline ends the one before, and the
@@ -142,7 +151,7 @@ nonisolated struct AttributedTextBuilder {
         _ environment: Environment, headIndent: CGFloat? = nil, isRule: Bool = false
     ) {
         let isFirst = text.length == 0
-        if !isFirst { text.append("\n", font: style.font(.body), style: TextRunStyle()) }
+        if !isFirst { text.append("\n", font: lastFont ?? style.font(.body), style: TextRunStyle()) }
         text.paragraphs.append(
             StyledParagraph(
                 start: text.length, firstLineIndent: environment.indent,

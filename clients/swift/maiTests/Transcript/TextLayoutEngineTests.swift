@@ -157,4 +157,13 @@ struct TextLayoutEngineTests {
             [.list(MarkdownList(startIndex: 3, items: [[.code(language: nil, code: "make")]]))], style: style)
         #expect(numbered.string.string.hasPrefix("3."))
     }
+
+    /// The newline ending a paragraph is in that paragraph's font: in the
+    /// body font, the last line of code in a quote was taller than the rest.
+    @Test func aParagraphBreakDoesNotRaiseTheLineItEnds() {
+        let layout = layout(
+            [.quote([.code(language: nil, code: "a\nb"), .paragraph([MarkdownInline(text: "x")])])], width: 500)
+        #expect(layout.lines.count == 3)
+        #expect(layout.lines[0].height == layout.lines[1].height)
+    }
 }
