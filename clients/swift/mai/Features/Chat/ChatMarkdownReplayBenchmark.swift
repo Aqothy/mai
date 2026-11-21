@@ -22,6 +22,7 @@
                 isExtreme
                 ? [
                     ("fence-3000-lines", longFence(lines: 3000)),
+                    ("wide-fence-3000-lines", longFence(lines: 3000, wide: true)),
                     ("paragraph-60kb", longParagraph(words: 10_000)),
                     ("table-400-rows", longTable(rows: 400)),
                     ("reply-200kb", String(repeating: ChatMarkdownFixtures.longMarkdown + "\n\n", count: 12)),
@@ -92,10 +93,11 @@
             }
         }
 
-        private static func longFence(lines: Int) -> String {
+        private static func longFence(lines: Int, wide: Bool = false) -> String {
             var text = "Here is the whole module:\n\n```go\n"
+            let extra = wide ? " // " + String(repeating: "wide-payload-", count: 10) : ""
             for line in 0..<lines {
-                text += "\tvalue\(line) := compute(input[\(line)], \"step \(line)\") // keep \(line % 7)\n"
+                text += "\tvalue\(line) := compute(input[\(line)], \"step \(line)\") // keep \(line % 7)\(extra)\n"
             }
             return text + "```\n\nThat is all."
         }

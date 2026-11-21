@@ -189,17 +189,25 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             let visits = ["sessionsResize", "sessionsRevisit"].contains(ChatBenchmarkAutoRun.plan ?? "")
                 ? [1, 2, 3, 4, 5, 1, 5, 2, 4, 3, 1] : [1, 2, 3, 4, 5]
             for (checkpoint, index) in visits.enumerated() {
-                let started = ContinuousClock.now
+                var buildMilliseconds: Double = 0
                 if checkpoint > 0 {
                     let identity = index == 1
                         ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
                     if checkpoint < 5 {
+                        let buildStarted = ContinuousClock.now
                         let thread = ChatSyntheticBenchmarkThread.thread(
                             turnCount: turns, identity: identity)
                         store.insertSyntheticBenchmarkThread(thread)
+                        let build = buildStarted.duration(to: .now).components
+                        buildMilliseconds = Double(build.seconds) * 1000 + Double(build.attoseconds) / 1e15
                     }
                     ChatBenchmarkAutoRun.isTranscriptWarm = false
                     ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+                }
+                let started = ContinuousClock.now
+                if checkpoint > 0 {
+                    let identity = index == 1
+                        ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
                     selectThread(identity)
                 }
                 // The end screen shows when the transcript lands on its end,
@@ -252,6 +260,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                         elapsed.attoseconds) / 1e15,
                     "visibleMilliseconds": Double(visible.seconds) * 1000 + Double(
                         visible.attoseconds) / 1e15,
+                    "threadBuildMilliseconds": buildMilliseconds,
                     "selectedLayoutCount": store.selectedThreadTextLayoutStore?.cachedLayoutCount
                         ?? 0,
                     "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
