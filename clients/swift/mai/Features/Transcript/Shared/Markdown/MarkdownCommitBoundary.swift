@@ -142,10 +142,11 @@ nonisolated enum MarkdownCommitBoundary {
 }
 
 extension MarkdownCommitBoundary {
-    /// One source line: where its content starts after up to three spaces of
-    /// indentation, and where the next line starts.
+    /// One source line: where its text starts after its indentation, where
+    /// it ends, and where the next line starts. `indent` is in columns, with
+    /// tab stops of 4 (CommonMark 2.2), so it is not a byte count.
     fileprivate nonisolated struct Line {
-        let start: Int
+        let contentStart: Int
         let contentEnd: Int
         /// Past the newline.
         let end: Int
@@ -154,7 +155,7 @@ extension MarkdownCommitBoundary {
         let isBlank: Bool
 
         func content(in bytes: [UInt8]) -> ArraySlice<UInt8> {
-            bytes[(start + min(indent, 3))..<contentEnd]
+            bytes[contentStart..<contentEnd]
         }
 
         static func split(_ bytes: [UInt8]) -> [Line] {
@@ -165,14 +166,21 @@ extension MarkdownCommitBoundary {
                 while end < bytes.count, bytes[end] != 0x0A { end += 1 }
                 var indent = 0
                 var cursor = start
-                while cursor < end, bytes[cursor] == UInt8(ascii: " ") || bytes[cursor] == UInt8(ascii: "\t") {
-                    indent += bytes[cursor] == UInt8(ascii: "\t") ? 4 : 1
+                while cursor < end {
+                    let byte = bytes[cursor]
+                    if byte == UInt8(ascii: " ") {
+                        indent += 1
+                    } else if byte == UInt8(ascii: "\t") {
+                        indent += 4 - indent % 4
+                    } else {
+                        break
+                    }
                     cursor += 1
                 }
                 let terminated = end < bytes.count
                 lines.append(
                     Line(
-                        start: start, contentEnd: end, end: terminated ? end + 1 : end,
+                        contentStart: cursor, contentEnd: end, end: terminated ? end + 1 : end,
                         isTerminated: terminated, indent: indent, isBlank: cursor == end))
                 start = end + 1
             }

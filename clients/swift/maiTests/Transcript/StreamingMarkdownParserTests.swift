@@ -62,4 +62,14 @@ struct StreamingMarkdownParserTests {
         _ = parser.update(source)
         #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
     }
+
+    /// Go code indents with tabs: a line of one tab and a brace (or a tab
+    /// alone) is shorter than its indent in columns, and used to be sliced
+    /// past its end.
+    @Test func tabIndentedCodeStreamsToTheOneShotBlocks() {
+        let source = "Intro\n\n```go\nfunc main() {\n\tif ok {\n\t\trun()\n\t}\n\t\n}\n```\n\n\tindented\n\t\nDone\n"
+        var parser = StreamingMarkdownParser()
+        for end in 1...source.count { _ = parser.update(String(source.prefix(end))) }
+        #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+    }
 }
