@@ -87,4 +87,15 @@ struct StreamingMarkdownParserTests {
         #expect(
             MarkdownCommitBoundary.committedLength(of: Array((committed + "    more\n").utf8)) == committed.utf8.count)
     }
+
+    /// `[key]: value` is a link definition in prose but code inside a fence
+    /// (YAML, a TypeScript computed key): it must not switch the parser to
+    /// whole-message parsing and drop the committed blocks.
+    @Test func definitionSyntaxInsideAFenceKeepsTheCommittedBlocks() {
+        let source = "First paragraph.\n\n```ts\n[key]: value\n```\n\nAfter.\n"
+        var parser = StreamingMarkdownParser()
+        #expect(parser.update("First paragraph.\n\n").committed.count == 1)
+        #expect(parser.update(String(source.dropLast("After.\n".count))).committed.count == 2)
+        #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+    }
 }

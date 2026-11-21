@@ -26,6 +26,11 @@ nonisolated struct StreamingMarkdownParser: Sendable {
     private var committedLength = 0
     private var source: [UInt8] = []
     private var parsesWholeDocument = false
+    /// Where the definition scan resumes: the start of the first line not
+    /// yet scanned to its end, and the fence open there (a definition's
+    /// syntax inside code is code).
+    private var definitionScanStart = 0
+    private var definitionFence: (marker: UInt8, length: Int)?
 
     mutating func update(_ text: String) -> Snapshot {
         accept(text)
@@ -33,7 +38,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
             return Snapshot(committed: [], open: MarkdownTailHealer.blocks(forOpenTail: text))
         }
         let tail = Array(source[committedLength...])
-        if Self.containsDefinition(tail) {
+        if scanForDefinition() {
             parsesWholeDocument = true
             committed = []
             committedLength = 0
@@ -52,7 +57,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
     /// The finished message's blocks: the tail parsed as written.
     mutating func finish(_ text: String) -> [MarkdownBlock] {
         accept(text)
-        if parsesWholeDocument || Self.containsDefinition(Array(source[committedLength...])) {
+        if parsesWholeDocument || scanForDefinition() {
             parsesWholeDocument = true
             committed = MarkdownPlanner.blocks(from: text)
             committedLength = source.count
@@ -72,29 +77,69 @@ nonisolated struct StreamingMarkdownParser: Sendable {
             committed = []
             committedLength = 0
             parsesWholeDocument = false
+            definitionScanStart = 0
+            definitionFence = nil
+        } else if !bytes.starts(with: source) {
+            // The tail was replaced: scan it again from the committed
+            // boundary, which is never inside a fence.
+            definitionScanStart = min(definitionScanStart, committedLength)
+            definitionFence = nil
         }
         source = bytes
     }
 
-    /// `[label]: destination` or `[^note]: text` at a line start.
-    private static func containsDefinition(_ bytes: [UInt8]) -> Bool {
-        var lineStart = 0
-        while lineStart < bytes.count {
+    /// `[label]: destination` or `[^note]: text` at a line start, outside
+    /// fenced code, in the text not scanned yet: each line is scanned once.
+    private mutating func scanForDefinition() -> Bool {
+        var lineStart = definitionScanStart
+        while lineStart < source.count {
+            var lineEnd = lineStart
+            while lineEnd < source.count, source[lineEnd] != 0x0A { lineEnd += 1 }
+            let isTerminated = lineEnd < source.count
+            let contentEnd = lineEnd
+            var indent = 0
             var cursor = lineStart
-            var spaces = 0
-            while cursor < bytes.count, bytes[cursor] == UInt8(ascii: " "), spaces < 3 {
+            while cursor < contentEnd {
+                let byte = source[cursor]
+                if byte == UInt8(ascii: " ") {
+                    indent += 1
+                } else if byte == UInt8(ascii: "\t") {
+                    indent += 4 - indent % 4
+                } else {
+                    break
+                }
                 cursor += 1
-                spaces += 1
             }
-            if cursor < bytes.count, bytes[cursor] == UInt8(ascii: "[") {
-                var end = cursor + 1
-                while end < bytes.count, bytes[end] != UInt8(ascii: "]"), bytes[end] != 0x0A { end += 1 }
-                if end + 1 < bytes.count, bytes[end] == UInt8(ascii: "]"), bytes[end + 1] == UInt8(ascii: ":") {
-                    return true
+            if let open = definitionFence {
+                if indent < 4, cursor < contentEnd, source[cursor] == open.marker {
+                    var runEnd = cursor
+                    while runEnd < contentEnd, source[runEnd] == open.marker { runEnd += 1 }
+                    let closes =
+                        runEnd - cursor >= open.length
+                        && source[runEnd..<contentEnd].allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") }
+                    if closes, isTerminated { definitionFence = nil }
+                }
+            } else if indent < 4, cursor < contentEnd {
+                let first = source[cursor]
+                if first == UInt8(ascii: "`") || first == UInt8(ascii: "~") {
+                    var runEnd = cursor
+                    while runEnd < contentEnd, source[runEnd] == first { runEnd += 1 }
+                    let opens =
+                        runEnd - cursor >= 3
+                        && (first != UInt8(ascii: "`") || !source[runEnd..<contentEnd].contains(UInt8(ascii: "`")))
+                    if opens, isTerminated { definitionFence = (first, runEnd - cursor) }
+                } else if first == UInt8(ascii: "[") {
+                    var end = cursor + 1
+                    while end < contentEnd, source[end] != UInt8(ascii: "]") { end += 1 }
+                    if end + 1 < contentEnd, source[end] == UInt8(ascii: "]"), source[end + 1] == UInt8(ascii: ":") {
+                        return true
+                    }
                 }
             }
-            while cursor < bytes.count, bytes[cursor] != 0x0A { cursor += 1 }
-            lineStart = cursor + 1
+            // The last line can still change: it is scanned again next time.
+            guard isTerminated else { break }
+            lineStart = lineEnd + 1
+            definitionScanStart = lineStart
         }
         return false
     }
