@@ -28,6 +28,7 @@ actor TerminalFeed {
     }
 
     private var state = State.awaitingSnapshot
+    private var generation = 0
     private var history: Task<Void, Never>?
 
     init(terminal: Terminal, events: @escaping @MainActor (Event) -> Void) {
@@ -41,6 +42,9 @@ actor TerminalFeed {
 
     /// Waits for the snapshot a new stream begins with.
     func expectSnapshot() {
+        generation &+= 1
+        history?.cancel()
+        history = nil
         state = .awaitingSnapshot
     }
 
@@ -80,9 +84,11 @@ actor TerminalFeed {
     /// Installs the snapshot's screen, then restores older history in the
     /// background so the screen shows before history finishes.
     private func install(_ header: TerminalStreamSnapshot, data: Data) async throws {
+        let generation = self.generation
         history?.cancel()
         history = nil
         try await terminal.restore(snapshot: data)
+        guard self.generation == generation else { return }
         state = .live
         let terminal = terminal
         history = Task { [weak self] in
@@ -92,16 +98,18 @@ actor TerminalFeed {
                 case .restored: await Task.yield()
                 case .finished: return
                 case .dropped:
-                    await self?.send(.needsSnapshot)
+                    await self?.send(.needsSnapshot, for: generation)
                     return
                 }
             }
         }
         let title = await terminal.title
-        await send(.snapshot(title: title))
+        guard self.generation == generation else { return }
+        await send(.snapshot(title: title), for: generation)
     }
 
-    private func send(_ event: Event) async {
+    private func send(_ event: Event, for generation: Int) async {
+        guard self.generation == generation else { return }
         await events(event)
     }
 

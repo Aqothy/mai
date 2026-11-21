@@ -245,6 +245,7 @@ final class TerminalAttachment: TerminalIO {
         self.stream = stream
         let feed = feed
         await feed.expectSnapshot()
+        guard self.stream === stream, !isClosed else { return }
         Task { [weak self] in
             let (end, sawSnapshot) = await stream.run(ticket: ticket) { record in
                 try await feed.apply(record)
