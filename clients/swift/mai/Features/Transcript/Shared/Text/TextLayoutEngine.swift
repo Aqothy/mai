@@ -207,15 +207,16 @@ nonisolated enum TextLayoutEngine {
     /// is the left edge of the glyph that starts it, the letters of an ASCII
     /// ligature share its width, and the rest of a cluster (an emoji
     /// sequence, a combining mark) carets with its start, so hit testing
-    /// never lands inside it. Right-to-left lines ask Core Text, which knows
-    /// visual order but looks every character's cluster up: most of the
-    /// layout time of code and long paragraphs.
+    /// never lands inside it. Right-to-left lines, and lines whose glyphs
+    /// Core Text reordered (an Indic vowel sign drawn before its consonant),
+    /// ask Core Text, which knows visual order but looks every character's
+    /// cluster up: most of the layout time of code and long paragraphs.
     static func caretOffsets(
         of line: CTLine, range: Range<Int>, string: NSString, indent: CGFloat, width: CGFloat
     ) -> [CGFloat] {
         let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-        if runs.contains(where: { CTRunGetStatus($0).contains(.rightToLeft) }) {
-            return enumeratedCaretOffsets(of: line, range: range, indent: indent, width: width)
+        if runs.contains(where: { !CTRunGetStatus($0).isDisjoint(with: [.rightToLeft, .nonMonotonic]) }) {
+            return enumeratedCaretOffsets(of: line, range: range, string: string, indent: indent, width: width)
         }
         var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
         let start = range.lowerBound
@@ -230,10 +231,14 @@ nonisolated enum TextLayoutEngine {
             CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
             let runRange = CTRunGetStringRange(run)
             let runEnd = runRange.location + runRange.length
-            for glyph in 0..<count {
+            var glyph = 0
+            while glyph < count {
                 let first = indices[glyph]
-                let end = glyph + 1 < count ? indices[glyph + 1] : runEnd
-                // Another glyph of the same character: its first glyph carets it.
+                // A character drawn as several glyphs carets at its first.
+                var next = glyph + 1
+                while next < count, indices[next] == first { next += 1 }
+                defer { glyph = next }
+                let end = next < count ? indices[next] : runEnd
                 guard end > first else { continue }
                 let span = end - first
                 let isLigature = span > 1 && (first..<end).allSatisfy { index in
@@ -251,14 +256,25 @@ nonisolated enum TextLayoutEngine {
         return filled(offsets, indent: indent, width: width)
     }
 
-    /// Core Text's own caret offsets, for right-to-left lines (and to check
-    /// the glyph-based ones against). It reports both edges of every
-    /// character in visual order; the leading edge is the caret before it.
-    static func enumeratedCaretOffsets(of line: CTLine, range: Range<Int>, indent: CGFloat, width: CGFloat) -> [CGFloat] {
+    /// Core Text's own caret offsets, for right-to-left and reordered lines
+    /// (and to check the glyph-based ones against). It reports both edges of
+    /// every character in visual order; the leading edge is the caret before
+    /// it, the trailing edge the caret after its whole cluster (with
+    /// `string`), so an emoji's second UTF-16 unit never gets a caret.
+    static func enumeratedCaretOffsets(
+        of line: CTLine, range: Range<Int>, string: NSString? = nil, indent: CGFloat, width: CGFloat
+    ) -> [CGFloat] {
         var offsets = [CGFloat](repeating: .nan, count: range.count + 1)
         let start = range.lowerBound
         CTLineEnumerateCaretOffsets(line) { offset, index, leadingEdge, _ in
-            let position = index - start + (leadingEdge ? 0 : 1)
+            let position: Int
+            if leadingEdge {
+                position = index - start
+            } else if let string, index < string.length {
+                position = NSMaxRange(string.rangeOfComposedCharacterSequence(at: index)) - start
+            } else {
+                position = index - start + 1
+            }
             guard offsets.indices.contains(position) else { return }
             if leadingEdge || offsets[position].isNaN { offsets[position] = indent + CGFloat(offset) }
         }

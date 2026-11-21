@@ -180,4 +180,24 @@ struct TextLayoutEngineTests {
             #expect(last.allSatisfy { abs($0.box.maxX - layout.gridSize.width) < 1 }, "\(columns) columns")
         }
     }
+
+    /// Core Text reorders a Devanagari vowel sign before its consonant, so
+    /// glyph order is not text order there: those lines take Core Text's
+    /// carets, and a trailing edge never lands inside an emoji's pair.
+    @Test func reorderedAndRightToLeftLinesTakeCoreTextsCarets() {
+        for text in ["हिन्दी किताब", "שלום 👋 עולם"] {
+            let attributed = NSAttributedString(
+                string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): style.font(.body).font])
+            let line = CTLineCreateWithAttributedString(attributed)
+            let range = 0..<attributed.length
+            let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+            let string = attributed.string as NSString
+            let carets = TextLayoutEngine.caretOffsets(of: line, range: range, string: string, indent: 0, width: width)
+            #expect(
+                carets == TextLayoutEngine.enumeratedCaretOffsets(
+                    of: line, range: range, string: string, indent: 0, width: width))
+            let emoji = string.range(of: "👋")
+            if emoji.location != NSNotFound { #expect(carets[emoji.location + 1] == carets[emoji.location]) }
+        }
+    }
 }
