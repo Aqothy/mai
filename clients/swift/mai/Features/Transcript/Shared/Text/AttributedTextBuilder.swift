@@ -11,6 +11,9 @@ nonisolated struct AttributedTextBuilder {
     struct Environment {
         var indent: CGFloat = 0
         var quoteBars: [CGFloat] = []
+        /// Lists this one is nested in: picks its bullet. Not derived from
+        /// `indent`, which quotes also add to.
+        var listDepth = 0
         var blockSpacing: CGFloat
     }
 
@@ -73,8 +76,9 @@ nonisolated struct AttributedTextBuilder {
     private mutating func append(_ list: MarkdownList, environment: Environment) {
         var nested = environment
         nested.indent += style.listIndent
+        nested.listDepth += 1
         nested.blockSpacing = style.listItemSpacing
-        let depth = Int(environment.indent / style.listIndent)
+        let depth = environment.listDepth
         for (offset, item) in list.items.enumerated() {
             for (blockIndex, child) in item.enumerated() {
                 guard blockIndex == 0, case .paragraph(let inlines) = child else {

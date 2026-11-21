@@ -138,4 +138,12 @@ struct TextLayoutEngineTests {
         let lf = CodeLayout.make(code: "a\nb\nc", language: nil, colors: nil, width: 400, style: style)
         #expect(crlf.size.height == lf.size.height)
     }
+
+    /// A list's bullet follows how deep in lists it is: two quotes indent as
+    /// much as a list, and used to make a top-level list's bullet `◦`.
+    @Test func aListInQuotesStartsAtTheFirstBullet() {
+        let list = MarkdownBlock.list(MarkdownList(startIndex: nil, items: [[.paragraph([MarkdownInline(text: "a")])]]))
+        let text = AttributedTextBuilder.build([.quote([.quote([list])])], style: style)
+        #expect(text.string.string.hasPrefix("•"))
+    }
 }
