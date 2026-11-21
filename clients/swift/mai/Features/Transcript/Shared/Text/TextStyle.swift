@@ -79,17 +79,18 @@ nonisolated struct TextStyle: Sendable {
 
 extension TextStyle {
     @MainActor private static var cached: TextStyle?
-    @MainActor private static var cachedSizes: [CGFloat] = []
+    @MainActor private static var cachedFonts: [CTFont] = []
 
-    /// The style for the current text size; the same value (and version)
-    /// until the user's text size changes.
+    /// The style for the current text size and weight; the same value (and
+    /// version) until the user's fonts change. Fonts compare whole (Core
+    /// Foundation equality): Bold Text changes their weight, not their size.
     @MainActor static func current() -> TextStyle {
         let base = platformFonts()
-        let sizes = FontRole.allCases.map { CTFontGetSize(base($0)) }
-        if let cached, sizes == cachedSizes { return cached }
+        let fonts = FontRole.allCases.map(base)
+        if let cached, fonts == cachedFonts { return cached }
         let style = TextStyle(version: (cached?.version ?? 0) + 1, baseFont: base)
         cached = style
-        cachedSizes = sizes
+        cachedFonts = fonts
         return style
     }
 

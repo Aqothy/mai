@@ -85,7 +85,10 @@
                 (view: TranscriptScrollView, _) in
                 view.updatePalette()
             }
-            registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TranscriptScrollView, _) in
+            // Bold Text changes the fonts' weight, not their size.
+            registerForTraitChanges([
+                UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self,
+            ]) { (view: TranscriptScrollView, _) in
                 view.controller.updateStyle()
             }
             installInteractions()
