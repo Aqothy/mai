@@ -139,9 +139,10 @@ nonisolated enum MarkdownPlanner {
         _ text: String, style: MarkdownInline.Style, link: URL?, to result: inout [MarkdownInline]
     ) {
         guard !text.isEmpty else { return }
-        if var last = result.last, last.style == style, last.link == link {
-            last.text += text
-            result[result.count - 1] = last
+        // In place: a copy of the last run would share its text's storage,
+        // so appending to it would copy the run's text every time.
+        if let last = result.indices.last, result[last].style == style, result[last].link == link {
+            result[last].text += text
         } else {
             result.append(MarkdownInline(text: text, style: style, link: link))
         }
