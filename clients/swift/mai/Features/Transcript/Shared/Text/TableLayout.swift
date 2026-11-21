@@ -16,6 +16,7 @@ nonisolated struct TableLayout: Sendable {
         let column: Int
     }
 
+    let source: MarkdownTable
     let cells: [Cell]
     let dividers: [CGRect]
     /// The grid's size, below the toolbar.
@@ -26,27 +27,53 @@ nonisolated struct TableLayout: Sendable {
 
     var isWiderThanBlock: Bool { gridSize.width > size.width + 0.5 }
 
-    static func make(_ table: MarkdownTable, width: CGFloat, style: TextStyle) -> TableLayout {
+    static func make(
+        _ table: MarkdownTable, width: CGFloat, style: TextStyle, previous: TableLayout? = nil
+    ) -> TableLayout {
         let columns = table.columnCount
         let rows = [table.header] + table.rows
+        // Reuse laid-out cells of unchanged prefix rows when a streaming table
+        // grows at its bottom (PLAN 6.10).
+        let canReuse =
+            previous.map {
+                $0.source.columnCount == columns && $0.source.header == table.header
+                    && $0.cells.count == ($0.source.rows.count + 1) * columns
+            } ?? false
         var measured: [[TextLayout]] = []
+        measured.reserveCapacity(rows.count)
         var columnWidths = [CGFloat](repeating: style.tableMinimumColumnWidth, count: columns)
         for (rowIndex, row) in rows.enumerated() {
+            let reuseRow: Bool
+            if canReuse, let previous {
+                reuseRow =
+                    rowIndex == 0
+                    || (rowIndex - 1 < previous.source.rows.count && previous.source.rows[rowIndex - 1] == row)
+            } else {
+                reuseRow = false
+            }
             var line: [TextLayout] = []
+            line.reserveCapacity(columns)
             for column in 0..<columns {
-                let inlines = row.indices.contains(column) ? row[column] : []
-                var builder = AttributedTextBuilder(style: style)
-                builder.append(
-                    .paragraph(rowIndex == 0 ? inlines.map(Self.bold) : inlines),
-                    environment: .init(blockSpacing: 0))
-                let layout = TextLayoutEngine.layout(
-                    builder.text, width: style.tableMaximumColumnWidth, options: .init(lineSpacing: style.lineSpacing))
+                let layout: TextLayout
+                if reuseRow, let previous {
+                    layout = previous.cells[rowIndex * columns + column].layout
+                } else {
+                    let inlines = row.indices.contains(column) ? row[column] : []
+                    var builder = AttributedTextBuilder(style: style)
+                    builder.append(
+                        .paragraph(rowIndex == 0 ? inlines.map(Self.bold) : inlines),
+                        environment: .init(blockSpacing: 0))
+                    layout = TextLayoutEngine.layout(
+                        builder.text, width: style.tableMaximumColumnWidth,
+                        options: .init(lineSpacing: style.lineSpacing))
+                }
                 columnWidths[column] = max(columnWidths[column], min(style.tableMaximumColumnWidth, layout.size.width))
                 line.append(layout)
             }
             measured.append(line)
         }
         var columnOrigins: [CGFloat] = []
+        columnOrigins.reserveCapacity(columns)
         var x: CGFloat = 0
         for columnWidth in columnWidths {
             columnOrigins.append(x)
@@ -55,7 +82,9 @@ nonisolated struct TableLayout: Sendable {
         let gridWidth = max(0, x - style.tableColumnSpacing)
         let emptyLineHeight = style.font(.body).lineHeight
         var cells: [Cell] = []
+        cells.reserveCapacity(rows.count * columns)
         var dividers: [CGRect] = []
+        dividers.reserveCapacity(max(0, rows.count - 1))
         var y: CGFloat = 0
         for (rowIndex, line) in measured.enumerated() {
             let rowHeight = line.map { $0.lines.isEmpty ? emptyLineHeight : $0.size.height }.max() ?? emptyLineHeight
@@ -90,8 +119,16 @@ nonisolated struct TableLayout: Sendable {
         }
         let gridSize = CGSize(width: ceil(gridWidth), height: ceil(y))
         return TableLayout(
-            cells: cells, dividers: dividers, gridSize: gridSize, toolbarHeight: style.tableToolbarHeight,
+            source: table, cells: cells, dividers: dividers, gridSize: gridSize,
+            toolbarHeight: style.tableToolbarHeight,
             size: CGSize(width: width, height: style.tableToolbarHeight + gridSize.height))
+    }
+
+    /// Cell widths do not depend on the row width, so a resize keeps the grid.
+    func resized(toWidth width: CGFloat) -> TableLayout {
+        TableLayout(
+            source: source, cells: cells, dividers: dividers, gridSize: gridSize, toolbarHeight: toolbarHeight,
+            size: CGSize(width: width, height: size.height))
     }
 
     private static func bold(_ inline: MarkdownInline) -> MarkdownInline {

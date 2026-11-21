@@ -5,26 +5,17 @@
     /// pooled by the transcript. Vertical pans pass to the transcript on
     /// their own: this view has nothing to scroll vertically (PLAN 3.9). Only
     /// the transcript answers the status-bar tap.
-    final class TranscriptWideBlockScroller: UIScrollView {
+    final class TranscriptWideBlockScroller: UIScrollView, UIScrollViewDelegate {
         private let body = UIView()
         private let row = RowLayer()
         private(set) var rowID: String?
-        private var shown: Shown?
-
-        /// What the body shows, so placing an unchanged block again is free.
-        private struct Shown: Equatable {
-            let rowID: String
-            let key: RowLayoutKey
-            let colorsAreDark: Bool?
-            let isHighlighted: Bool
-            let isDark: Bool
-            let scale: CGFloat
-            let colorSpace: CGColorSpace
-            let width: CGFloat
-        }
+        /// Called when the horizontal offset changes so UIKit selection rects
+        /// and handles follow the scrolled content.
+        var onHorizontalScroll: (() -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
+            delegate = self
             alwaysBounceVertical = false
             alwaysBounceHorizontal = false
             isDirectionalLockEnabled = true
@@ -41,29 +32,35 @@
             fatalError("init(coder:) has not been implemented")
         }
 
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            onHorizontalScroll?()
+        }
+
         func show(
             rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
         ) {
-            let shown = Shown(
-                rowID: rowID, key: key, colorsAreDark: wide.content.colorsAreDark,
-                isHighlighted: wide.content.isHighlighted, isDark: palette.isDark,
-                scale: scale, colorSpace: colorSpace, width: bounds.width)
-            guard shown != self.shown else { return }
             if self.rowID != rowID { contentOffset = .zero }
-            self.shown = shown
             self.rowID = rowID
             let height = wide.frame.height
-            contentSize = CGSize(width: max(bounds.width, wide.contentWidth), height: height)
-            body.frame = CGRect(origin: .zero, size: contentSize)
+            let targetSize = CGSize(width: max(bounds.width, wide.contentWidth), height: height)
+            if contentSize != targetSize {
+                contentSize = targetSize
+                body.frame = CGRect(origin: .zero, size: targetSize)
+            }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            row.frame = CGRect(x: 0, y: 0, width: wide.contentWidth, height: height)
+            let rowFrame = CGRect(x: 0, y: 0, width: wide.contentWidth, height: height)
+            if row.frame != rowFrame { row.frame = rowFrame }
             row.show(
                 rowID: rowID, layout: RowLayout(rowID: rowID, key: key, height: height, content: wide.content),
-                palette: palette, drawsWideBody: true, scale: scale, colorSpace: colorSpace)
-            // On screen already, it draws now rather than show a blank block.
-            row.drawBands(in: row.bounds, visible: isVisible ? row.bounds : .null, offMain: drawsOffMain)
+                palette: palette, drawsWideBody: true, scale: scale, colorSpace: colorSpace, drawn: streamed)
+            let drawRect = CGRect(x: 0, y: drawn.minY, width: wide.contentWidth, height: drawn.height)
+            let visibleRect =
+                visible.isNull ? .null : CGRect(x: 0, y: visible.minY, width: wide.contentWidth, height: visible.height)
+            row.drawBands(in: drawRect, visible: visibleRect, offMain: drawsOffMain)
+            let releaseMargin = visible.isNull ? 512 : max(512, visible.height)
+            row.releaseBands(outside: drawRect.insetBy(dx: 0, dy: -releaseMargin))
             CATransaction.commit()
         }
 
@@ -71,12 +68,16 @@
             row.showSelection(range, color: color)
         }
 
+        func releaseOffscreenBands(keeping visible: CGRect) {
+            row.releaseBands(outside: CGRect(x: 0, y: visible.minY, width: row.bounds.width, height: visible.height))
+        }
+
         /// How far the body is scrolled: hit testing adds it to a point.
         var scrollX: CGFloat { contentOffset.x }
 
         func resetForReuse() {
             rowID = nil
-            shown = nil
+            onHorizontalScroll = nil
             row.resetForReuse()
         }
     }

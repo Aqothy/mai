@@ -106,5 +106,47 @@
                 then: [event(.leftMouseUp, fixture.window, at: word)])
             #expect(fixture.controller.selection == nil)
         }
+    
+
+        /// A click whose pointer wobbles a point or two is a click: it clears
+        /// the selection (and opens a link) instead of selecting a character.
+        @Test func aClickThatWobblesStillClearsTheSelection() {
+            let fixture = make()
+            defer { fixture.close() }
+            let word = point(fixture, row: 1, fraction: 0.35)
+            click(
+                fixture, down: event(.leftMouseDown, fixture.window, at: word, clicks: 2),
+                then: [event(.leftMouseUp, fixture.window, at: word, clicks: 2)])
+            #expect(fixture.controller.selection != nil)
+            guard let layout = fixture.controller.layout(forRowAt: 0, synchronously: true),
+                let line = layout.content.textSegments.first?.layout.lines.first
+            else { return }
+            // Across the midpoint between two characters' carets.
+            let start = point(fixture, row: 0, fraction: 0)
+            let x = start.x - line.x + (line.caretOffsets[2] + line.caretOffsets[3]) / 2
+            let down = NSPoint(x: x - 0.75, y: start.y)
+            let up = NSPoint(x: x + 0.75, y: start.y)
+            click(
+                fixture, down: event(.leftMouseDown, fixture.window, at: down),
+                then: [event(.leftMouseDragged, fixture.window, at: up), event(.leftMouseUp, fixture.window, at: up)])
+            #expect(fixture.controller.selection == nil)
+        }
+
+        /// Rows that go away take their layers with them, all of them too.
+        @Test func clearingTheRowsUnmountsThem() {
+            let fixture = make()
+            defer { fixture.close() }
+            func rowLayers() -> [RowLayer] {
+                let rows = fixture.document.subviews.compactMap { $0 as? TranscriptRowsView }.first
+                return rows?.rowsLayer.sublayers?.compactMap { $0 as? RowLayer } ?? []
+            }
+            fixture.controller.layOutVisibleRows(minY: 0, maxY: 400)
+            fixture.document.needsLayout = true
+            fixture.document.layoutSubtreeIfNeeded()
+            #expect(!rowLayers().isEmpty)
+            fixture.controller.setRows([])
+            fixture.document.layoutSubtreeIfNeeded()
+            #expect(rowLayers().isEmpty)
+        }
     }
 #endif

@@ -7,9 +7,13 @@ import QuartzCore
 @MainActor
 protocol TranscriptRowMounterDelegate: AnyObject {
     /// Shows `body` in a horizontal scroller, the row's top left at `origin`
-    /// (document coordinates). Called on every placement of the row; cheap
-    /// when nothing changed.
-    func showWideBlock(rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, isVisible: Bool)
+    /// (document coordinates). `drawn` and `visible` are in document
+    /// coordinates so tall wide blocks vertically clip and release bands just
+    /// like normal rows. `streamed` carries bands pre-drawn with a streamed
+    /// layout so wide blocks update size and pixels in the same frame.
+    func showWideBlock(
+        rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect, visible: CGRect,
+        streamed: DrawnBands?)
     func removeWideBlock(rowID: String)
     /// Highlights `range` of a wide block's text in its scroller.
     func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor)
@@ -76,6 +80,21 @@ final class TranscriptRowMounter {
         preparedRect = rect
     }
 
+    /// Releases off-screen bitmaps and clears the layer pool (iOS memory
+    /// warning / backgrounding, PLAN 4.4).
+    func releaseOffscreen(keeping visible: CGRect) {
+        for (id, layer) in mounted {
+            if !layer.placedFrame.intersects(visible) {
+                unmount(id, layer)
+            } else {
+                let local = visible.offsetBy(dx: -layer.placedFrame.minX, dy: -layer.placedFrame.minY)
+                layer.releaseBands(outside: local)
+            }
+        }
+        pool.removeAll()
+        isStale = true
+    }
+
     /// Whether `visible` needs a placement before it can be shown.
     func needsPlacement(visible: CGRect) -> Bool {
         // A new width re-centers the column.
@@ -83,17 +102,23 @@ final class TranscriptRowMounter {
         guard let readySpan, readySpan.contains(visible.minY), readySpan.contains(visible.maxY) else { return true }
         let step = max(1, visible.height) / 8
         if abs(visible.minY - placedTop) > step { return true }
-        return !preparedRect.isNull && !placedDrawn.insetBy(dx: 0, dy: -step).contains(preparedRect)
+        if !preparedRect.isNull {
+            let coveredMinY = placedDrawn.minY - step
+            let coveredMaxY = placedDrawn.maxY + step
+            if preparedRect.minY < coveredMinY || preparedRect.maxY > coveredMaxY { return true }
+        }
+        return false
     }
 
     /// Mounts, positions and draws the rows for `visible` (document
     /// coordinates) in a column of `documentWidth`. `showsContent` is false
     /// while the transcript waits for its first rows (PLAN 3.9 rule 9): no
-    /// synchronous layouts then. Bands draw in `colorSpace`, the window's.
+    /// synchronous layouts then.
     func place(
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
-        scale: CGFloat, colorSpace: CGColorSpace, showsContent: Bool
+        scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool
     ) {
+        let space = colorSpace ?? RowLayer.colorSpace
         hasSelection = drawsSelection && controller.selection != nil
         isStale = false
         let geometry = controller.geometry
@@ -149,7 +174,7 @@ final class TranscriptRowMounter {
                 mount(
                     controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
-                    colorSpace: colorSpace, showsContent: showsContent)
+                    colorSpace: space, showsContent: showsContent)
             }
         }
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
@@ -169,6 +194,18 @@ final class TranscriptRowMounter {
                     if layer.placedFrame.minY != frame.minY {
                         layer.placedFrame.origin.y = frame.minY
                         layer.frame = layer.placedFrame
+                        let origin = layer.placedFrame.origin
+                        if layer.hasAccessories, let layout = controller.layouts[id] {
+                            layer.accessoriesOrigin = origin
+                            delegate?.showAccessories(rowID: id, accessories: layout.content.accessories, origin: origin)
+                        }
+                        if layer.hasWideBlock, let layout = controller.layouts[id],
+                            let wideBody = layout.content.wideBody
+                        {
+                            delegate?.showWideBlock(
+                                rowID: id, body: wideBody, key: layout.key, origin: origin, drawn: drawn,
+                                visible: visible, streamed: nil)
+                        }
                     }
                     continue
                 }
@@ -202,15 +239,12 @@ final class TranscriptRowMounter {
         let width = layout.key.width
         let x = max(0, ((documentWidth - width) / 2).rounded(.down))
         let layer: RowLayer
-        let isNew: Bool
         if let existing = mounted[row.id] {
             layer = existing
-            isNew = false
         } else {
             layer = pool.popLast() ?? RowLayer()
             container.addSublayer(layer)
             mounted[row.id] = layer
-            isNew = true
         }
         layer.placementStamp = stamp
         let target = CGRect(x: x, y: frame.minY, width: width, height: frame.height)
@@ -228,11 +262,9 @@ final class TranscriptRowMounter {
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
             colorSpace: colorSpace, drawn: streamed)
-        if hasSelection {
-            layer.showSelection(controller.selectedRange(inRowAt: index), color: selectionColor)
-        }
+        layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
-        let localVisible = visible.offsetBy(dx: -x, dy: -frame.minY)
+        let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
         let drawnNow = layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
         #if DEBUG
@@ -247,7 +279,7 @@ final class TranscriptRowMounter {
                 }
             }
         #else
-            _ = (isNew, drawnNow, showsContent)
+            _ = drawnNow
         #endif
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.
@@ -267,12 +299,11 @@ final class TranscriptRowMounter {
         if let wideBody {
             layer.hasWideBlock = true
             delegate?.showWideBlock(
-                rowID: row.id, body: wideBody, key: layout.key, origin: CGPoint(x: x, y: frame.minY),
-                isVisible: target.intersects(visible))
-            if hasSelection {
-                delegate?.showWideBlockSelection(
-                    rowID: row.id, range: controller.selectedRange(inRowAt: index), color: selectionColor)
-            }
+                rowID: row.id, body: wideBody, key: layout.key, origin: origin, drawn: drawn,
+                visible: showsContent ? visible : .null, streamed: streamed?.wideBodyDrawn)
+            delegate?.showWideBlockSelection(
+                rowID: row.id, range: hasSelection ? controller.selectedRange(inRowAt: index) : nil,
+                color: selectionColor)
         } else if layer.hasWideBlock {
             layer.hasWideBlock = false
             delegate?.removeWideBlock(rowID: row.id)

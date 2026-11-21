@@ -66,14 +66,30 @@ final class RasterQueue {
     }
 
     /// The nearest job whose band still wants it, the earliest of equals;
-    /// stale ones are dropped.
+    /// stale ones are dropped in place without reallocating `waiting`.
     private func takeNearest() -> (Int, Job)? {
-        waiting = waiting.filter { _, job in job.band.map { $0.generation == job.generation } ?? false }
-        guard let nearest = waiting.min(by: { ($0.value.priority, $0.key) < ($1.value.priority, $1.key) }) else {
-            return nil
+        var stale: [Int] = []
+        var bestKey: Int?
+        var bestJob: Job?
+        for (key, job) in waiting {
+            guard let band = job.band, band.generation == job.generation else {
+                stale.append(key)
+                continue
+            }
+            if let current = bestJob, let currentKey = bestKey {
+                if (job.priority, key) < (current.priority, currentKey) {
+                    bestKey = key
+                    bestJob = job
+                }
+            } else {
+                bestKey = key
+                bestJob = job
+            }
         }
-        waiting[nearest.key] = nil
-        return (nearest.key, nearest.value)
+        for key in stale { waiting[key] = nil }
+        guard let bestKey, let bestJob else { return nil }
+        waiting[bestKey] = nil
+        return (bestKey, bestJob)
     }
 
     /// Applies every bitmap finished since the last drain, in one turn.

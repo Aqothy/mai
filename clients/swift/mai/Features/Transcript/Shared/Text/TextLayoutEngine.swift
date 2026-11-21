@@ -48,6 +48,117 @@ nonisolated enum TextLayoutEngine {
         return builder.finish()
     }
 
+    /// Incremental layout for a growing block (streaming prose or code): keeps
+    /// the finished lines of `previous` before `unchangedUTF16Prefix` (with a
+    /// 1-line wrap margin for wrapped prose) and only invokes Core Text on the
+    /// changed suffix. Falls back to full layout for BiDi text or when too few
+    /// lines can be kept.
+    static func layout(
+        _ text: StyledText, width: CGFloat, options: Options, appendingTo previous: TextLayout,
+        unchangedUTF16Prefix: Int
+    ) -> TextLayout {
+        guard !previous.hasComplexBiDi, !previous.lines.isEmpty, text.length > 0, text.paragraphs.count <= 1 else {
+            return layout(text, width: width, options: options)
+        }
+        // Keep lines strictly before the unchanged prefix; for wrapped text,
+        // back up one extra line so a growing word on the boundary re-breaks.
+        var keepCount = 0
+        while keepCount < previous.lines.count, previous.lines[keepCount].range.upperBound <= unchangedUTF16Prefix {
+            keepCount += 1
+        }
+        if options.wraps { keepCount = max(0, keepCount - 1) }
+        guard keepCount >= 2, keepCount < previous.lines.count else {
+            return layout(text, width: width, options: options)
+        }
+        let resumeLine = previous.lines[keepCount]
+        let resumeUTF16 = resumeLine.range.lowerBound
+        guard resumeUTF16 > 0, resumeUTF16 < text.length else {
+            return layout(text, width: width, options: options)
+        }
+
+        // Build a suffix `StyledText` for `[resumeUTF16..<text.length]` so
+        // Core Text only typesets the few newly changed lines.
+        let suffixLength = text.length - resumeUTF16
+        let suffixAttributed = text.string.attributedSubstring(from: NSRange(location: resumeUTF16, length: suffixLength))
+        let typesetter = CTTypesetterCreateWithAttributedString(suffixAttributed)
+        let suffixNS = suffixAttributed.string as NSString
+        let paragraph = text.paragraphs.first
+        let indent = paragraph?.headIndent ?? 0
+        let lastKept = previous.lines[keepCount - 1]
+        let keptRunEnd = resumeLine.runs.lowerBound
+        let keptY = lastKept.bottom
+
+        var builder = Builder(
+            text: text, nsString: suffixNS, options: options, availableWidth: width,
+            initialLines: Array(previous.lines[..<keepCount]),
+            initialRuns: Array(previous.runs[..<keptRunEnd]),
+            initialDecorations: previous.decorations.filter { $0.rect.midY <= keptY },
+            initialY: keptY,
+            initialWidth: previous.lines[..<keepCount].reduce(CGFloat(0)) { max($0, $1.x + $1.width) },
+            previousQuoteBars: paragraph?.quoteBars ?? [],
+            utf16BaseOffset: resumeUTF16)
+
+        var localStart = 0
+        while localStart < suffixLength {
+            let count = nextLineLength(
+                typesetter: typesetter, nsString: suffixNS, start: localStart, length: suffixLength,
+                availableWidth: max(1, width - indent), wraps: options.wraps)
+            let line = CTTypesetterCreateLine(typesetter, CFRange(location: localStart, length: count))
+            builder.add(
+                line, range: localStart..<(localStart + count), indent: indent, paragraph: paragraph,
+                isParagraphStart: false,
+                endsWithNewline: suffixNS.character(at: localStart + count - 1) == 0x0A)
+            localStart += count
+        }
+        // If complex BiDi appeared in the suffix, recompute cleanly so
+        // paragraph-level BiDi ordering matches one-shot layout.
+        if builder.hasComplexBiDi {
+            return layout(text, width: width, options: options)
+        }
+        return builder.finish()
+    }
+
+    /// Measure-only height of `text` at `width` (for off-screen background
+    /// sweep): breaks lines and sums metrics without copying glyphs, positions,
+    /// carets or decorations.
+    static func measureHeight(_ text: StyledText, width: CGFloat, options: Options) -> CGFloat {
+        let length = text.length
+        guard length > 0 else { return 0 }
+        let typesetter = CTTypesetterCreateWithAttributedString(text.string)
+        let nsString = text.string.mutableString
+        var y: CGFloat = 0
+        var hasLines = false
+        var start = 0
+        var paragraphIndex = 0
+        while start < length {
+            while paragraphIndex + 1 < text.paragraphs.count, text.paragraphs[paragraphIndex + 1].start <= start {
+                paragraphIndex += 1
+            }
+            let paragraph = text.paragraphs.isEmpty ? nil : text.paragraphs[paragraphIndex]
+            let isParagraphStart = paragraph.map { $0.start == start } ?? (start == 0)
+            let indent = (isParagraphStart ? paragraph?.firstLineIndent : paragraph?.headIndent) ?? 0
+            let count = nextLineLength(
+                typesetter: typesetter, nsString: nsString, start: start, length: length,
+                availableWidth: max(1, width - indent), wraps: options.wraps)
+            if hasLines {
+                y += options.lineSpacing + (isParagraphStart ? paragraph?.spacingBefore ?? 0 : 0)
+            }
+            if let fixed = options.fixedLineHeight {
+                y += fixed
+            } else {
+                let line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
+                var ascent: CGFloat = 0
+                var descent: CGFloat = 0
+                var leading: CGFloat = 0
+                _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+                y += ceil(ascent + descent + leading)
+            }
+            hasLines = true
+            start += count
+        }
+        return ceil(y)
+    }
+
     /// The UTF-16 length of the line starting at `start`: Core Text's break
     /// when wrapping, through the next newline when not.
     private static func nextLineLength(
@@ -72,18 +183,34 @@ nonisolated enum TextLayoutEngine {
         let nsString: NSString
         let options: Options
         let availableWidth: CGFloat
-        var lines: [TextLine] = []
-        var runs: [TextGlyphRun] = []
-        var decorations: [TextDecoration] = []
-        var y: CGFloat = 0
-        var width: CGFloat = 0
-        var previousQuoteBars: [CGFloat] = []
+        /// Where `nsString` starts in the layout's text: a suffix laid out
+        /// after kept lines (incremental layout) ranges from there.
+        let utf16BaseOffset: Int
+        var lines: [TextLine]
+        var runs: [TextGlyphRun]
+        var decorations: [TextDecoration]
+        var y: CGFloat
+        var width: CGFloat
+        var previousQuoteBars: [CGFloat]
+        var hasComplexBiDi = false
 
-        init(text: StyledText, nsString: NSString, options: Options, availableWidth: CGFloat) {
+        init(
+            text: StyledText, nsString: NSString, options: Options, availableWidth: CGFloat,
+            initialLines: [TextLine] = [], initialRuns: [TextGlyphRun] = [],
+            initialDecorations: [TextDecoration] = [], initialY: CGFloat = 0, initialWidth: CGFloat = 0,
+            previousQuoteBars: [CGFloat] = [], utf16BaseOffset: Int = 0
+        ) {
             self.text = text
             self.nsString = nsString
             self.options = options
             self.availableWidth = availableWidth
+            self.utf16BaseOffset = utf16BaseOffset
+            lines = initialLines
+            runs = initialRuns
+            decorations = initialDecorations
+            y = initialY
+            width = initialWidth
+            self.previousQuoteBars = previousQuoteBars
         }
 
         mutating func add(
@@ -106,9 +233,10 @@ nonisolated enum TextLayoutEngine {
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let firstRun = runs.count
             let carets = addRunsAndCarets(of: line, range: range, indent: indent, baseline: baseline, width: lineWidth)
+            let textRange = (range.lowerBound + utf16BaseOffset)..<(range.upperBound + utf16BaseOffset)
             lines.append(
                 TextLine(
-                    top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: range,
+                    top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: textRange,
                     caretOffsets: carets, runs: firstRun..<runs.count, endsWithNewline: endsWithNewline))
             if let paragraph {
                 addParagraphDecorations(paragraph, lineHeight: height, gapAbove: gapAbove)
@@ -120,7 +248,7 @@ nonisolated enum TextLayoutEngine {
         func finish() -> TextLayout {
             TextLayout(
                 string: text.string.string, size: CGSize(width: ceil(width), height: ceil(y)), lines: lines,
-                runs: runs, decorations: decorations, links: text.links)
+                runs: runs, decorations: decorations, links: text.links, hasComplexBiDi: hasComplexBiDi)
         }
 
         /// Copies the line's runs and their decorations, and returns its
@@ -130,6 +258,7 @@ nonisolated enum TextLayoutEngine {
         ) -> [CGFloat] {
             let ctRuns = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
             let needsCoreTextCarets = ctRuns.contains(where: Self.needsCoreTextCarets)
+            if needsCoreTextCarets { hasComplexBiDi = true }
             var carets = needsCoreTextCarets ? [] : [CGFloat](repeating: .nan, count: range.count + 1)
             let rangeStart = range.lowerBound
 
@@ -168,7 +297,8 @@ nonisolated enum TextLayoutEngine {
                 runs.append(
                     TextGlyphRun(
                         font: font, glyphs: glyphs, positions: positions, color: style.color,
-                        range: stringRange.location..<(stringRange.location + stringRange.length),
+                        range: (stringRange.location + utf16BaseOffset)..<(
+                            stringRange.location + utf16BaseOffset + stringRange.length),
                         linkIndex: style.linkIndex))
                 addRunDecorations(run, style: style, font: font, start: positions[0].x, baseline: baseline)
             }

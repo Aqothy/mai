@@ -9,7 +9,7 @@ nonisolated struct RowLayoutRequest: Sendable {
     let style: TextStyle
     /// Syntax colors for a code block, made for its code.
     var codeColors: CodeColors?
-    /// The code block's current layout at the same text size and colors:
-    /// a new width reuses its text instead of laying the code out again.
-    var previousCode: CodeLayout?
+    /// Previous row content and layout at the same text size: reused on resize
+    /// (code, tables) and extended incrementally while streaming open blocks.
+    var previous: (kind: TranscriptRowKind, layout: RowLayout)?
 }

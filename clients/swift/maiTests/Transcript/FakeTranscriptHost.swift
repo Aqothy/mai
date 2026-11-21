@@ -20,8 +20,11 @@ final class FakeTranscriptHost: TranscriptViewportHost {
     private(set) var isContentVisible = false
     private(set) var rowPlacements = 0
 
+    var animatesJumps = false
+
     var viewport: TranscriptViewport? {
-        TranscriptViewport(size: size, topInset: topInset, bottomInset: bottomInset)
+        guard size.width > 0, size.height > 0 else { return nil }
+        return TranscriptViewport(size: size, topInset: topInset, bottomInset: bottomInset)
     }
 
     var viewportTop: CGFloat { offset + topInset }

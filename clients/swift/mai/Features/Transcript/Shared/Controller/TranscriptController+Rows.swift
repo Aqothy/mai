@@ -231,9 +231,10 @@ extension TranscriptController {
             }
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
-        // Laid out at a width the column no longer has (a resize meanwhile):
-        // the rows still change, their layouts come from the layout queue.
-        let laidOut = result.width == columnWidth ? result.rows : []
+        // Laid out at a width or text size the column no longer has (a resize
+        // or Dynamic Type change meanwhile): the rows still change, their
+        // layouts come from the layout queue.
+        let laidOut = result.width == columnWidth && result.styleVersion == style.version ? result.rows : []
         var heights: [String: CGFloat] = [:]
         for row in laidOut where row.index < newRows.count && newRows[row.index].kind == row.kind {
             heights[newRows[row.index].id] = row.layout.height

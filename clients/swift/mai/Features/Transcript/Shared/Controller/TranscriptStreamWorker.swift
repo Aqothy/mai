@@ -43,24 +43,58 @@ actor TranscriptStreamWorker {
         let textLength: Int
         let isFinished: Bool
         let blocks: [MarkdownBlock]
-        /// The width the rows were laid out at.
+        /// The width and style version the rows were laid out at.
         let width: CGFloat
+        let styleVersion: Int
         /// The rows that changed.
         let rows: [Row]
     }
 
+    private struct ShownState {
+        let width: CGFloat
+        let styleVersion: Int
+        /// Committed blocks whose `isLast` position is already settled (never
+        /// change on later appends at the same width/style).
+        let stableCount: Int
+        let parserResetCount: Int
+        let rows: [(kind: TranscriptRowKind, layout: RowLayout)]
+    }
+
     private var parsers: [String: StreamingMarkdownParser] = [:]
-    /// Each message's rows as last laid out, and at which width.
-    private var shown: [String: (width: CGFloat, rows: [(kind: TranscriptRowKind, layout: RowLayout)])] = [:]
+    private var shown: [String: ShownState] = [:]
 
     func run(_ update: Update) -> Result {
         var parser = parsers[update.messageID] ?? StreamingMarkdownParser()
-        let blocks = update.isFinished ? parser.finish(update.text) : parser.update(update.text).blocks
-        parsers[update.messageID] = update.isFinished ? nil : parser
-        let previous = shown[update.messageID].flatMap { $0.width == update.width ? $0.rows : nil } ?? []
+        let blocks: [MarkdownBlock]
+        let committedCount: Int
+        if update.isFinished {
+            blocks = parser.finish(update.text)
+            committedCount = parser.parsesWholeDocument ? 0 : blocks.count
+            parsers[update.messageID] = nil
+        } else {
+            let snapshot = parser.update(update.text)
+            blocks = snapshot.blocks
+            committedCount = parser.parsesWholeDocument ? 0 : snapshot.committed.count
+            parsers[update.messageID] = parser
+        }
+        let state = shown[update.messageID].flatMap {
+            $0.width == update.width && $0.styleVersion == update.style.version ? $0 : nil
+        }
+        let previous = state?.rows ?? []
+        // Committed blocks strictly before the last block of the previous
+        // update cannot change unless the parser reset or switched to whole-
+        // document parsing (e.g., on a reference definition).
+        let canSkipCommitted = state.map { $0.parserResetCount == parser.committedResetCount && !parser.parsesWholeDocument } ?? false
+        let skipPrefix =
+            canSkipCommitted
+            ? min(state?.stableCount ?? 0, max(0, committedCount - 1), previous.count, max(0, blocks.count - 1))
+            : 0
         var current: [(kind: TranscriptRowKind, layout: RowLayout)] = []
+        current.reserveCapacity(blocks.count)
+        if skipPrefix > 0 { current.append(contentsOf: previous[..<skipPrefix]) }
         var changed: [Row] = []
-        for (index, block) in blocks.enumerated() {
+        for index in skipPrefix..<blocks.count {
+            let block = blocks[index]
             let kind = TranscriptRowKind.markdownBlock(block, .of(index, in: blocks))
             let before = index < previous.count ? previous[index] : nil
             if let before, before.kind == kind {
@@ -72,6 +106,7 @@ actor TranscriptStreamWorker {
                 rowID: rowID, kind: kind,
                 key: RowLayoutKey(contentVersion: -1, width: update.width, styleVersion: update.style.version),
                 style: update.style)
+            if let before { request.previous = before }
             if case .markdownBlock(.code(_, let code), _) = kind, let isDark = update.isDark,
                 let colors = update.codeColors[rowID], colors.matches(code: code, isDark: isDark)
             {
@@ -88,10 +123,13 @@ actor TranscriptStreamWorker {
         if update.isFinished {
             shown[update.messageID] = nil
         } else {
-            shown[update.messageID] = (update.width, current)
+            let nextStable = max(0, min(committedCount, blocks.count - 1))
+            shown[update.messageID] = ShownState(
+                width: update.width, styleVersion: update.style.version, stableCount: nextStable,
+                parserResetCount: parser.committedResetCount, rows: current)
         }
         return Result(
             messageID: update.messageID, textLength: update.text.utf8.count, isFinished: update.isFinished,
-            blocks: blocks, width: update.width, rows: changed)
+            blocks: blocks, width: update.width, styleVersion: update.style.version, rows: changed)
     }
 }

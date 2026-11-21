@@ -9,39 +9,138 @@ nonisolated enum RowLayoutBuilder {
         let style = request.style
         let width = request.key.width
         let (height, content) = body(
-            request.kind, width: width, style: style, codeColors: request.codeColors,
-            previousCode: request.previousCode)
+            request.kind, width: width, style: style, codeColors: request.codeColors, previous: request.previous)
         return RowLayout(rowID: request.rowID, key: request.key, height: max(1, ceil(height)), content: content)
+    }
+
+    /// Measure-only height for off-screen rows in the background sweep: skips
+    /// glyph/caret/decoration arrays and only returns the row's height.
+    static func measureHeight(_ request: RowLayoutRequest) -> CGFloat {
+        let style = request.style
+        let width = request.key.width
+        let height: CGFloat
+        switch request.kind {
+        case .markdownBlock(let block, let position):
+            let top = position.spacingAbove(style)
+            let bottom = position.spacingBelow(style)
+            switch block {
+            case .code(_, let code):
+                height = top + CodeLayout.height(for: code, style: style) + bottom
+            case .table(let table):
+                height = top + TableLayout.make(table, width: width, style: style).size.height + bottom
+            default:
+                let textHeight = TextLayoutEngine.measureHeight(
+                    AttributedTextBuilder.build([block], style: style), width: width,
+                    options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth))
+                height = top + textHeight + bottom
+            }
+        case .userMessage(let source):
+            let inner = max(1, width - 2 * style.bubbleHorizontalPadding)
+            let textHeight = TextLayoutEngine.measureHeight(
+                AttributedTextBuilder.build(MarkdownPlanner.blocks(from: source), style: style), width: inner,
+                options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth))
+            height = textHeight + 2 * (style.bubbleVerticalPadding + style.messageVerticalInset)
+        case .pendingMessage(let source):
+            let textHeight = TextLayoutEngine.measureHeight(
+                AttributedTextBuilder.build([.paragraph([MarkdownInline(text: source)])], style: style), width: width,
+                options: .init(lineSpacing: style.lineSpacing))
+            height = textHeight + 2 * style.messageVerticalInset
+        case .thought(let text):
+            height =
+                TextLayoutEngine.measureHeight(
+                    AttributedTextBuilder.plain(text, role: .body, color: .secondary, style: style), width: width,
+                    options: .init(lineSpacing: style.lineSpacing)) + 8
+        case .activity(let summary):
+            height =
+                TextLayoutEngine.measureHeight(
+                    AttributedTextBuilder.plain(summary, role: .callout, color: .secondary, style: style), width: width,
+                    options: .init(lineSpacing: style.lineSpacing)) + 8
+        case .turnHeader(let header):
+            let chevron = header.isRunning ? "" : (header.isExpanded ? "  ⌄" : "  ›")
+            let textHeight = TextLayoutEngine.measureHeight(
+                AttributedTextBuilder.plain(header.title + chevron, role: .callout, color: .secondary, style: style),
+                width: width, options: .init(lineSpacing: style.lineSpacing))
+            height = 6 + textHeight + 8 + 1 + 2
+        case .turnActions:
+            height = RowAccessory.size + 6
+        case .working(let phrase):
+            let textHeight = TextLayoutEngine.measureHeight(
+                AttributedTextBuilder.plain("✦  " + phrase, role: .callout, color: .secondary, style: style),
+                width: width, options: .init(lineSpacing: style.lineSpacing))
+            height = textHeight + 16
+        case .notice(let title, let text):
+            var styled = AttributedTextBuilder.plain(title, role: .callout, color: .primary, bold: true, style: style)
+            if let text, !text.isEmpty {
+                styled.append("\n" + text, font: style.font(.callout), style: TextRunStyle(color: .secondary))
+            }
+            let textHeight = TextLayoutEngine.measureHeight(
+                styled, width: max(1, width - 24), options: .init(lineSpacing: style.lineSpacing))
+            height = textHeight + 36
+        }
+        return max(1, ceil(height))
     }
 
     private static func body(
         _ kind: TranscriptRowKind, width: CGFloat, style: TextStyle, codeColors: CodeColors?,
-        previousCode: CodeLayout?
+        previous: (kind: TranscriptRowKind, layout: RowLayout)?
     ) -> (CGFloat, RowContentLayout) {
+        let sameStyle = previous?.layout.key.styleVersion == style.version
         switch kind {
         case .markdownBlock(let block, let position):
             let top = position.spacingAbove(style)
             let bottom = position.spacingBelow(style)
             switch block {
             case .code(let language, let code):
-                let layout =
-                    previousCode.flatMap { previous in
-                        previous.code == code && previous.colors?.code == codeColors?.code
-                            && previous.colorsAreDark == codeColors?.isDark
-                            ? previous.resized(toWidth: width) : nil
-                    }
-                    ?? CodeLayout.make(
-                        code: code, language: language, colors: codeColors, width: width, style: style)
+                let prevCode = sameStyle ? previous?.layout.content.codeLayout : nil
+                let display = CodeLayout.displayName(language)
+                let layout: CodeLayout
+                if let prevCode, prevCode.code == code, prevCode.label.string == display,
+                    prevCode.colors?.code == codeColors?.code, prevCode.colorsAreDark == codeColors?.isDark
+                {
+                    layout = prevCode.resized(toWidth: width)
+                } else {
+                    layout = CodeLayout.make(
+                        code: code, language: language, colors: codeColors, width: width, style: style,
+                        previous: prevCode)
+                }
                 return (
                     top + layout.size.height + bottom,
                     .code(layout, frame: CGRect(origin: CGPoint(x: 0, y: top), size: layout.size))
                 )
             case .table(let table):
-                let layout = TableLayout.make(table, width: width, style: style)
+                let prevTable: TableLayout?
+                if sameStyle, case .table(let existing, _) = previous?.layout.content {
+                    prevTable = existing
+                } else {
+                    prevTable = nil
+                }
+                let layout: TableLayout
+                if let prevTable, prevTable.source == table {
+                    layout = prevTable.resized(toWidth: width)
+                } else {
+                    layout = TableLayout.make(table, width: width, style: style, previous: prevTable)
+                }
                 return (
                     top + layout.size.height + bottom,
                     .table(layout, frame: CGRect(origin: CGPoint(x: 0, y: top), size: layout.size))
                 )
+            case .paragraph(let inlines):
+                if sameStyle, let previous, previous.layout.key.width == width,
+                    case .markdownBlock(.paragraph(let oldInlines), _) = previous.kind,
+                    case .text(let prevText, _) = previous.layout.content
+                {
+                    let unchanged = Self.commonUTF16Prefix(oldInlines, inlines)
+                    if unchanged > 0 {
+                        let styled = AttributedTextBuilder.build([block], style: style)
+                        let layout = TextLayoutEngine.layout(
+                            styled, width: width,
+                            options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth),
+                            appendingTo: prevText, unchangedUTF16Prefix: unchanged)
+                        return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
+                    }
+                }
+                let layout = prose([block], width: width, style: style)
+                return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
             default:
                 let layout = prose([block], width: width, style: style)
                 return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
@@ -110,5 +209,34 @@ nonisolated enum RowLayoutBuilder {
         TextLayoutEngine.layout(
             AttributedTextBuilder.plain(text, role: role, color: color, style: style), width: width,
             options: .init(lineSpacing: style.lineSpacing))
+    }
+
+    /// Exact UTF-16 length of the identical prefix of two inline arrays (same
+    /// text, style, and link), used to keep finished lines during streaming.
+    private static func commonUTF16Prefix(_ old: [MarkdownInline], _ new: [MarkdownInline]) -> Int {
+        var total = 0
+        let shared = min(old.count, new.count)
+        for index in 0..<shared {
+            let a = old[index]
+            let b = new[index]
+            guard a.style == b.style, a.link == b.link else { break }
+            if a.text == b.text {
+                total += a.text.utf16.count
+                continue
+            }
+            if b.text.hasPrefix(a.text) {
+                total += a.text.utf16.count
+            } else {
+                var aIdx = a.text.utf16.startIndex
+                var bIdx = b.text.utf16.startIndex
+                while aIdx < a.text.utf16.endIndex, bIdx < b.text.utf16.endIndex, a.text.utf16[aIdx] == b.text.utf16[bIdx] {
+                    total += 1
+                    a.text.utf16.formIndex(after: &aIdx)
+                    b.text.utf16.formIndex(after: &bIdx)
+                }
+            }
+            break
+        }
+        return total
     }
 }

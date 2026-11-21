@@ -27,15 +27,23 @@
 
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
         ) {
             let height = body.frame.height
             let layout = RowLayout(rowID: rowID, key: key, height: height, content: body.content)
-            row.frame = CGRect(x: 0, y: 0, width: body.contentWidth, height: height)
+            let target = CGRect(x: 0, y: 0, width: body.contentWidth, height: height)
+            if row.frame != target { row.frame = target }
             row.show(
-                rowID: rowID, layout: layout, palette: palette, drawsWideBody: true, scale: scale, colorSpace: colorSpace)
-            // On screen already, it draws now rather than show a blank block.
-            row.drawBands(in: row.bounds, visible: isVisible ? row.bounds : .null, offMain: drawsOffMain)
+                rowID: rowID, layout: layout, palette: palette, drawsWideBody: true, scale: scale,
+                colorSpace: colorSpace, drawn: streamed)
+            // Clip vertically to the transcript's drawn/visible region so tall
+            // wide blocks never rasterize or hold all bands at once.
+            let drawRect = CGRect(x: 0, y: drawn.minY, width: body.contentWidth, height: drawn.height)
+            let visibleRect =
+                visible.isNull ? .null : CGRect(x: 0, y: visible.minY, width: body.contentWidth, height: visible.height)
+            row.drawBands(in: drawRect, visible: visibleRect, offMain: drawsOffMain)
+            let releaseMargin = visible.isNull ? 512 : max(512, visible.height)
+            row.releaseBands(outside: drawRect.insetBy(dx: 0, dy: -releaseMargin))
         }
 
         /// Clicks select text in the transcript, whose document is the

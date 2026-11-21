@@ -289,6 +289,38 @@ struct TranscriptControllerScrollTests {
         #expect(!controller.isFollowing)
     }
 
+    /// Re-attaching before first layout (`viewport == nil`) still restores the
+    /// detached reading place once layout gives the host a size.
+    @Test func reattachingBeforeLayoutStillRestoresDetachedPlace() {
+        let (controller, host) = make()
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        host.readerScroll(toTop: 300)
+        controller.detach(host)
+
+        let again = FakeTranscriptHost()
+        again.size = .zero
+        again.controller = controller
+        controller.attach(again)
+        again.resize(to: CGSize(width: 300, height: 200))
+        #expect(again.viewportTop == 300)
+        #expect(!controller.isFollowing)
+    }
+
+    /// Streaming growth during an animated jump keeps stepping smoothly instead
+    /// of snapping to the end and jumping back on the next tick.
+    @Test func animatedJumpDoesNotSnapDuringGeometryGrowth() {
+        let (controller, host) = make()
+        host.animatesJumps = true
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        host.readerScroll(toTop: 100)
+        controller.jumpToEnd(animated: true)
+        #expect(controller.endJump != nil)
+        let before = host.viewportTop
+        controller.setHeights(["row-9": 150])
+        // Still near the start of the 0.3s ease-out jump, not snapped to 850.
+        #expect(host.viewportTop < before + 200)
+    }
+
     // MARK: Rule 10: selection
 
     /// Selecting is not a reader move: a reply streaming at the end keeps

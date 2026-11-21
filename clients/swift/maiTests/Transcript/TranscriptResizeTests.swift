@@ -6,17 +6,20 @@ import Testing
 @testable import mai
 
 /// A new width does as little as it can (PLAN 4.2): code keeps its text and
-/// colors, and rows whose lines break where they did keep their bitmaps.
+/// colors, tables keep their cells, and rows whose lines break where they did
+/// keep their bitmaps.
 @MainActor
 struct TranscriptResizeTests {
     private let style = TextStyle.current()
 
-    private func layout(_ kind: TranscriptRowKind, width: CGFloat, previousCode: CodeLayout? = nil) -> RowLayout {
+    private func layout(
+        _ kind: TranscriptRowKind, width: CGFloat, previous: (TranscriptRowKind, RowLayout)? = nil
+    ) -> RowLayout {
         var request = RowLayoutRequest(
             rowID: "row", kind: kind, key: RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version),
             style: style)
-        request.previousCode = previousCode
-        request.codeColors = previousCode?.colors
+        request.previous = previous
+        request.codeColors = previous?.1.content.codeLayout?.colors
         return RowLayoutBuilder.layout(request)
     }
 
@@ -27,8 +30,11 @@ struct TranscriptResizeTests {
         let colors = CodeColors(
             code: code, runs: [.init(range: 0..<3, color: .rgba(red: 1, green: 0, blue: 0, alpha: 1))], isDark: true)
         let colored = CodeLayout.make(code: code, language: "swift", colors: colors, width: 600, style: style)
-        let old = layout(kind, width: 600, previousCode: colored)
-        let new = layout(kind, width: 520, previousCode: colored)
+        let old = RowLayout(
+            rowID: "row", key: RowLayoutKey(contentVersion: 0, width: 600, styleVersion: style.version),
+            height: colored.size.height + 20,
+            content: .code(colored, frame: CGRect(origin: CGPoint(x: 0, y: 10), size: colored.size)))
+        let new = layout(kind, width: 520, previous: (kind, old))
         guard case .code(let resized, let frame) = new.content else {
             Issue.record("not code")
             return
@@ -65,6 +71,34 @@ struct TranscriptResizeTests {
         let grown = CodeLayout.make(code: old + "\nprint(x)", language: "swift", colors: colors, width: 600, style: style)
         #expect(!grown.isHighlighted)
         #expect(CodeLayout.make(code: old, language: "swift", colors: colors, width: 600, style: style).isHighlighted)
+    }
+
+    /// Resizing a horizontal rule changes its decoration width so diff does
+    /// not treat it as unchanged; plain code and tables reuse their layouts.
+    @Test func ruleInvalidatesOnResizeAndPlainCodeAndTablesReuseLayout() {
+        let ruleKind = TranscriptRowKind.markdownBlock(.rule(spelling: "---"), .init(isFirst: true, isLast: true))
+        let wideRule = layout(ruleKind, width: 600)
+        let narrowRule = layout(ruleKind, width: 300)
+        #expect(RowContentDiff.unchangedHeight(wideRule.content, narrowRule.content) < .infinity)
+
+        let codeKind = TranscriptRowKind.markdownBlock(
+            .code(language: "swift", code: "let x = 1\nlet y = 2"), .init(isFirst: true, isLast: true))
+        let plainWide = layout(codeKind, width: 600)
+        let plainNarrow = layout(codeKind, width: 420, previous: (codeKind, plainWide))
+        if case .code(let a, _) = plainWide.content, case .code(let b, _) = plainNarrow.content {
+            #expect(a.body.runs.map(\.glyphs) == b.body.runs.map(\.glyphs))
+        } else {
+            Issue.record("expected code")
+        }
+
+        let table = MarkdownTable(
+            alignments: [.leading, .trailing],
+            header: [[MarkdownInline(text: "K")], [MarkdownInline(text: "V")]],
+            rows: [[[MarkdownInline(text: "a")], [MarkdownInline(text: "1")]]])
+        let tableKind = TranscriptRowKind.markdownBlock(.table(table), .init(isFirst: true, isLast: true))
+        let tableWide = layout(tableKind, width: 600)
+        let tableNarrow = layout(tableKind, width: 420, previous: (tableKind, tableWide))
+        #expect(RowContentDiff.unchangedHeight(tableWide.content, tableNarrow.content) == .infinity)
     }
 
     /// What draws differently is redrawn even when the glyphs do not move:

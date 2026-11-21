@@ -31,39 +31,45 @@ nonisolated struct CodeLayout: Sendable {
     var isWiderThanBlock: Bool { contentWidth > size.width + 0.5 }
 
     static func make(
-        code: String, language: String?, colors: CodeColors?, width: CGFloat, style: TextStyle
+        code: String, language: String?, colors: CodeColors?, width: CGFloat, style: TextStyle,
+        previous: CodeLayout? = nil
     ) -> CodeLayout {
         let colors = colors?.code == code ? colors : nil
-        let label = TextLayoutEngine.layout(
-            AttributedTextBuilder.plain(displayName(language), role: .callout, color: .secondary, style: style),
-            width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
-        var text = AttributedTextBuilder.plain("", role: .code, color: .primary, style: style)
-        let font = style.font(.code)
-        let utf16 = code.utf16
-        var cursor = 0
-        func appendPlain(upTo end: Int) {
-            guard end > cursor else { return }
-            text.append(Self.substring(code, utf16, cursor..<end), font: font, style: TextRunStyle())
-            cursor = end
+        let display = displayName(language)
+        let label =
+            previous.flatMap { $0.label.string == display ? $0.label : nil }
+            ?? TextLayoutEngine.layout(
+                AttributedTextBuilder.plain(display, role: .callout, color: .secondary, style: style),
+                width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
+        let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
+        let body: TextLayout
+        if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
+            code.hasPrefix(previous.code), previous.body.lines.count >= 3
+        {
+            // Streaming plain fence: keep all finished lines before the last
+            // line of `previous.code` and only typeset the growing tail.
+            let unchangedPrefix = previous.body.lines[previous.body.lines.count - 1].range.lowerBound
+            let text = AttributedTextBuilder.plain(code, role: .code, color: .primary, style: style)
+            body = TextLayoutEngine.layout(
+                text, width: .greatestFiniteMagnitude, options: bodyOptions, appendingTo: previous.body,
+                unchangedUTF16Prefix: unchangedPrefix)
+        } else {
+            let text = buildStyledCode(code, colors: colors, style: style)
+            body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
         }
-        for run in colors?.runs ?? [] where run.range.lowerBound >= cursor && run.range.upperBound <= utf16.count {
-            appendPlain(upTo: run.range.lowerBound)
-            text.append(Self.substring(code, utf16, run.range), font: font, style: TextRunStyle(color: run.color))
-            cursor = run.range.upperBound
-        }
-        appendPlain(upTo: utf16.count)
-        let body = TextLayoutEngine.layout(
-            text, width: .greatestFiniteMagnitude,
-            options: .init(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight))
         let headerHeight = style.codeHeaderHeight
         let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
-        // Bytes, not Characters: "\r\n" is one Character.
-        let lineCount = max(1, code.utf8.reduce(into: 1) { count, byte in if byte == 0x0A { count += 1 } })
-        let height = headerHeight + CGFloat(lineCount) * style.codeLineHeight + style.codeBottomInset
+        let height = Self.height(for: code, style: style)
         return CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
             bodyOrigin: CGPoint(x: style.codeHorizontalInset, y: headerHeight),
-            size: CGSize(width: width, height: ceil(height)), contentWidth: contentWidth, colors: colors)
+            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors)
+    }
+
+    /// Analytic height (independent of width and syntax colors).
+    static func height(for code: String, style: TextStyle) -> CGFloat {
+        let lineCount = max(1, code.utf8.reduce(into: 1) { count, byte in if byte == 0x0A { count += 1 } })
+        return ceil(style.codeHeaderHeight + CGFloat(lineCount) * style.codeLineHeight + style.codeBottomInset)
     }
 
     /// The same block at another row width: code never wraps, so its text
@@ -75,10 +81,31 @@ nonisolated struct CodeLayout: Sendable {
             colors: colors)
     }
 
-    private static func substring(_ code: String, _ utf16: String.UTF16View, _ range: Range<Int>) -> String {
-        let start = utf16.index(utf16.startIndex, offsetBy: range.lowerBound)
-        let end = utf16.index(start, offsetBy: range.count)
-        return String(code[start..<end])
+    private static func buildStyledCode(_ code: String, colors: CodeColors?, style: TextStyle) -> StyledText {
+        var text = StyledText()
+        text.paragraphs = [StyledParagraph(start: 0, firstLineIndent: 0, headIndent: 0, spacingBefore: 0, quoteBars: [])]
+        let font = style.font(.code)
+        guard let runs = colors?.runs, !runs.isEmpty else {
+            text.append(code, font: font, style: TextRunStyle())
+            return text
+        }
+        let utf16 = code.utf16
+        let total = utf16.count
+        var cursorOffset = 0
+        var cursorIndex = utf16.startIndex
+        func appendSlice(upTo target: Int, style runStyle: TextRunStyle) {
+            guard target > cursorOffset else { return }
+            let end = utf16.index(cursorIndex, offsetBy: target - cursorOffset)
+            text.append(String(code[cursorIndex..<end]), font: font, style: runStyle)
+            cursorOffset = target
+            cursorIndex = end
+        }
+        for run in runs where run.range.lowerBound >= cursorOffset && run.range.upperBound <= total {
+            appendSlice(upTo: run.range.lowerBound, style: TextRunStyle())
+            appendSlice(upTo: run.range.upperBound, style: TextRunStyle(color: run.color))
+        }
+        appendSlice(upTo: total, style: TextRunStyle())
+        return text
     }
 
     /// The label a code block's language shows under.

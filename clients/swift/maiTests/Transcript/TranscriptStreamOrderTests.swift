@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import QuartzCore
 import Testing
@@ -154,4 +155,99 @@ struct TranscriptStreamOrderTests {
             #expect(bands.allSatisfy { !$0.isCurrent })
         }
     #endif
+
+    /// A wide streaming code block pre-draws its changed body bands with its
+    /// layout, so the body shows its new text with its new size.
+    @Test func wideCodePreDrawsItsChangedBodyBands() {
+        let palette = TextPalette.resolveForTests
+        let longLine = String(repeating: "x", count: 200)
+        let kind1 = TranscriptRowKind.markdownBlock(
+            .code(language: "go", code: longLine), .init(isFirst: true, isLast: true))
+        let kind2 = TranscriptRowKind.markdownBlock(
+            .code(language: "go", code: longLine + "\n" + longLine), .init(isFirst: true, isLast: true))
+        let key1 = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
+        let key2 = RowLayoutKey(contentVersion: 1, width: 300, styleVersion: style.version)
+        let l1 = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "c", kind: kind1, key: key1, style: style))
+        let l2 = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "c", kind: kind2, key: key2, style: style))
+        #expect(l2.content.wideBody != nil)
+        let drawn = DrawnBands.draw(
+            l2, after: l1, palette: palette, scale: 2, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        #expect(!drawn.wideBands.isEmpty)
+    }
+
+    /// A text size change while a reply streams lays its blocks out again:
+    /// the worker used to keep the rows it had laid out at the old size.
+    @Test func aTextSizeChangeMidStreamLaysTheReplyOutAgain() async {
+        let worker = TranscriptStreamWorker()
+        let bigger = TextStyle(version: style.version + 1) { role in
+            CTFontCreateCopyWithAttributes(style.font(role).font, CTFontGetSize(style.font(role).font) + 4, nil, nil)
+        }
+        func update(_ style: TextStyle) -> TranscriptStreamWorker.Update {
+            .init(
+                messageID: "m", text: "One\n\nTwo\n\nThr", isFinished: false, width: 400, style: style, codeColors: [:],
+                isDark: nil, drawing: nil)
+        }
+        _ = await worker.run(update(style))
+        let result = await worker.run(update(bigger))
+        #expect(result.rows.count == 3)
+        #expect(result.styleVersion == bigger.version)
+    }
+
+    private final class MountRecorder: TranscriptRowMounterDelegate {
+        var wideOrigins: [String: CGPoint] = [:]
+        var accessoryOrigins: [String: CGPoint] = [:]
+        func showWideBlock(
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect, visible: CGRect,
+            streamed: DrawnBands?
+        ) { wideOrigins[rowID] = origin }
+        func removeWideBlock(rowID: String) { wideOrigins[rowID] = nil }
+        func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {}
+        func showAccessories(rowID: String, accessories: [RowAccessory], origin: CGPoint) {
+            accessoryOrigins[rowID] = origin
+        }
+        func removeAccessories(rowID: String) { accessoryOrigins[rowID] = nil }
+    }
+
+    /// A row kept just outside the drawn window moves its wide block's
+    /// scroller and its buttons with it when a row above changes height; they
+    /// stayed where it was and could show over other rows.
+    @Test func aKeptRowsWideBlockAndButtonsFollowIt() {
+        var configuration = TranscriptConfiguration(laysOutRows: true)
+        configuration.concurrency = 1
+        let controller = TranscriptController(configuration: configuration)
+        let host = FakeTranscriptHost()
+        host.controller = controller
+        controller.attach(host)
+        let long = String(repeating: "wide ", count: 60)
+        controller.setRows(
+            [
+                TranscriptRow(id: "spacer", kind: .notice(title: "spacer", text: nil)),
+                TranscriptRow(
+                    id: "m#0", sourceID: "m",
+                    kind: .markdownBlock(.code(language: "go", code: long), .init(isFirst: true, isLast: true)),
+                    messageID: "m", role: .assistant),
+                TranscriptRow(id: "tail", kind: .notice(title: "tail", text: nil)),
+            ], measuredHeights: ["spacer": 400, "tail": 3000])
+        _ = controller.layout(forRowAt: 0, synchronously: true)
+        let code = controller.layout(forRowAt: 1, synchronously: true)
+        controller.setHeights(["spacer": 400, "m#0": code?.height ?? 0, "tail": 3000])
+        let mounter = TranscriptRowMounter(container: CALayer())
+        let recorder = MountRecorder()
+        mounter.delegate = recorder
+        let width = controller.columnWidth
+        func place(at top: CGFloat) {
+            mounter.place(
+                controller, visible: CGRect(x: 0, y: top, width: width, height: 400), documentWidth: width,
+                palette: TextPalette.resolveForTests, scale: 2, showsContent: true)
+        }
+        place(at: 0)
+        #expect(recorder.wideOrigins["m#0"]?.y == 400)
+        place(at: 1050)
+        #expect(recorder.wideOrigins["m#0"]?.y == 400)
+        controller.setHeights(["spacer": 450])
+        mounter.invalidate()
+        place(at: 1100)
+        #expect(recorder.wideOrigins["m#0"]?.y == 450)
+        #expect(recorder.accessoryOrigins["m#0"]?.y == 450)
+    }
 }

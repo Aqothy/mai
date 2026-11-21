@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Observation
+import Synchronization
 
 /// One open chat's transcript, and the only owner of its scrolling (PLAN
 /// 3.9): rows, their geometry, the follow state, the reading place and every
@@ -22,6 +23,18 @@ import Observation
 final class TranscriptController {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
+
+    /// Thread-safe handoff from `LayoutQueue` workers so finished background
+    /// jobs coalesce into batches while urgent viewport work drains at once.
+    final class LayoutInbox: Sendable {
+        struct State {
+            var items: [LayoutQueue.Result] = []
+            var hasUrgentScheduled = false
+            var hasBackgroundScheduled = false
+        }
+
+        let state = Mutex<State>(State())
+    }
 
     /// Whether the transcript's end is on screen; the jump button shows when
     /// it is not. Written only here, in the pass that moves the viewport.
@@ -66,14 +79,38 @@ final class TranscriptController {
     /// The key each row's height was measured at.
     @ObservationIgnored var measuredKeys: [String: RowLayoutKey] = [:]
     @ObservationIgnored var synchronousHeights: [String: CGFloat] = [:]
-    @ObservationIgnored var inbox: [LayoutQueue.Result] = []
-    @ObservationIgnored var isDrainScheduled = false
+    @ObservationIgnored let layoutInbox = LayoutInbox()
+    @ObservationIgnored var urgentGeneration = 0
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
     @ObservationIgnored var backgroundSweepTask: Task<Void, Never>?
     @ObservationIgnored var isWarm = false
     @ObservationIgnored var openStarted = ContinuousClock.now
-    @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) { [weak self] result in
-        Task { @MainActor in self?.receive(result) }
+    @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) {
+        [weak self, inbox = layoutInbox] result in
+        enum Action { case none, urgent, background }
+        let action: Action = inbox.state.withLock { state in
+            state.items.append(result)
+            if result.isUrgent {
+                guard !state.hasUrgentScheduled else { return .none }
+                state.hasUrgentScheduled = true
+                return .urgent
+            } else {
+                guard !state.hasUrgentScheduled, !state.hasBackgroundScheduled else { return .none }
+                state.hasBackgroundScheduled = true
+                return .background
+            }
+        }
+        switch action {
+        case .none:
+            break
+        case .urgent:
+            Task { @MainActor [weak self] in self?.drainInbox() }
+        case .background:
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(32))
+                self?.drainInbox()
+            }
+        }
     }
 
     /// The reader's selection (PLAN 5), state: it outlives the rows'
@@ -132,12 +169,7 @@ final class TranscriptController {
         adjusting { host.setDocumentHeight(geometry.totalHeight) }
         if let viewport = host.viewport {
             viewportBecameAvailable(viewport)
-            if !isAwaitingInitialEnd {
-                let top = isFollowingEnd ? endTop(viewport) : detachedPlace.flatMap(geometry.offset(for:)) ?? detachedTop
-                move(to: top)
-            }
         }
-        detachedPlace = nil
         alignInitialEndIfPossible()
         host.setNeedsRowPlacement()
         updateFrameUpdates()
@@ -169,7 +201,11 @@ final class TranscriptController {
             // Rule 3: layout moved the viewport, not the reader.
             lastViewport = viewport
             if viewport.size.width != last.size.width { widthDidChange(viewport.size.width) }
-            move(to: isFollowingEnd ? endTop(viewport) : baselineTop)
+            if endJump != nil {
+                stepEndJump()
+            } else {
+                move(to: isFollowingEnd ? endTop(viewport) : baselineTop)
+            }
             alignInitialEndIfPossible()
             viewportDidMove()
             return
@@ -194,9 +230,16 @@ final class TranscriptController {
 
     private func viewportBecameAvailable(_ viewport: TranscriptViewport) {
         lastViewport = viewport
-        baselineTop = host?.viewportTop ?? 0
         if columnWidth != Self.columnWidth(for: viewport.size.width) { widthDidChange(viewport.size.width) }
-        updateEndVisibility()
+        if !isAwaitingInitialEnd {
+            let top = isFollowingEnd ? endTop(viewport) : detachedPlace.flatMap(geometry.offset(for:)) ?? detachedTop
+            detachedPlace = nil
+            move(to: top)
+        } else {
+            detachedPlace = nil
+            baselineTop = host?.viewportTop ?? 0
+            updateEndVisibility()
+        }
         viewportDidMove()
     }
 
@@ -224,13 +267,15 @@ final class TranscriptController {
 
     /// Replaces rows `range` with `replacement` as one geometry change that
     /// touches only the rows from `range` on: a streamed message gaining a
-    /// block. A row that stays keeps its height unless `heights` has one.
+    /// block or a parsed message expanding in place. A row that stays keeps its
+    /// height unless `heights` has one.
     func replaceRows(_ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat]) {
         var old: [String: (row: TranscriptRow, height: CGFloat)] = [:]
         for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index)) }
         let width = columnWidth > 0 ? columnWidth : 600
         var versioned = replacement
         var newHeights: [CGFloat] = []
+        newHeights.reserveCapacity(versioned.count)
         for index in versioned.indices {
             let id = versioned[index].id
             if let previous = old[id] {
@@ -241,13 +286,26 @@ final class TranscriptController {
                 heights[id] ?? old[id]?.height
                     ?? HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
         }
-        arrivedRowIDs = Set(versioned.lazy.map(\.id).filter { old[$0] == nil })
+        // Accumulates until a placement reads it: two replacements before
+        // one placement both arrive.
+        arrivedRowIDs.formUnion(versioned.lazy.map(\.id).filter { old[$0] == nil })
         changeGeometry {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
                 range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
         }
         scheduleWork()
+    }
+
+    /// Replaces the tail `start..<rows.count` in one geometry change (used by
+    /// batched background parse+measure drains).
+    func spliceTail(
+        from start: Int, rows tailRows: [TranscriptRow], ids: [String], sources: [String], heights: [CGFloat]
+    ) {
+        changeGeometry {
+            rows.replaceSubrange(start..<rows.count, with: tailRows)
+            geometry.replaceRows(start..<geometry.count, ids: ids, sources: sources, heights: heights)
+        }
     }
 
     /// Updates rows in place whose IDs stay, with their new heights: a
@@ -286,7 +344,11 @@ final class TranscriptController {
         guard let host else { return }
         adjusting { host.setDocumentHeight(geometry.totalHeight) }
         if let viewport = host.viewport {
-            if follows {
+            if endJump != nil {
+                // Keep stepping the animated jump toward the newly grown end
+                // instead of snapping and oscillating back on the next tick.
+                stepEndJump()
+            } else if follows {
                 move(to: endTop(viewport))
             } else {
                 // Without a place to keep, the viewport still moves back

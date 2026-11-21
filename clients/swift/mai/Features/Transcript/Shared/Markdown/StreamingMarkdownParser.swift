@@ -23,9 +23,13 @@ nonisolated struct StreamingMarkdownParser: Sendable {
     }
 
     private(set) var committed: [MarkdownBlock] = []
+    /// Counts the times committed blocks were dropped (a replaced message, or
+    /// a definition switching to whole-message parsing): the stream worker
+    /// skips re-checking committed blocks only while it stays the same.
+    private(set) var committedResetCount = 0
     private var committedLength = 0
     private var source: [UInt8] = []
-    private var parsesWholeDocument = false
+    private(set) var parsesWholeDocument = false
     /// Where the definition scan resumes: the start of the first line not
     /// yet scanned to its end, and the fence open there (a definition's
     /// syntax inside code is code).
@@ -39,6 +43,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
         }
         if scanForDefinition() {
             parsesWholeDocument = true
+            committedResetCount &+= 1
             committed = []
             committedLength = 0
             return Snapshot(committed: [], open: MarkdownTailHealer.blocks(forOpenTail: text))
@@ -58,6 +63,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
         accept(text)
         if parsesWholeDocument || scanForDefinition() {
             parsesWholeDocument = true
+            committedResetCount &+= 1
             committed = MarkdownPlanner.blocks(from: text)
             committedLength = source.count
             return committed
@@ -91,6 +97,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
         if bytes.count < committedLength || !bytes.starts(with: source.prefix(committedLength)) {
             committed = []
             committedLength = 0
+            committedResetCount &+= 1
             parsesWholeDocument = false
             definitionScanStart = 0
             definitionFence = nil

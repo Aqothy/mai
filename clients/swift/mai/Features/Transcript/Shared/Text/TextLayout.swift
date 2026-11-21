@@ -13,6 +13,22 @@ nonisolated struct TextLayout: Sendable {
     let runs: [TextGlyphRun]
     let decorations: [TextDecoration]
     let links: [URL]
+    /// True if any line had right-to-left or non-monotonic runs (incremental
+    /// suffix layout falls back to full layout so BiDi reordering stays exact).
+    let hasComplexBiDi: Bool
+
+    init(
+        string: String, size: CGSize, lines: [TextLine], runs: [TextGlyphRun], decorations: [TextDecoration],
+        links: [URL], hasComplexBiDi: Bool = false
+    ) {
+        self.string = string
+        self.size = size
+        self.lines = lines
+        self.runs = runs
+        self.decorations = decorations
+        self.links = links
+        self.hasComplexBiDi = hasComplexBiDi
+    }
 
     static let empty = TextLayout(string: "", size: .zero, lines: [], runs: [], decorations: [], links: [])
 

@@ -66,8 +66,6 @@
 
         private var clip: NSClipView? { enclosingScrollView?.contentView }
         var scale: CGFloat { window?.backingScaleFactor ?? 2 }
-        /// Each window draws in its own display's space: windows on two
-        /// displays must not share one.
         var colorSpace: CGColorSpace { window?.colorSpace?.cgColorSpace ?? RowLayer.colorSpace }
 
         // MARK: Lifecycle
@@ -94,6 +92,7 @@
                         self, selector: #selector(windowKeyStateDidChange), name: name, object: window)
                 }
             }
+            displayLink?.invalidate()
             let link = displayLink(target: self, selector: #selector(frameDidTick(_:)))
             link.add(to: .main, forMode: .common)
             displayLink = link
@@ -108,25 +107,24 @@
 
         override func viewDidChangeBackingProperties() {
             super.viewDidChangeBackingProperties()
-            // Another display: its scale and color space (see `colorSpace`).
             mounter.invalidate()
             placeRowsIfNeeded()
         }
 
         /// The appearance and contrast the palette was resolved for: AppKit
-        /// calls `viewDidChangeEffectiveAppearance` more often than they
-        /// change, and a new palette draws every row again.
+        /// calls `viewDidChangeEffectiveAppearance` more often than it changes,
+        /// and a new palette places every row again.
         private var paletteAppearance: NSAppearance.Name?
-        private var paletteIncreasesContrast = false
+        private var paletteIncreasedContrast = false
 
         private func updatePalette() {
             let name = effectiveAppearance.name
-            let increasesContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            guard name != paletteAppearance || increasesContrast != paletteIncreasesContrast || palette == nil else {
+            let increasedContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            guard name != paletteAppearance || increasedContrast != paletteIncreasedContrast || palette == nil else {
                 return
             }
             paletteAppearance = name
-            paletteIncreasesContrast = increasesContrast
+            paletteIncreasedContrast = increasedContrast
             let palette = TextPalette.resolve(for: effectiveAppearance)
             self.palette = palette
             updateSelectionColor()
@@ -263,7 +261,7 @@
         /// A visible row without a layout gets one now (PLAN D3); the mounter
         /// does the rest.
         private func placeRows() {
-            guard let clip, let palette, controller.columnWidth > 0, !controller.geometry.isEmpty else { return }
+            guard let clip, let palette, controller.columnWidth > 0 else { return }
             attachRowsLayer()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -279,7 +277,10 @@
 
         // MARK: TranscriptRowMounterDelegate
 
-        func showWideBlock(rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, isVisible: Bool) {
+        func showWideBlock(
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect, visible: CGRect,
+            streamed: DrawnBands?
+        ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScrollView()
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
@@ -290,9 +291,12 @@
             let frame = body.frame.offsetBy(dx: origin.x, dy: origin.y)
             if scroller.frame != frame { scroller.frame = frame }
             guard let palette else { return }
+            let localDrawn = drawn.offsetBy(dx: -frame.minX, dy: -frame.minY)
+            let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -frame.minX, dy: -frame.minY)
             scroller.show(
                 rowID: rowID, body: body, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: controller.configuration.drawsOffMain, isVisible: isVisible)
+                drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
+                streamed: streamed)
         }
 
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {

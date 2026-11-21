@@ -54,6 +54,7 @@ nonisolated struct TranscriptBuilder {
                 guard !entry.text.isEmpty else { continue }
                 blocks.append(Block(item: .message(entry), isFoldable: true))
             case .reasoning:
+                guard entry.text.contains(where: { !$0.isWhitespace }) else { continue }
                 blocks.append(Block(item: .thought(entry), isFoldable: true))
             case .warning, .error:
                 let title = entry.title ?? (entry.kind == .error ? "Error" : "Warning")

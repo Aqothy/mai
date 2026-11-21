@@ -100,9 +100,16 @@
         func characterRange(
             byExtending position: UITextPosition, in direction: UITextLayoutDirection
         ) -> UITextRange? {
-            guard let start = self.position(position) else { return nil }
-            let edge = self.position(within: TranscriptTextRange(from: start, to: start), farthestIn: direction)
-            return edge.flatMap { textRange(from: position, to: $0) }
+            guard let start = self.position(position), let controller else { return nil }
+            let target: TextPosition? =
+                switch direction {
+                case .left: controller.paragraphRange(around: start)?.anchor
+                case .right: controller.paragraphRange(around: start)?.focus
+                case .up: controller.firstTextPosition
+                case .down: controller.lastTextPosition
+                @unknown default: nil
+                }
+            return target.map { range(start, $0) }
         }
 
         // MARK: Text
@@ -138,7 +145,7 @@
 
         func caretRect(for position: UITextPosition) -> CGRect {
             guard let position = self.position(position) else { return .null }
-            return controller?.caretRect(for: position, columnX: columnX()) ?? .null
+            return controller?.caretRect(for: position, columnX: columnX(), scrollX: scrollX) ?? .null
         }
 
         func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
@@ -163,10 +170,10 @@
         }
 
         func characterRange(at point: CGPoint) -> UITextRange? {
-            guard let start = closestPosition(to: point), let end = position(from: start, offset: 1) else {
-                return nil
-            }
-            return textRange(from: start, to: end)
+            guard let start = controller?.textPosition(atDocumentPoint: point, columnX: columnX(), scrollX: scrollX),
+                let cluster = controller?.characterRange(around: start)
+            else { return nil }
+            return TranscriptTextRange(from: cluster.anchor, to: cluster.focus)
         }
 
         // MARK: Edit menu
@@ -183,7 +190,7 @@
 
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             switch action {
-            case #selector(copy(_:)): controller?.selection.map { !$0.isEmpty } == true
+            case #selector(copy(_:)): controller?.hasValidSelection == true
             case #selector(selectAll(_:)): hasText
             default: false
             }

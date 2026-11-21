@@ -145,4 +145,27 @@ struct StreamingMarkdownParserTests {
         #expect(!committed.isEmpty)
         #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
     }
+
+    /// Large open fence, paragraph and table match one-shot parsing across
+    /// incremental streaming updates.
+    @Test(arguments: [17, 97, 256])
+    func largeOpenBlocksStreamIncrementallyAndMatchOneShot(chunk: Int) {
+        let fence = "Intro\n\n```go\n" + (0..<120).map { "\tx\($0) := f(\($0))\n" }.joined() + "```\n\nEnd"
+        let words = ["stream", "layout", "**bold**", "`code`", "alpha", "beta", "foo_bar", "text"]
+        let paragraph = (0..<600).map { words[$0 % words.count] }.joined(separator: " ")
+        let table = "| Col A | Col B |\n| --- | --- |\n" + (0..<80).map { "| `k\($0)` | **v\($0)** |\n" }.joined() + "\nDone"
+        for source in [fence, paragraph, table] {
+            let chars = Array(source)
+            var parser = StreamingMarkdownParser()
+            var committed: [MarkdownBlock] = []
+            var offset = 0
+            while offset < chars.count {
+                offset = min(chars.count, offset + chunk)
+                let snap = parser.update(String(chars[..<offset]))
+                #expect(Array(snap.committed.prefix(committed.count)) == committed)
+                committed = snap.committed
+            }
+            #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+        }
+    }
 }

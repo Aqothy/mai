@@ -200,4 +200,90 @@ struct TextLayoutEngineTests {
             if emoji.location != NSNotFound { #expect(carets[emoji.location + 1] == carets[emoji.location]) }
         }
     }
+
+    /// Incremental streaming layouts for prose, code and tables match one-shot
+    /// layout bit-for-bit, and `measureHeight` matches full layout height.
+    @Test func incrementalLayoutsAndMeasureHeightMatchFullLayout() {
+        // 1. Prose paragraph growth.
+        let words = ["stream", "layout", "**bold**", "`code`", "café", "👩🏽‍💻", "text", "frame"]
+        let part1 = (0..<80).map { words[$0 % words.count] }.joined(separator: " ")
+        let part2 = part1 + " " + (0..<40).map { words[$0 % words.count] }.joined(separator: " ")
+        let block1 = MarkdownPlanner.blocks(from: part1)[0]
+        let block2 = MarkdownPlanner.blocks(from: part2)[0]
+        let kind1 = TranscriptRowKind.markdownBlock(block1, .init(isFirst: true, isLast: true))
+        let kind2 = TranscriptRowKind.markdownBlock(block2, .init(isFirst: true, isLast: true))
+        let key = RowLayoutKey(contentVersion: 0, width: 420, styleVersion: style.version)
+        let first = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: kind1, key: key, style: style))
+        var incReq = RowLayoutRequest(rowID: "p", kind: kind2, key: key, style: style)
+        incReq.previous = (kind1, first)
+        let incremental = RowLayoutBuilder.layout(incReq)
+        let full = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: kind2, key: key, style: style))
+        #expect(incremental.height == full.height)
+        if case .text(let a, _) = incremental.content, case .text(let b, _) = full.content {
+            #expect(a.size == b.size)
+            #expect(a.lines.count == b.lines.count)
+            #expect(RowContentDiff.unchangedHeight(a, b) == .infinity)
+        } else {
+            Issue.record("expected text layouts")
+        }
+        #expect(RowLayoutBuilder.measureHeight(RowLayoutRequest(rowID: "p", kind: kind2, key: key, style: style)) == full.height)
+
+        // 2. Code fence growth (including CRLF).
+        let code1 = "line 0\r\nline 1\r\nline 2\r\nline 3\r\nline 4"
+        let code2 = code1 + "\r\nline 5\r\nline 6"
+        let c1 = CodeLayout.make(code: code1, language: "go", colors: nil, width: 400, style: style)
+        let c2Inc = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style, previous: c1)
+        let c2Full = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style)
+        #expect(c2Inc.size == c2Full.size)
+        #expect(c2Inc.body.lines.count == 7)
+        #expect(RowContentDiff.unchangedHeight(c2Inc.body, c2Full.body) == .infinity)
+
+        // 3. Table growth.
+        let t1 = MarkdownTable(
+            alignments: [.leading, .trailing],
+            header: [[MarkdownInline(text: "A")], [MarkdownInline(text: "B")]],
+            rows: (0..<10).map { [[MarkdownInline(text: "row\($0)")], [MarkdownInline(text: "\($0)")]] })
+        let t2 = MarkdownTable(
+            alignments: t1.alignments, header: t1.header,
+            rows: t1.rows + [[[MarkdownInline(text: "row10")], [MarkdownInline(text: "10")]]])
+        let tl1 = TableLayout.make(t1, width: 500, style: style)
+        let tl2Inc = TableLayout.make(t2, width: 500, style: style, previous: tl1)
+        let tl2Full = TableLayout.make(t2, width: 500, style: style)
+        #expect(tl2Inc.size == tl2Full.size)
+        #expect(RowContentDiff.unchangedHeight(.tableBody(tl2Inc), .tableBody(tl2Full)) == .infinity)
+    }
+
+    /// The background sweep measures rows without laying them out; its
+    /// heights must be the layout's, or rows jump when laid out later.
+    @Test func measuredHeightsAreLayoutHeightsForEveryRowKind() {
+        let table = MarkdownTable(
+            alignments: [.leading, .trailing], header: [[MarkdownInline(text: "K")], [MarkdownInline(text: "V")]],
+            rows: [[[MarkdownInline(text: "a long cell that wraps more than once at this width")], [MarkdownInline(text: "1")]]])
+        let blocks: [MarkdownBlock] = [
+            .paragraph([MarkdownInline(text: String(repeating: "words wrap ", count: 40))]),
+            .heading(level: 2, [MarkdownInline(text: "Heading")]),
+            .quote([.paragraph([MarkdownInline(text: "quoted")]), .list(MarkdownList(startIndex: 1, items: [[.paragraph([MarkdownInline(text: "item")])]]))]),
+            .code(language: "go", code: "func f() {\n\treturn\n}"),
+            .table(table),
+            .rule(spelling: "---"),
+        ]
+        var kinds: [TranscriptRowKind] = blocks.indices.map { .markdownBlock(blocks[$0], .of($0, in: blocks)) }
+        kinds += [
+            .userMessage(source: "A prompt with **bold** and a [link](https://example.com)"),
+            .pendingMessage(source: "Pending\n\nmessage"),
+            .thought("Thinking about it"),
+            .activity(summary: "Ran 2 commands"),
+            .turnHeader(TranscriptTurnHeader(turnID: "t", title: "Worked for 3s", isRunning: false, isExpanded: false)),
+            .turnActions(turnID: "t", replyMarkdown: "reply"),
+            .working(phrase: "Pondering…"),
+            .notice(title: "Warning", text: "Something to know"),
+        ]
+        for width in [CGFloat(280), 640] {
+            let key = RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version)
+            for kind in kinds {
+                let request = RowLayoutRequest(rowID: "r", kind: kind, key: key, style: style)
+                #expect(RowLayoutBuilder.measureHeight(request) == RowLayoutBuilder.layout(request).height, "\(kind)")
+            }
+        }
+    }
 }

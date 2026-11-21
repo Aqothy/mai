@@ -45,7 +45,7 @@
             window?.makeFirstResponder(self)
             let point = convert(event.locationInWindow, from: nil)
             // A finished turn's header expands and collapses its work.
-            if let turnID = controller.expandableTurn(atDocumentY: point.y) {
+            if let turnID = controller.expandableTurn(atDocumentPoint: point, columnX: columnX) {
                 controller.toggleExpansion(turnID: turnID)
                 return
             }
@@ -88,6 +88,10 @@
                 switch event.type {
                 case .leftMouseDragged:
                     last = event
+                    let moved = hypot(
+                        event.locationInWindow.x - down.locationInWindow.x,
+                        event.locationInWindow.y - down.locationInWindow.y)
+                    if !dragged, moved < 3 { continue }
                     dragged = true
                     _ = autoscroll(with: event)
                     extend(anchor, granularity: granularity, to: convert(event.locationInWindow, from: nil))
@@ -98,7 +102,7 @@
                     if !dragged, granularity == .character, !down.modifierFlags.contains(.shift) {
                         controller.setSelection(nil)
                         let point = convert(event.locationInWindow, from: nil)
-                        if let url = controller.link(atDocumentPoint: point, columnX: columnX) {
+                        if let url = controller.link(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX) {
                             NSWorkspace.shared.open(url)
                         }
                     }
@@ -142,7 +146,7 @@
             if let position = textPosition(at: point), !isSelected(position) {
                 controller.setSelection(controller.wordRange(around: position))
             }
-            guard controller.selection.map({ !$0.isEmpty }) == true else { return nil }
+            guard controller.hasValidSelection else { return nil }
             // Targets are explicit: a right-click over a code block's scroller
             // reaches here without making this view first responder.
             let menu = NSMenu()
@@ -172,26 +176,37 @@
             updateCursor(at: convert(event.locationInWindow, from: nil))
         }
 
-        /// A pointing hand over links, an I-beam over selectable text.
+        /// A pointing hand over links, an I-beam over selectable text. One
+        /// geometry and layout lookup per pointer move.
         private func updateCursor(at point: CGPoint) {
-            if controller.link(atDocumentPoint: point, columnX: columnX) != nil {
+            let geometry = controller.geometry
+            guard !geometry.isEmpty, point.y >= 0, let index = geometry.index(at: point.y) else {
+                NSCursor.arrow.set()
+                return
+            }
+            let row = controller.rows[index]
+            guard let layout = controller.layouts[row.id] else {
+                NSCursor.arrow.set()
+                return
+            }
+            var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
+            if let body = layout.content.wideBody, local.y >= body.frame.minY {
+                guard local.x >= body.frame.minX, local.x <= body.frame.maxX else {
+                    NSCursor.arrow.set()
+                    return
+                }
+                local.x += wideBlocks[row.id]?.scrollX ?? 0
+            }
+            if layout.content.link(at: local) != nil {
                 NSCursor.pointingHand.set()
-            } else if isOverSelectableText(point) {
+            } else if row.kind.isSelectable,
+                layout.content.textSegments.contains(where: { segment in
+                    (segment.hitRect ?? CGRect(origin: segment.origin, size: segment.layout.size)).contains(local)
+                })
+            {
                 NSCursor.iBeam.set()
             } else {
                 NSCursor.arrow.set()
-            }
-        }
-
-        private func isOverSelectableText(_ point: CGPoint) -> Bool {
-            let geometry = controller.geometry
-            guard !geometry.isEmpty, point.y >= 0, let index = geometry.index(at: point.y),
-                controller.rows[index].kind.isSelectable,
-                let layout = controller.layouts[controller.rows[index].id]
-            else { return false }
-            let local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
-            return layout.content.textSegments.contains { segment in
-                (segment.hitRect ?? CGRect(origin: segment.origin, size: segment.layout.size)).contains(local)
             }
         }
 
@@ -222,10 +237,12 @@
             max(0, ((bounds.width - controller.columnWidth) / 2).rounded(.down))
         }
 
+        private func wideScrollX(_ rowID: String) -> CGFloat {
+            wideBlocks[rowID]?.scrollX ?? 0
+        }
+
         private func textPosition(at point: CGPoint) -> TextPosition? {
-            controller.textPosition(atDocumentPoint: point, columnX: columnX) { [wideBlocks] rowID in
-                wideBlocks[rowID]?.scrollX ?? 0
-            }
+            controller.textPosition(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX)
         }
 
         private func isSelected(_ position: TextPosition) -> Bool {
@@ -242,7 +259,7 @@
         func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
             switch menuItem.action {
             case #selector(copy(_:)), #selector(comment(_:)):
-                controller.selection.map { !$0.isEmpty } == true
+                controller.hasValidSelection
             case #selector(selectAll(_:)):
                 !controller.rows.isEmpty
             default:

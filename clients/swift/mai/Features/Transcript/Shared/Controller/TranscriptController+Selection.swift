@@ -53,18 +53,26 @@ extension TranscriptController {
     }
 
     /// The link at `point` (document coordinates), if any.
-    func link(atDocumentPoint point: CGPoint, columnX: CGFloat) -> URL? {
+    func link(
+        atDocumentPoint point: CGPoint, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
+    ) -> URL? {
         guard point.y >= 0, let index = geometry.index(at: point.y), let layout = layouts[rows[index].id] else {
             return nil
         }
-        return layout.content.link(
-            at: CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index)))
+        var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
+        if let body = layout.content.wideBody, local.y >= body.frame.minY {
+            guard local.x >= body.frame.minX, local.x <= body.frame.maxX else { return nil }
+            local.x += scrollX(rows[index].id)
+        }
+        return layout.content.link(at: local)
     }
 
-    /// The finished turn whose header is at `y` (document coordinates), if
-    /// any: clicking or tapping it toggles its work (rule 6).
-    func expandableTurn(atDocumentY y: CGFloat) -> String? {
-        guard y >= 0, let index = geometry.index(at: y), case .turnHeader(let header) = rows[index].kind,
+    /// The finished turn whose header is at `point` (document coordinates)
+    /// inside the transcript column, if any: clicking or tapping it toggles
+    /// its work (rule 6).
+    func expandableTurn(atDocumentPoint point: CGPoint, columnX: CGFloat) -> String? {
+        guard point.y >= 0, point.x >= columnX, point.x <= columnX + columnWidth,
+            let index = geometry.index(at: point.y), case .turnHeader(let header) = rows[index].kind,
             !header.isRunning
         else { return nil }
         return header.turnID
@@ -81,6 +89,12 @@ extension TranscriptController {
         let a = (index: anchor, offset: selection.anchor.offset)
         let b = (index: focus, offset: selection.focus.offset)
         return (a.index, a.offset) <= (b.index, b.offset) ? (a, b) : (b, a)
+    }
+
+    /// Whether there is a non-empty selection whose rows are still present.
+    var hasValidSelection: Bool {
+        guard let ends = orderedSelection() else { return false }
+        return ends.start.index != ends.end.index || ends.start.offset != ends.end.offset
     }
 
     /// The selected part of row `index`'s text.
@@ -175,7 +189,8 @@ extension TranscriptController {
     }
 
     /// Highlight rects from `start` to `end` (document coordinates) for rows
-    /// with layouts (those near the viewport, the only ones on screen).
+    /// with layouts (those near the viewport, the only ones on screen). Wide
+    /// block rects are clipped to their horizontal scroller's frame.
     func selectionRects(
         from start: TextPosition, to end: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat
     ) -> [CGRect] {
@@ -184,27 +199,39 @@ extension TranscriptController {
         var rects: [CGRect] = []
         for index in first...last where rows[index].kind.isSelectable {
             guard let layout = layouts[rows[index].id], let length = selectableLength(ofRowAt: index) else { continue }
-            let from = index == first ? start.offset : 0
-            let to = index == last ? end.offset : length
+            // A selection made before the text shrank (a re-parse) ends past it.
+            let from = index == first ? min(start.offset, length) : 0
+            let to = index == last ? min(end.offset, length) : length
             guard from < to else { continue }
-            var dx = columnX
-            if layout.content.wideBody != nil { dx -= scrollX(rows[index].id) }
             let top = geometry.offset(at: index)
-            for rect in layout.content.selectionRects(for: from..<to) { rects.append(rect.offsetBy(dx: dx, dy: top)) }
+            let wideBody = layout.content.wideBody
+            let dx = columnX - (wideBody != nil ? scrollX(rows[index].id) : 0)
+            let clip = wideBody.map { $0.frame.offsetBy(dx: columnX, dy: top) }
+            for rect in layout.content.selectionRects(for: from..<to) {
+                var shifted = rect.offsetBy(dx: dx, dy: top)
+                if let clip {
+                    shifted = shifted.intersection(clip)
+                    guard !shifted.isNull, shifted.width > 0 else { continue }
+                }
+                rects.append(shifted)
+            }
         }
         return rects
     }
 
     /// The caret before `position` (document coordinates), when its row has
     /// a layout.
-    func caretRect(for position: TextPosition, columnX: CGFloat) -> CGRect? {
+    func caretRect(
+        for position: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
+    ) -> CGRect? {
         guard let index = geometry.index(for: position.rowID), let layout = layouts[position.rowID] else { return nil }
+        let dx = columnX - (layout.content.wideBody != nil ? scrollX(position.rowID) : 0)
         for segment in layout.content.textSegments where position.offset >= segment.start && position.offset <= segment.end {
             let local = position.offset - segment.start
             guard let line = segment.layout.lines.last(where: { $0.range.lowerBound <= local }) else { continue }
             let x = line.caretOffsets[min(local - line.range.lowerBound, line.caretOffsets.count - 1)]
             return CGRect(
-                x: columnX + segment.origin.x + x, y: geometry.offset(at: index) + segment.origin.y + line.top,
+                x: dx + segment.origin.x + x, y: geometry.offset(at: index) + segment.origin.y + line.top,
                 width: 2, height: line.height)
         }
         return nil
@@ -252,7 +279,7 @@ extension TranscriptController {
         }
         let string = text as NSString
         guard string.length > 0 else { return TranscriptSelection(caret: position) }
-        let offset = min(max(0, position.offset), string.length - 1)
+        let offset = min(position.offset, string.length - 1)
         var found: NSRange?
         let paragraph = string.paragraphRange(for: NSRange(location: offset, length: 0))
         string.enumerateSubstrings(in: paragraph, options: [.byWords, .substringNotRequired]) { _, range, _, stop in
@@ -262,6 +289,21 @@ extension TranscriptController {
             }
         }
         let range = found ?? string.rangeOfComposedCharacterSequence(at: offset)
+        return TranscriptSelection(
+            anchor: TextPosition(rowID: position.rowID, offset: range.location),
+            focus: TextPosition(rowID: position.rowID, offset: NSMaxRange(range)))
+    }
+
+    /// The composed character sequence (whole emoji / surrogate pair) at
+    /// `position`.
+    func characterRange(around position: TextPosition) -> TranscriptSelection? {
+        guard let index = geometry.index(for: position.rowID), let text = selectableText(ofRowAt: index) else {
+            return nil
+        }
+        let string = text as NSString
+        guard string.length > 0 else { return TranscriptSelection(caret: position) }
+        let offset = min(position.offset, string.length - 1)
+        let range = string.rangeOfComposedCharacterSequence(at: offset)
         return TranscriptSelection(
             anchor: TextPosition(rowID: position.rowID, offset: range.location),
             focus: TextPosition(rowID: position.rowID, offset: NSMaxRange(range)))

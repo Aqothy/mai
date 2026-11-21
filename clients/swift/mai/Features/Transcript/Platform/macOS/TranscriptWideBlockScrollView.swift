@@ -16,18 +16,6 @@
         weak var transcriptScrollView: NSScrollView?
         private let body = TranscriptWideBlockBodyView()
         private(set) var rowID: String?
-        /// What the body shows, so placing an unchanged block again is free.
-        private struct Shown: Equatable {
-            let rowID: String
-            let key: RowLayoutKey
-            let colorsAreDark: Bool?
-            let isHighlighted: Bool
-            let isDark: Bool
-            let scale: CGFloat
-            let colorSpace: CGColorSpace
-            let width: CGFloat
-        }
-        private var shown: Shown?
         /// The axis the trackpad gesture in progress was latched to.
         private var gestureAxis: NSEvent.GestureAxis?
 
@@ -50,22 +38,17 @@
 
         func show(
             rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
         ) {
-            let shown = Shown(
-                rowID: rowID, key: key, colorsAreDark: wide.content.colorsAreDark,
-                isHighlighted: wide.content.isHighlighted, isDark: palette.isDark,
-                scale: scale, colorSpace: colorSpace, width: frame.width)
-            guard shown != self.shown else { return }
             if self.rowID != rowID { contentView.scroll(to: .zero) }
-            self.shown = shown
             self.rowID = rowID
-            body.frame = NSRect(
-                x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
+            let target = NSRect(x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
+            let resized = body.frame != target
+            if resized { body.frame = target }
             body.show(
                 rowID: rowID, body: wide, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: drawsOffMain, isVisible: isVisible)
-            reflectScrolledClipView(contentView)
+                drawsOffMain: drawsOffMain, drawn: drawn, visible: visible, streamed: streamed)
+            if resized { reflectScrolledClipView(contentView) }
         }
 
         func showSelection(_ range: Range<Int>?, color: CGColor) {
@@ -77,7 +60,7 @@
 
         func resetForReuse() {
             rowID = nil
-            shown = nil
+            gestureAxis = nil
             body.resetForReuse()
         }
 

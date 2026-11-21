@@ -81,12 +81,16 @@
             NotificationCenter.default.addObserver(
                 self, selector: #selector(keyboardWillChangeFrame(_:)),
                 name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+            for name in [
+                UIApplication.didReceiveMemoryWarningNotification, UIApplication.didEnterBackgroundNotification,
+            ] {
+                NotificationCenter.default.addObserver(self, selector: #selector(releaseOffscreenMemory), name: name, object: nil)
+            }
             registerForTraitChanges([
                 UITraitUserInterfaceStyle.self, UITraitDisplayScale.self, UITraitAccessibilityContrast.self,
             ]) { (view: TranscriptScrollView, _) in
                 view.updatePalette()
             }
-            // Bold Text changes the fonts' weight, not their size.
             registerForTraitChanges([
                 UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self,
             ]) { (view: TranscriptScrollView, _) in
@@ -118,6 +122,19 @@
             updatePalette()
             controller.attach(self)
             updateFrameLink()
+        }
+
+        @objc private func releaseOffscreenMemory() {
+            let visible = visibleRect
+            mounter.releaseOffscreen(keeping: visible)
+            for scroller in wideBlocks.values {
+                let localVisible = visible.offsetBy(dx: -scroller.frame.minX, dy: -scroller.frame.minY)
+                scroller.releaseOffscreenBands(keeping: localVisible)
+            }
+            for scroller in wideBlockPool { scroller.removeFromSuperview() }
+            wideBlockPool.removeAll()
+            for button in accessoryPool { button.removeFromSuperview() }
+            accessoryPool.removeAll()
         }
 
         private func updatePalette() {
@@ -284,7 +301,7 @@
         }
 
         private func placeRows() {
-            guard let palette, controller.columnWidth > 0, !controller.geometry.isEmpty else { return }
+            guard let palette, controller.columnWidth > 0 else { return }
             matchContentWidth()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -301,18 +318,29 @@
 
         // MARK: TranscriptRowMounterDelegate
 
-        func showWideBlock(rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, isVisible: Bool) {
+        func showWideBlock(
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect, visible: CGRect,
+            streamed: DrawnBands?
+        ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScroller()
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
-                contentView.addSubview(scroller)
+                if scroller.superview == nil { contentView.addSubview(scroller) }
+                scroller.isHidden = false
+                scroller.onHorizontalScroll = { [weak self] in
+                    guard let self, self.controller.selection != nil else { return }
+                    self.contentView.selectionGeometryDidChange()
+                }
             }
             let frame = body.frame.offsetBy(dx: origin.x, dy: origin.y)
             if scroller.frame != frame { scroller.frame = frame }
             guard let palette else { return }
+            let localDrawn = drawn.offsetBy(dx: -frame.minX, dy: -frame.minY)
+            let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -frame.minX, dy: -frame.minY)
             scroller.show(
                 rowID: rowID, body: body, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: controller.configuration.drawsOffMain, isVisible: isVisible)
+                drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
+                streamed: streamed)
         }
 
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {
@@ -321,9 +349,13 @@
 
         func removeWideBlock(rowID: String) {
             guard let scroller = wideBlocks.removeValue(forKey: rowID) else { return }
-            scroller.removeFromSuperview()
             scroller.resetForReuse()
-            if wideBlockPool.count < 8 { wideBlockPool.append(scroller) }
+            scroller.isHidden = true
+            if wideBlockPool.count < 8 {
+                wideBlockPool.append(scroller)
+            } else {
+                scroller.removeFromSuperview()
+            }
         }
 
         func showAccessories(rowID: String, accessories: [RowAccessory], origin: CGPoint) {
@@ -331,7 +363,7 @@
             while buttons.count > accessories.count { recycle(buttons.removeLast()) }
             while buttons.count < accessories.count {
                 let button = accessoryPool.popLast() ?? TranscriptAccessoryControl()
-                contentView.addSubview(button)
+                if button.superview == nil { contentView.addSubview(button) }
                 buttons.append(button)
             }
             for (button, accessory) in zip(buttons, accessories) {
@@ -353,9 +385,13 @@
         }
 
         private func recycle(_ button: TranscriptAccessoryControl) {
-            button.removeFromSuperview()
             button.resetForReuse()
-            if accessoryPool.count < 16 { accessoryPool.append(button) }
+            button.isHidden = true
+            if accessoryPool.count < 16 {
+                accessoryPool.append(button)
+            } else {
+                button.removeFromSuperview()
+            }
         }
 
         // MARK: Positions
