@@ -45,6 +45,23 @@ nonisolated extension RowContentLayout {
         }
     }
 
+    /// How far down from the row's top `RowPainter` paints into its bands:
+    /// nothing for rows drawn only with layer shapes and controls, or whose
+    /// whole grid is in a wide block's scroller; only the header for a wide
+    /// code block, whose body is in its scroller.
+    func paintedHeight(drawsWideBody: Bool, rowHeight: CGFloat) -> CGFloat {
+        switch self {
+        case .actions, .empty:
+            0
+        case .table where !drawsWideBody:
+            0
+        case .code(let code, let frame) where !drawsWideBody:
+            min(rowHeight, ceil(frame.minY + code.headerHeight))
+        default:
+            rowHeight
+        }
+    }
+
     /// The body of a code block or table wider than the row, which scrolls
     /// sideways in a scroller of its own; nil for everything else.
     var wideBody: WideBlockBody? {

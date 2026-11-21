@@ -86,4 +86,30 @@ struct TranscriptStreamOrderTests {
         #expect(band.wants(band.generation))
     }
 
+    /// A row that paints nothing (a turn's action buttons) holds no bitmap,
+    /// and a code block wider than its row paints only its header: the body
+    /// is drawn in the block's own scroller.
+    @Test func rowsHoldBitmapsOnlyForWhatTheyPaint() {
+        let palette = TextPalette.resolveForTests
+        let key = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
+        let actions = RowLayoutBuilder.layout(
+            RowLayoutRequest(rowID: "a", kind: .turnActions(turnID: "t", replyMarkdown: "hi"), key: key, style: style))
+        let actionsLayer = mounted(actions, palette: palette)
+        let actionBands = actionsLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
+        #expect(actionBands.isEmpty)
+
+        let wide = String(repeating: "x", count: 200)
+        let code = TranscriptRowKind.markdownBlock(
+            .code(language: "go", code: Array(repeating: wide, count: 60).joined(separator: "\n")),
+            .init(isFirst: true, isLast: true))
+        let codeLayout = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "c", kind: code, key: key, style: style))
+        #expect(codeLayout.content.wideBody != nil)
+        #expect(codeLayout.height > RowLayer.bandHeight)
+        let codeLayer = RowLayer()
+        codeLayer.frame = CGRect(x: 0, y: 0, width: 300, height: codeLayout.height)
+        codeLayer.show(rowID: "c", layout: codeLayout, palette: palette, drawsWideBody: false, scale: 2)
+        let codeBands = codeLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
+        #expect(codeBands.count == 1)
+        #expect(codeBands.allSatisfy { $0.frame.maxY <= RowLayer.bandHeight })
+    }
 }

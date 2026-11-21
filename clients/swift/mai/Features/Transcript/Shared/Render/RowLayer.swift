@@ -7,9 +7,11 @@ import QuartzCore
 nonisolated final class RowLayer: CALayer {
     static let bandHeight: CGFloat = 512
 
-    /// The frames of a row's bands, in row coordinates.
+    /// The frames of a row's bands, in row coordinates: none for a row that
+    /// paints nothing, so it holds no `IOSurface`.
     static func bandFrames(height: CGFloat, width: CGFloat) -> [CGRect] {
-        let count = max(1, Int(ceil(height / bandHeight)))
+        guard height > 0, width > 0 else { return [] }
+        let count = Int(ceil(height / bandHeight))
         return (0..<count).map { index in
             let top = CGFloat(index) * bandHeight
             return CGRect(x: 0, y: top, width: width, height: min(bandHeight, height - top))
@@ -91,7 +93,8 @@ nonisolated final class RowLayer: CALayer {
         configureShape(palette: palette)
         let bitmaps = drawn.flatMap { $0.palette === palette && $0.scale == scale ? $0.bands : nil } ?? []
         configureBands(
-            height: layout.height, width: bounds.width, scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
+            height: layout.content.paintedHeight(drawsWideBody: drawsWideBody, rowHeight: layout.height),
+            width: bounds.width, scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
         if selectedRange != nil { drawSelection() }
     }
 

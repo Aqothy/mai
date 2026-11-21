@@ -18,9 +18,9 @@ nonisolated struct DrawnBands: Sendable {
         colorSpace: CGColorSpace
     ) -> DrawnBands {
         let unchanged = previous.map { RowContentDiff.unchangedHeight($0.content, layout.content) } ?? 0
-        let oldFrames = previous.map { RowLayer.bandFrames(height: $0.height, width: $0.key.width) } ?? []
+        let oldFrames = previous.map { Self.frames(of: $0) } ?? []
         var bands: [(frame: CGRect, bitmap: BandBitmap?)] = []
-        for (index, frame) in RowLayer.bandFrames(height: layout.height, width: layout.key.width).enumerated() {
+        for (index, frame) in Self.frames(of: layout).enumerated() {
             if index < oldFrames.count, oldFrames[index] == frame, frame.maxY <= unchanged { continue }
             let raster = BandRaster(
                 content: layout.content, palette: palette, drawsWideBody: layout.content.wideBody == nil, rect: frame,
@@ -28,5 +28,13 @@ nonisolated struct DrawnBands: Sendable {
             bands.append((frame, BandRasterizer.bitmap(raster)))
         }
         return DrawnBands(palette: palette, scale: scale, bands: bands)
+    }
+
+    /// The bands `RowLayer` gives `layout`'s row.
+    private static func frames(of layout: RowLayout) -> [CGRect] {
+        let drawsWideBody = layout.content.wideBody == nil
+        return RowLayer.bandFrames(
+            height: layout.content.paintedHeight(drawsWideBody: drawsWideBody, rowHeight: layout.height),
+            width: layout.key.width)
     }
 }
