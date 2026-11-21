@@ -24,6 +24,7 @@
             let isHighlighted: Bool
             let isDark: Bool
             let scale: CGFloat
+            let colorSpace: CGColorSpace
             let width: CGFloat
         }
         private var shown: Shown?
@@ -49,12 +50,12 @@
 
         func show(
             rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
         ) {
             let shown = Shown(
                 rowID: rowID, key: key, colorsAreDark: wide.content.colorsAreDark,
                 isHighlighted: wide.content.isHighlighted, isDark: palette.isDark,
-                scale: scale, width: frame.width)
+                scale: scale, colorSpace: colorSpace, width: frame.width)
             guard shown != self.shown else { return }
             if self.rowID != rowID { contentView.scroll(to: .zero) }
             self.shown = shown
@@ -62,8 +63,8 @@
             body.frame = NSRect(
                 x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
             body.show(
-                rowID: rowID, body: wide, key: key, palette: palette, scale: scale, drawsOffMain: drawsOffMain,
-                isVisible: isVisible)
+                rowID: rowID, body: wide, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
+                drawsOffMain: drawsOffMain, isVisible: isVisible)
             reflectScrolledClipView(contentView)
         }
 

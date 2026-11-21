@@ -173,7 +173,7 @@ extension TranscriptController {
             }
             let drawing = palette.map { palette in
                 TranscriptStreamWorker.Drawing(
-                    palette: palette, scale: host?.scale ?? 2, colorSpace: RowLayer.colorSpace)
+                    palette: palette, scale: host?.scale ?? 2, colorSpace: host?.colorSpace ?? RowLayer.colorSpace)
             }
             let update = TranscriptStreamWorker.Update(
                 messageID: messageID, text: released, isFinished: stream.isFinishing, width: columnWidth, style: style,

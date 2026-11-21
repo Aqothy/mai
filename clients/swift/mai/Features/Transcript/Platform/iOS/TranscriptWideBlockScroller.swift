@@ -19,6 +19,7 @@
             let isHighlighted: Bool
             let isDark: Bool
             let scale: CGFloat
+            let colorSpace: CGColorSpace
             let width: CGFloat
         }
 
@@ -42,12 +43,12 @@
 
         func show(
             rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
         ) {
             let shown = Shown(
                 rowID: rowID, key: key, colorsAreDark: wide.content.colorsAreDark,
                 isHighlighted: wide.content.isHighlighted, isDark: palette.isDark,
-                scale: scale, width: bounds.width)
+                scale: scale, colorSpace: colorSpace, width: bounds.width)
             guard shown != self.shown else { return }
             if self.rowID != rowID { contentOffset = .zero }
             self.shown = shown
@@ -60,7 +61,7 @@
             row.frame = CGRect(x: 0, y: 0, width: wide.contentWidth, height: height)
             row.show(
                 rowID: rowID, layout: RowLayout(rowID: rowID, key: key, height: height, content: wide.content),
-                palette: palette, drawsWideBody: true, scale: scale)
+                palette: palette, drawsWideBody: true, scale: scale, colorSpace: colorSpace)
             // On screen already, it draws now rather than show a blank block.
             row.drawBands(in: row.bounds, visible: isVisible ? row.bounds : .null, offMain: drawsOffMain)
             CATransaction.commit()

@@ -292,7 +292,7 @@
             UIView.performWithoutAnimation {
                 mounter.place(
                     controller, visible: visibleRect, documentWidth: bounds.width, palette: palette, scale: scale,
-                    showsContent: isContentVisible)
+                    colorSpace: colorSpace, showsContent: isContentVisible)
             }
             // Rows laid out again move the selection's rects.
             if controller.selection != nil { contentView.selectionGeometryDidChange() }
@@ -310,7 +310,7 @@
             if scroller.frame != frame { scroller.frame = frame }
             guard let palette else { return }
             scroller.show(
-                rowID: rowID, body: body, key: key, palette: palette, scale: scale,
+                rowID: rowID, body: body, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, isVisible: isVisible)
         }
 

@@ -66,6 +66,9 @@
 
         private var clip: NSClipView? { enclosingScrollView?.contentView }
         var scale: CGFloat { window?.backingScaleFactor ?? 2 }
+        /// Each window draws in its own display's space: windows on two
+        /// displays must not share one.
+        var colorSpace: CGColorSpace { window?.colorSpace?.cgColorSpace ?? RowLayer.colorSpace }
 
         // MARK: Lifecycle
 
@@ -105,9 +108,7 @@
 
         override func viewDidChangeBackingProperties() {
             super.viewDidChangeBackingProperties()
-            // Another display: bitmaps drawn in its color space need no
-            // color matching at commit (see `RowLayer.colorSpace`).
-            if let space = window?.colorSpace?.cgColorSpace { RowLayer.colorSpace = space }
+            // Another display: its scale and color space (see `colorSpace`).
             mounter.invalidate()
             placeRowsIfNeeded()
         }
@@ -118,7 +119,6 @@
         private var paletteAppearance: NSAppearance.Name?
 
         private func updatePalette() {
-            if let space = window?.colorSpace?.cgColorSpace { RowLayer.colorSpace = space }
             let name = effectiveAppearance.name
             guard name != paletteAppearance || palette == nil else { return }
             paletteAppearance = name
@@ -269,7 +269,7 @@
             }
             mounter.place(
                 controller, visible: clip.documentVisibleRect, documentWidth: bounds.width, palette: palette,
-                scale: scale, showsContent: isContentVisible)
+                scale: scale, colorSpace: colorSpace, showsContent: isContentVisible)
         }
 
         // MARK: TranscriptRowMounterDelegate
@@ -286,7 +286,7 @@
             if scroller.frame != frame { scroller.frame = frame }
             guard let palette else { return }
             scroller.show(
-                rowID: rowID, body: body, key: key, palette: palette, scale: scale,
+                rowID: rowID, body: body, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, isVisible: isVisible)
         }
 

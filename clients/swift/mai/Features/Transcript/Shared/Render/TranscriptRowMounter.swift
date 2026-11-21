@@ -89,10 +89,10 @@ final class TranscriptRowMounter {
     /// Mounts, positions and draws the rows for `visible` (document
     /// coordinates) in a column of `documentWidth`. `showsContent` is false
     /// while the transcript waits for its first rows (PLAN 3.9 rule 9): no
-    /// synchronous layouts then.
+    /// synchronous layouts then. Bands draw in `colorSpace`, the window's.
     func place(
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
-        scale: CGFloat, showsContent: Bool
+        scale: CGFloat, colorSpace: CGColorSpace, showsContent: Bool
     ) {
         hasSelection = drawsSelection && controller.selection != nil
         isStale = false
@@ -149,7 +149,7 @@ final class TranscriptRowMounter {
                 mount(
                     controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
-                    showsContent: showsContent)
+                    colorSpace: colorSpace, showsContent: showsContent)
             }
         }
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
@@ -197,7 +197,7 @@ final class TranscriptRowMounter {
     private func mount(
         _ row: TranscriptRow, index: Int, frame: CGRect, layout: RowLayout, controller: TranscriptController,
         documentWidth: CGFloat, visible: CGRect, drawn: CGRect, palette: TextPalette, scale: CGFloat,
-        showsContent: Bool
+        colorSpace: CGColorSpace, showsContent: Bool
     ) {
         let width = layout.key.width
         let x = max(0, ((documentWidth - width) / 2).rounded(.down))
@@ -227,7 +227,7 @@ final class TranscriptRowMounter {
         }
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
-            drawn: streamed)
+            colorSpace: colorSpace, drawn: streamed)
         if hasSelection {
             layer.showSelection(controller.selectedRange(inRowAt: index), color: selectionColor)
         }

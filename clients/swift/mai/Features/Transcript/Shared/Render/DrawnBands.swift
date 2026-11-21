@@ -4,10 +4,11 @@ import CoreGraphics
 /// streamed block, `TranscriptStreamWorker`), so the row shows its new
 /// text in the same frame as its new size, never an older bitmap in it.
 nonisolated struct DrawnBands: Sendable {
-    /// What they were drawn with; a row showing another palette or scale
-    /// draws its bands itself.
+    /// What they were drawn with; a row showing another palette, scale or
+    /// color space draws its bands itself.
     let palette: TextPalette
     let scale: CGFloat
+    let colorSpace: CGColorSpace
     /// The bands that changed, by frame in row coordinates.
     let bands: [(frame: CGRect, bitmap: BandBitmap?)]
 
@@ -27,7 +28,7 @@ nonisolated struct DrawnBands: Sendable {
                 scale: scale, colorSpace: colorSpace)
             bands.append((frame, BandRasterizer.bitmap(raster)))
         }
-        return DrawnBands(palette: palette, scale: scale, bands: bands)
+        return DrawnBands(palette: palette, scale: scale, colorSpace: colorSpace, bands: bands)
     }
 
     /// The bands `RowLayer` gives `layout`'s row.

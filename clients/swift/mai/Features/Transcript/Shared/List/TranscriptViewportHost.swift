@@ -13,6 +13,8 @@ protocol TranscriptViewportHost: AnyObject {
     var viewportTop: CGFloat { get }
     /// Pixels per point of the display the transcript is on.
     var scale: CGFloat { get }
+    /// The color space of the window the transcript is in.
+    var colorSpace: CGColorSpace { get }
     /// May move the viewport to keep it inside the content (UIKit does, in
     /// the setter).
     func setDocumentHeight(_ height: CGFloat)
@@ -35,6 +37,7 @@ protocol TranscriptViewportHost: AnyObject {
 }
 
 extension TranscriptViewportHost {
+    var colorSpace: CGColorSpace { RowLayer.colorSpace }
     func setNeedsSelectionDisplay() {}
     var animatesJumps: Bool { false }
     func stopDeceleration() {}

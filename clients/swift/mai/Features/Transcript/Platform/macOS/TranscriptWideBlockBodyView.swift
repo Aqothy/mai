@@ -27,12 +27,13 @@
 
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            drawsOffMain: Bool, isVisible: Bool
+            colorSpace: CGColorSpace, drawsOffMain: Bool, isVisible: Bool
         ) {
             let height = body.frame.height
             let layout = RowLayout(rowID: rowID, key: key, height: height, content: body.content)
             row.frame = CGRect(x: 0, y: 0, width: body.contentWidth, height: height)
-            row.show(rowID: rowID, layout: layout, palette: palette, drawsWideBody: true, scale: scale)
+            row.show(
+                rowID: rowID, layout: layout, palette: palette, drawsWideBody: true, scale: scale, colorSpace: colorSpace)
             // On screen already, it draws now rather than show a blank block.
             row.drawBands(in: row.bounds, visible: isVisible ? row.bounds : .null, offMain: drawsOffMain)
         }

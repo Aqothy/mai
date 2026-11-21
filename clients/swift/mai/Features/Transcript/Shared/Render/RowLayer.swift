@@ -31,6 +31,8 @@ nonisolated final class RowLayer: CALayer {
     private var selectedRange: Range<Int>?
     private var selectionColor: CGColor?
     private var palette: TextPalette?
+    /// The color space the bands draw in: their window's.
+    private var bandColorSpace: CGColorSpace?
     /// Placement bookkeeping for `TranscriptRowMounter`.
     var placementStamp = 0
     var placedFrame: CGRect = .null
@@ -64,17 +66,17 @@ nonisolated final class RowLayer: CALayer {
 
     override func action(forKey event: String) -> (any CAAction)? { nil }
 
-    /// Shows `layout` for `rowID`. Bands redraw only when the layout or the
-    /// palette changed; `drawn` has bitmaps of the new layout made with it,
-    /// shown now.
+    /// Shows `layout` for `rowID`. Bands redraw only when the layout, the
+    /// palette, the scale or the color space changed; `drawn` has bitmaps of
+    /// the new layout made with them, shown now.
     @MainActor
     func show(
         rowID: String, layout: RowLayout, palette: TextPalette, drawsWideBody: Bool, scale: CGFloat,
-        drawn: DrawnBands? = nil
+        colorSpace: CGColorSpace = RowLayer.colorSpace, drawn: DrawnBands? = nil
     ) {
         let sameRow =
             self.rowID == rowID && self.palette.map { $0.isDark == palette.isDark } == true
-            && self.drawsWideBody == drawsWideBody && contentsScale == scale
+            && self.drawsWideBody == drawsWideBody && contentsScale == scale && bandColorSpace == colorSpace
         // Syntax colors arrive as a new layout under the same key (they never
         // change the height), so they count as new content too.
         guard
@@ -89,9 +91,13 @@ nonisolated final class RowLayer: CALayer {
         self.palette = palette
         self.drawsWideBody = drawsWideBody
         contentsScale = scale
+        bandColorSpace = colorSpace
         content = layout.content
         configureShape(palette: palette)
-        let bitmaps = drawn.flatMap { $0.palette === palette && $0.scale == scale ? $0.bands : nil } ?? []
+        let bitmaps =
+            drawn.flatMap {
+                $0.palette === palette && $0.scale == scale && $0.colorSpace == colorSpace ? $0.bands : nil
+            } ?? []
         configureBands(
             height: layout.content.paintedHeight(drawsWideBody: drawsWideBody, rowHeight: layout.height),
             width: bounds.width, scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
@@ -121,9 +127,10 @@ nonisolated final class RowLayer: CALayer {
         selectionLayer.isHidden = false
     }
 
-    /// The display's color space, which band bitmaps are drawn in: Core
-    /// Animation color-matches a bitmap in any other on the main thread.
-    @MainActor static var colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    /// The color space bands draw in when their host has not said its
+    /// window's: Core Animation color-matches a bitmap in any other than the
+    /// display's on the main thread, so hosts pass their window's.
+    nonisolated static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     /// Draws the bands crossing `rect` (row coordinates) that do not show
     /// their current bitmap: off the main thread, nearest to `visible` first,
@@ -141,7 +148,7 @@ nonisolated final class RowLayer: CALayer {
             guard drawsNow || !band.isPending else { continue }
             let raster = BandRaster(
                 content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
-                scale: contentsScale, colorSpace: Self.colorSpace)
+                scale: contentsScale, colorSpace: bandColorSpace ?? Self.colorSpace)
             if drawsNow {
                 band.show(BandRasterizer.bitmap(raster), generation: band.generation)
                 drawnNow += 1
@@ -166,6 +173,7 @@ nonisolated final class RowLayer: CALayer {
         rowID = nil
         layoutKey = nil
         content = .empty
+        bandColorSpace = nil
         placedFrame = .null
         hasWideBlock = false
         hasAccessories = false

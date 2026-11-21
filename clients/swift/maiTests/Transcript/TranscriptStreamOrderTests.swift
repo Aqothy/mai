@@ -112,4 +112,26 @@ struct TranscriptStreamOrderTests {
         #expect(codeBands.count == 1)
         #expect(codeBands.allSatisfy { $0.frame.maxY <= RowLayer.bandHeight })
     }
+
+    /// A row draws in its window's color space: moved to a window with
+    /// another one, its bands draw again, and bitmaps drawn in another space
+    /// are not shown.
+    @Test func aRowDrawsInItsWindowsColorSpace() {
+        let palette = TextPalette.resolveForTests
+        let before = paragraph("Colors", version: 0)
+        let layer = mounted(before, palette: palette)
+        let displayP3 = CGColorSpace(name: CGColorSpace.displayP3)!
+        layer.show(rowID: "row", layout: before, palette: palette, drawsWideBody: true, scale: 2, colorSpace: displayP3)
+        let bands = layer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
+        #expect(!bands.isEmpty)
+        #expect(bands.allSatisfy { !$0.isCurrent })
+
+        let after = paragraph("Colors and more", version: 1)
+        let drawn = DrawnBands.draw(
+            after, after: before, palette: palette, scale: 2, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        layer.show(
+            rowID: "row", layout: after, palette: palette, drawsWideBody: true, scale: 2, colorSpace: displayP3,
+            drawn: drawn)
+        #expect(bands.allSatisfy { $0.contents == nil || !$0.isCurrent })
+    }
 }
