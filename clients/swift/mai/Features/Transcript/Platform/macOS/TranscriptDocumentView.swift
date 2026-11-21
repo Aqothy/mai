@@ -113,15 +113,20 @@
             placeRowsIfNeeded()
         }
 
-        /// The appearance the palette was resolved for: AppKit calls
-        /// `viewDidChangeEffectiveAppearance` more often than it changes, and
-        /// a new palette places every row again.
+        /// The appearance and contrast the palette was resolved for: AppKit
+        /// calls `viewDidChangeEffectiveAppearance` more often than they
+        /// change, and a new palette draws every row again.
         private var paletteAppearance: NSAppearance.Name?
+        private var paletteIncreasesContrast = false
 
         private func updatePalette() {
             let name = effectiveAppearance.name
-            guard name != paletteAppearance || palette == nil else { return }
+            let increasesContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            guard name != paletteAppearance || increasesContrast != paletteIncreasesContrast || palette == nil else {
+                return
+            }
             paletteAppearance = name
+            paletteIncreasesContrast = increasesContrast
             let palette = TextPalette.resolve(for: effectiveAppearance)
             self.palette = palette
             updateSelectionColor()

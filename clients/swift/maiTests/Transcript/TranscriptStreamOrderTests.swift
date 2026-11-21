@@ -3,6 +3,10 @@ import Foundation
 import QuartzCore
 import Testing
 
+#if os(macOS)
+    import AppKit
+#endif
+
 @testable import mai
 
 /// Bitmaps land in order: a band takes any bitmap newer than the one it
@@ -134,4 +138,20 @@ struct TranscriptStreamOrderTests {
             drawn: drawn)
         #expect(bands.allSatisfy { $0.contents == nil || !$0.isCurrent })
     }
+
+    #if os(macOS)
+        /// Increase Contrast keeps the light or dark appearance but changes
+        /// its colors: a mounted row draws again in the new palette.
+        @Test func increasedContrastRedrawsAMountedRow() {
+            let normal = TextPalette.resolve(for: NSAppearance(named: .aqua)!)
+            let contrast = TextPalette.resolve(for: NSAppearance(named: .accessibilityHighContrastAqua)!)
+            #expect(normal.isDark == contrast.isDark)
+            let layout = paragraph("Contrast", version: 0)
+            let layer = mounted(layout, palette: normal)
+            layer.show(rowID: "row", layout: layout, palette: contrast, drawsWideBody: true, scale: 2)
+            let bands = layer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
+            #expect(!bands.isEmpty)
+            #expect(bands.allSatisfy { !$0.isCurrent })
+        }
+    #endif
 }

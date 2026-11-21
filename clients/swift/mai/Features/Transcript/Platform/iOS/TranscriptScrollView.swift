@@ -81,8 +81,9 @@
             NotificationCenter.default.addObserver(
                 self, selector: #selector(keyboardWillChangeFrame(_:)),
                 name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
-            registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) {
-                (view: TranscriptScrollView, _) in
+            registerForTraitChanges([
+                UITraitUserInterfaceStyle.self, UITraitDisplayScale.self, UITraitAccessibilityContrast.self,
+            ]) { (view: TranscriptScrollView, _) in
                 view.updatePalette()
             }
             // Bold Text changes the fonts' weight, not their size.

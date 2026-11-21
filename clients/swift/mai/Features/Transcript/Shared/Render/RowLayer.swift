@@ -75,7 +75,9 @@ nonisolated final class RowLayer: CALayer {
         colorSpace: CGColorSpace = RowLayer.colorSpace, drawn: DrawnBands? = nil
     ) {
         let sameRow =
-            self.rowID == rowID && self.palette.map { $0.isDark == palette.isDark } == true
+            // Any new palette redraws: Increase Contrast changes colors in
+            // the same light or dark appearance.
+            self.rowID == rowID && self.palette === palette
             && self.drawsWideBody == drawsWideBody && contentsScale == scale && bandColorSpace == colorSpace
         // Syntax colors arrive as a new layout under the same key (they never
         // change the height), so they count as new content too.
