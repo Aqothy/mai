@@ -116,4 +116,12 @@ struct StreamingMarkdownParserTests {
         #expect(MarkdownTailHealer.healed("`\\`") == "`\\`")
         #expect(MarkdownTailHealer.healed("hello ***") == "hello ")
     }
+
+    /// A started table's next row can begin like a delimiter row; it must not
+    /// be filled in as one, which showed a row of dashes for a frame.
+    @Test func aStartedTablesBodyRowIsNotHealedAsADelimiterRow() {
+        let table = "| A | B |\n| --- | --- |\n| - |"
+        #expect(MarkdownTailHealer.healed(table) == table)
+        #expect(MarkdownTailHealer.healed("| A | B |\n| -") == "| A | B |\n| --- | --- |")
+    }
 }

@@ -83,7 +83,15 @@ nonisolated enum MarkdownTailHealer {
     private static func completePartialTableDelimiter(_ text: inout String) {
         guard let lastBreak = text.lastIndex(of: "\n") else { return }
         let delimiterStart = text.index(after: lastBreak)
-        let headerStart = text[..<lastBreak].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
+        let headerBreak = text[..<lastBreak].lastIndex(of: "\n")
+        let headerStart = headerBreak.map { text.index(after: $0) } ?? text.startIndex
+        // A body row of a table already under way ("| - |") looks like a
+        // partial delimiter row; a table's header is never below a row with
+        // pipes.
+        if let headerBreak {
+            let rowAboveStart = text[..<headerBreak].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
+            if text[rowAboveStart..<headerBreak].contains("|") { return }
+        }
         let headerCells = cells(in: text[headerStart..<lastBreak])
         let delimiter = text[delimiterStart...].trimmingCharacters(in: .whitespaces)
         guard headerCells.count >= 2, delimiter.contains("|"), delimiter.contains("-"),
