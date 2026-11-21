@@ -95,7 +95,7 @@ final class ThreadDraftStore {
         if let activeDraftThreadID {
             textByThreadID[activeDraftThreadID] = nil
             annotationsByThreadID[activeDraftThreadID] = nil
-            attachmentsByThreadID[activeDraftThreadID] = nil
+            attachmentsByThreadID.removeValue(forKey: activeDraftThreadID)?.cancelAll()
         }
         activeDraftThreadID = threadID
         activeFork = nil
@@ -120,7 +120,7 @@ final class ThreadDraftStore {
     func removeDraft(for threadID: String) {
         textByThreadID[threadID] = nil
         annotationsByThreadID[threadID] = nil
-        attachmentsByThreadID[threadID] = nil
+        attachmentsByThreadID.removeValue(forKey: threadID)?.cancelAll()
         if activeDraftThreadID == threadID {
             activeDraftThreadID = nil
             activeFork = nil

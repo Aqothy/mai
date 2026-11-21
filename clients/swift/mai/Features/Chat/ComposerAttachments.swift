@@ -63,6 +63,7 @@ final class ComposerAttachmentsModel {
     /// composers leave the default because the add menu is hidden instead.
     @ObservationIgnored var canAttachImages: () -> Bool = { true }
     @ObservationIgnored var reportError: (String) -> Void = { _ in }
+    @ObservationIgnored private var processingTasks: [UUID: Task<Void, Never>] = [:]
 
     private static let limitMessage =
         "You can attach up to \(ChatAttachmentLoader.maximumAttachmentCount) images per message."
@@ -80,8 +81,9 @@ final class ComposerAttachmentsModel {
             let id = UUID()
             let name = url.lastPathComponent.isEmpty ? "Image" : url.lastPathComponent
             attachments.append(ChatPendingAttachment(id: id, name: name))
-            Task {
-                await processFileAttachment(id: id, url: url)
+            processingTasks[id] = Task { [weak self] in
+                await self?.processFileAttachment(id: id, url: url)
+                self?.processingTasks[id] = nil
             }
         }
     }
@@ -96,8 +98,9 @@ final class ComposerAttachmentsModel {
         for photo in photos.prefix(availableCount) {
             let id = UUID()
             attachments.append(ChatPendingAttachment(id: id, name: "Photo"))
-            Task {
-                await processPhotoAttachment(id: id, photo: photo)
+            processingTasks[id] = Task { [weak self] in
+                await self?.processPhotoAttachment(id: id, photo: photo)
+                self?.processingTasks[id] = nil
             }
         }
     }
@@ -110,8 +113,9 @@ final class ComposerAttachmentsModel {
         attachments.append(
             ChatPendingAttachment(id: id, name: "Camera photo", thumbnail: thumbnail)
         )
-        Task {
-            await processCameraAttachment(id: id, thumbnail: thumbnail, name: name)
+        processingTasks[id] = Task { [weak self] in
+            await self?.processCameraAttachment(id: id, thumbnail: thumbnail, name: name)
+            self?.processingTasks[id] = nil
         }
     }
 
@@ -122,7 +126,9 @@ final class ComposerAttachmentsModel {
             let id = UUID()
             let name = image.name ?? "Image"
             attachments.append(ChatPendingAttachment(id: id, name: name))
-            Task {
+            processingTasks[id] = Task { [weak self] in
+                guard let self else { return }
+                defer { self.processingTasks[id] = nil }
                 do {
                     let loaded = try await ChatAttachmentLoader.loadSentImage(
                         data: try await data(image),
@@ -138,11 +144,22 @@ final class ComposerAttachmentsModel {
     }
 
     func remove(id: UUID) {
+        processingTasks.removeValue(forKey: id)?.cancel()
         attachments.removeAll { $0.id == id }
     }
 
     func remove(ids: Set<UUID>) {
+        for id in ids {
+            processingTasks.removeValue(forKey: id)?.cancel()
+        }
         attachments.removeAll { ids.contains($0.id) }
+    }
+
+    func cancelAll() {
+        for task in processingTasks.values {
+            task.cancel()
+        }
+        processingTasks.removeAll()
     }
 
     private func availableCountForAddingImages() -> Int? {
@@ -211,8 +228,9 @@ final class ComposerAttachmentsModel {
     }
 
     private func handleProcessingFailure(_ error: Error, attachmentID: UUID) {
+        let wasPresent = attachments.contains { $0.id == attachmentID }
         attachments.removeAll { $0.id == attachmentID }
-        if !(error is CancellationError) {
+        if wasPresent, !Task.isCancelled, !(error is CancellationError) {
             reportError(error.localizedDescription)
         }
     }
@@ -329,70 +347,70 @@ enum ChatAttachmentLoader {
         return transfer
     }
 
+    @concurrent
     nonisolated static func loadThumbnail(from url: URL) async throws -> ChatComposerThumbnail {
-        try await Task.detached(priority: .userInitiated) {
-            try withSecurityScope(for: url) {
-                guard
-                    let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                    let image = CGImageSourceCreateThumbnailAtIndex(
-                        source,
-                        0,
-                        [
-                            kCGImageSourceCreateThumbnailFromImageAlways: true,
-                            kCGImageSourceCreateThumbnailWithTransform: true,
-                            kCGImageSourceShouldCacheImmediately: true,
-                            kCGImageSourceThumbnailMaxPixelSize: 320,
-                        ] as CFDictionary
-                    )
-                else {
-                    throw ChatAttachmentLoadingError.invalidImage(name: url.lastPathComponent)
-                }
-                #if os(macOS)
-                    let platformImage = NSImage(
-                        cgImage: image,
-                        size: NSSize(width: image.width, height: image.height)
-                    )
-                #else
-                    let platformImage = UIImage(cgImage: image)
-                #endif
-                return ChatComposerThumbnail(image: platformImage)
+        try Task.checkCancellation()
+        return try withSecurityScope(for: url) {
+            guard
+                let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                let image = CGImageSourceCreateThumbnailAtIndex(
+                    source,
+                    0,
+                    [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceShouldCacheImmediately: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 320,
+                    ] as CFDictionary
+                )
+            else {
+                throw ChatAttachmentLoadingError.invalidImage(name: url.lastPathComponent)
             }
-        }.value
+            #if os(macOS)
+                let platformImage = NSImage(
+                    cgImage: image,
+                    size: NSSize(width: image.width, height: image.height)
+                )
+            #else
+                let platformImage = UIImage(cgImage: image)
+            #endif
+            return ChatComposerThumbnail(image: platformImage)
+        }
     }
 
+    @concurrent
     nonisolated static func loadImage(from url: URL) async throws -> ChatLoadedImageAttachment {
-        try await Task.detached(priority: .userInitiated) {
-            try withSecurityScope(for: url) {
-                let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey])
-                let contentType =
-                    values.contentType
-                    ?? UTType(filenameExtension: url.pathExtension)
+        try Task.checkCancellation()
+        return try withSecurityScope(for: url) {
+            let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey])
+            let contentType =
+                values.contentType
+                ?? UTType(filenameExtension: url.pathExtension)
 
-                guard contentType?.conforms(to: .image) == true else {
-                    throw ChatAttachmentLoadingError.unsupportedFile(name: url.lastPathComponent)
-                }
-
-                if let byteCount = values.fileSize,
-                    byteCount > maximumImageBytes
-                {
-                    throw ChatAttachmentLoadingError.imageTooLarge(name: url.lastPathComponent)
-                }
-
-                let data = try Data(contentsOf: url, options: .mappedIfSafe)
-                guard !data.isEmpty else {
-                    throw ChatAttachmentLoadingError.emptyFile(name: url.lastPathComponent)
-                }
-                guard data.count <= maximumImageBytes else {
-                    throw ChatAttachmentLoadingError.imageTooLarge(name: url.lastPathComponent)
-                }
-
-                return ChatLoadedImageAttachment(
-                    data: data.base64EncodedString(),
-                    mimeType: contentType?.preferredMIMEType ?? "application/octet-stream",
-                    name: url.lastPathComponent.isEmpty ? "image" : url.lastPathComponent
-                )
+            guard contentType?.conforms(to: .image) == true else {
+                throw ChatAttachmentLoadingError.unsupportedFile(name: url.lastPathComponent)
             }
-        }.value
+
+            if let byteCount = values.fileSize,
+                byteCount > maximumImageBytes
+            {
+                throw ChatAttachmentLoadingError.imageTooLarge(name: url.lastPathComponent)
+            }
+
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard !data.isEmpty else {
+                throw ChatAttachmentLoadingError.emptyFile(name: url.lastPathComponent)
+            }
+            guard data.count <= maximumImageBytes else {
+                throw ChatAttachmentLoadingError.imageTooLarge(name: url.lastPathComponent)
+            }
+
+            return ChatLoadedImageAttachment(
+                data: data.base64EncodedString(),
+                mimeType: contentType?.preferredMIMEType ?? "application/octet-stream",
+                name: url.lastPathComponent.isEmpty ? "image" : url.lastPathComponent
+            )
+        }
     }
 
     nonisolated static func prepareImageUpload(
@@ -401,46 +419,46 @@ enum ChatAttachmentLoader {
         try await ChatAttachmentEncodingGate.shared.loadImage(from: url)
     }
 
+    @concurrent
     nonisolated static func loadCameraImage(
         _ thumbnail: ChatComposerThumbnail,
         name: String
     ) async throws -> ChatLoadedImageAttachment {
-        try await Task.detached(priority: .userInitiated) {
-            guard let data = jpegData(from: thumbnail.image) else {
-                throw ChatAttachmentLoadingError.invalidImage(name: name)
-            }
-            guard !data.isEmpty else {
-                throw ChatAttachmentLoadingError.emptyFile(name: name)
-            }
-            guard data.count <= maximumImageBytes else {
-                throw ChatAttachmentLoadingError.imageTooLarge(name: name)
-            }
-            return ChatLoadedImageAttachment(
-                data: data.base64EncodedString(),
-                mimeType: "image/jpeg",
-                name: name,
-                thumbnail: try makeThumbnail(ofImageData: data, name: name)
-            )
-        }.value
+        try Task.checkCancellation()
+        guard let data = jpegData(from: thumbnail.image) else {
+            throw ChatAttachmentLoadingError.invalidImage(name: name)
+        }
+        guard !data.isEmpty else {
+            throw ChatAttachmentLoadingError.emptyFile(name: name)
+        }
+        guard data.count <= maximumImageBytes else {
+            throw ChatAttachmentLoadingError.imageTooLarge(name: name)
+        }
+        return ChatLoadedImageAttachment(
+            data: data.base64EncodedString(),
+            mimeType: "image/jpeg",
+            name: name,
+            thumbnail: try makeThumbnail(ofImageData: data, name: name)
+        )
     }
 
     /// An image a message carried, base64-encoded as it was sent.
+    @concurrent
     nonisolated static func loadSentImage(
         data: String,
         mimeType: String,
         name: String
     ) async throws -> ChatLoadedImageAttachment {
-        try await Task.detached(priority: .userInitiated) {
-            guard let bytes = Data(base64Encoded: data), !bytes.isEmpty else {
-                throw ChatAttachmentLoadingError.invalidImage(name: name)
-            }
-            return ChatLoadedImageAttachment(
-                data: data,
-                mimeType: mimeType,
-                name: name,
-                thumbnail: try makeThumbnail(ofImageData: bytes, name: name)
-            )
-        }.value
+        try Task.checkCancellation()
+        guard let bytes = Data(base64Encoded: data), !bytes.isEmpty else {
+            throw ChatAttachmentLoadingError.invalidImage(name: name)
+        }
+        return ChatLoadedImageAttachment(
+            data: data,
+            mimeType: mimeType,
+            name: name,
+            thumbnail: try makeThumbnail(ofImageData: bytes, name: name)
+        )
     }
 
     nonisolated private static func makeThumbnail(ofImageData data: Data, name: String) throws -> ChatComposerThumbnail {
@@ -506,6 +524,7 @@ private actor ChatAttachmentEncodingGate {
     func loadImage(from url: URL) async throws -> ChatLoadedImageAttachment {
         await acquire()
         defer { release() }
+        try Task.checkCancellation()
         return try await ChatAttachmentLoader.loadImage(from: url)
     }
 

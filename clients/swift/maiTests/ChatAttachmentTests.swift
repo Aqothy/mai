@@ -44,4 +44,63 @@ struct ChatAttachmentTests {
         #expect(ChatMessageAttachmentPresentation.inlineImagePayload(from: attachment) == "BBBB")
         #expect(ChatMessageAttachmentPresentation.displayName(attachment) == "sample")
     }
+
+    @Test
+    func removingPendingAttachmentCancelsInFlightWorkAndSuppressesErrors() async throws {
+        final class Probe {
+            var loadStarted: CheckedContinuation<Void, Never>?
+            var releaseLoad: CheckedContinuation<String, any Error>?
+            var finishedLoading: CheckedContinuation<Void, Never>?
+            var wasCancelled = false
+            var didFinish = false
+        }
+
+        let model = ComposerAttachmentsModel()
+        var reportedErrors: [String] = []
+        model.reportError = { reportedErrors.append($0) }
+        let probe = Probe()
+
+        let attachment = Attachment(data: nil, kind: "image", mimeType: "image/png", name: "sample.png", uri: nil)
+        model.addSentImages([attachment]) { _ in
+            defer {
+                probe.didFinish = true
+                probe.finishedLoading?.resume()
+                probe.finishedLoading = nil
+            }
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    probe.releaseLoad = continuation
+                    probe.loadStarted?.resume()
+                    probe.loadStarted = nil
+                }
+            } onCancel: {
+                Task { @MainActor in
+                    probe.wasCancelled = true
+                    probe.releaseLoad?.resume(throwing: CancellationError())
+                    probe.releaseLoad = nil
+                }
+            }
+        }
+
+        if probe.releaseLoad == nil {
+            await withCheckedContinuation { probe.loadStarted = $0 }
+        }
+        let pendingID = try #require(model.attachments.first?.id)
+        model.remove(id: pendingID)
+
+        // If remove(id:) did not cancel the task, fail the load so we observe
+        // whether a removed attachment still surfaces an error.
+        if let continuation = probe.releaseLoad {
+            probe.releaseLoad = nil
+            continuation.resume(throwing: RPCError("boom"))
+        }
+        if !probe.didFinish {
+            await withCheckedContinuation { probe.finishedLoading = $0 }
+        }
+        // Let the enclosing Task run handleProcessingFailure after data() throws.
+        await Task.yield()
+
+        #expect(probe.wasCancelled)
+        #expect(reportedErrors.isEmpty)
+    }
 }
