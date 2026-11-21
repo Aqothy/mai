@@ -158,6 +158,9 @@ final class ChatRequestModel {
         do {
             try await send(action, action.submit == true ? answers : nil)
             return true
+        } catch is CancellationError {
+            isResponding = false
+            return false
         } catch {
             isResponding = false
             errorMessage = error.localizedDescription

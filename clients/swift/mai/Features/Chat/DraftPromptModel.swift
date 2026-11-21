@@ -304,6 +304,8 @@ final class DraftPromptModel {
     private func addProject(_ directory: String) async -> String? {
         do {
             return try await store.addProject(directory)
+        } catch is CancellationError {
+            return nil
         } catch {
             errorMessage = error.localizedDescription
             return nil
@@ -419,6 +421,8 @@ final class DraftPromptModel {
         let providerID: String
         do {
             providerID = try await store.ensureProviderAvailable(requestedProviderID, cwd: requestedCwd)
+        } catch is CancellationError {
+            return
         } catch {
             showError(error)
             return

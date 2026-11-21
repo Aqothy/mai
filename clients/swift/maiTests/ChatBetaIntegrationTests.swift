@@ -260,4 +260,67 @@ struct ChatBetaIntegrationTests {
         }
         #expect(PromptCompletionInsertionContext.detect(in: "mail@example.com", cursorOffset: 16) == nil)
     }
+
+    @Test
+    func cancellingDraftProjectAddAndProviderStartDoesNotShowError() async throws {
+        final class CancellingRPC: ThreadRPCClient {
+            var onDisconnect: (((any Error)?) -> Void)?
+            var onNotification: ((String, Data) -> Void)?
+            func connect() {}
+            func disconnect() {}
+            func checkConnection() {}
+            func subscribeThreadList() async throws -> ThreadListItem {
+                ThreadListItem(kind: MaidThreadListKind.snapshot.rawValue, removed: nil, seq: 0, thread: nil, threads: [])
+            }
+            func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {
+                throw RPCError("unused")
+            }
+            func listProviders() async throws -> [InstanceInfo] {
+                [
+                    InstanceInfo(
+                        access: nil,
+                        auth: Auth(methods: nil, status: MaidAuthStatus.authenticated.rawValue),
+                        capabilities: Capabilities(
+                            additionalDirectories: true, auth: nil, commandCompletion: nil, delete: nil, fork: nil,
+                            history: "native", historyVersion: 1, instructions: nil, logout: nil, mcp: nil, messageIDS: nil,
+                            promptContent: nil, rename: nil, resume: nil, sessions: nil, steer: nil, subagents: nil
+                        ),
+                        driver: "codex",
+                        initializedAt: .distantPast,
+                        instanceID: "codex",
+                        name: "Codex",
+                        pid: nil,
+                        startedAt: .distantPast,
+                        status: MaidInstanceStatus.configured.rawValue
+                    )
+                ]
+            }
+            func addProject(_ path: String) async throws -> Project {
+                throw CancellationError()
+            }
+            func startProvider(_ instanceID: String) async throws -> InstanceInfo {
+                throw CancellationError()
+            }
+        }
+
+        let suite = "DraftCancellationTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = ThreadStore(rpc: CancellingRPC())
+        await store.start()
+        let draftStore = ThreadDraftStore(defaults: defaults)
+        let model = DraftPromptModel(store: store, draftStore: draftStore)
+        model.activate()
+        model.ensureLocalDraft()
+        model.selectedProviderID = "codex"
+        model.workingDirectory = "/tmp/project"
+        model.prompt = "Hello"
+
+        await model.addAdditionalProjectFolder("/tmp/other")
+        #expect(model.errorMessage == nil)
+
+        await model.send()
+        #expect(model.errorMessage == nil)
+    }
 }

@@ -79,4 +79,16 @@ struct ChatRequestModelTests {
         #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
         #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)
     }
+
+    @Test
+    func cancellingChooseClearsRespondingWithoutShowingError() async throws {
+        let model = ChatRequestModel(
+            request: try request(#"{"actions":[],"message":"Approve"}"#),
+            send: { _, _ in throw CancellationError() }
+        )
+        let sent = await model.choose(Self.submit)
+        #expect(!sent)
+        #expect(!model.isResponding)
+        #expect(model.errorMessage == nil)
+    }
 }

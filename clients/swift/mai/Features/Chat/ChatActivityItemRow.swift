@@ -274,6 +274,8 @@ struct ChatActivityItemRow: View {
         defer { isLoadingDetail = false }
         do {
             detail = try await store.entryDetail(threadID: threadID, item: item)
+        } catch is CancellationError {
+            return
         } catch {
             detailErrorMessage = error.localizedDescription
         }
