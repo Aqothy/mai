@@ -79,4 +79,12 @@ struct StreamingMarkdownParserTests {
         let committed = "<PRE>\nhello\n</PRE>\n\n"
         #expect(MarkdownCommitBoundary.committedLength(of: Array((committed + "After\n").utf8)) == committed.utf8.count)
     }
+
+    /// A paragraph right after indented code is not code: its blank line
+    /// commits both, even when more indented code follows.
+    @Test func aParagraphAfterIndentedCodeCommitsAtItsBlankLine() {
+        let committed = "    code\npara\n\n"
+        #expect(
+            MarkdownCommitBoundary.committedLength(of: Array((committed + "    more\n").utf8)) == committed.utf8.count)
+    }
 }

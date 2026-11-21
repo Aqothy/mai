@@ -68,6 +68,9 @@ nonisolated enum MarkdownCommitBoundary {
                 regionIsIndentedCode = false
                 continue
             }
+            // Indented code ends at the first line indented less: a blank
+            // line after that paragraph closes it like any other.
+            if line.indent < 4 { regionIsIndentedCode = false }
             if line.indent < 4, let opened = Fence(opening: content) {
                 fence = opened
                 fenceOpenedAtRegionStart = regionStart
