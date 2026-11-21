@@ -14,9 +14,7 @@ nonisolated enum MarkdownTailHealer {
         // parse needed while code streams.
         if let fence = openFence(in: tail) {
             if fence.isFirstBlock {
-                var code = String(tail[fence.contentStart...])
-                if code.hasSuffix("\n") { code.removeLast() }
-                return [.code(language: fence.language, code: code)]
+                return [.code(language: fence.language, code: stripOneTrailingNewline(tail[fence.contentStart...]))]
             }
             return MarkdownPlanner.locatedBlocks(from: tail).map(\.block)
         }
@@ -36,44 +34,68 @@ nonisolated enum MarkdownTailHealer {
     // MARK: Fences
 
     private struct OpenFence {
+        let marker: UInt8
+        let length: Int
         let contentStart: String.Index
         let language: String?
         let isFirstBlock: Bool
     }
 
     private static func openFence(in source: String) -> OpenFence? {
-        var open: (marker: Character, length: Int, fence: OpenFence)?
-        var lineStart = source.startIndex
-        while lineStart < source.endIndex {
-            let lineEnd = source[lineStart...].firstIndex(of: "\n") ?? source.endIndex
-            let line = source[lineStart..<lineEnd]
-            let indent = line.prefix { $0 == " " }.count
-            let body = line.dropFirst(indent)
-            if indent < 4, let marker = body.first, marker == "`" || marker == "~" {
-                let length = body.prefix { $0 == marker }.count
-                let rest = body.dropFirst(length)
-                if length >= 3 {
-                    if let current = open {
-                        if marker == current.marker, length >= current.length,
-                            rest.allSatisfy(\.isWhitespace)
-                        {
-                            open = nil
+        let utf8 = source.utf8
+        var open: OpenFence?
+        var lineStart = utf8.startIndex
+        while lineStart < utf8.endIndex {
+            var lineEnd = lineStart
+            while lineEnd < utf8.endIndex, utf8[lineEnd] != 0x0A { utf8.formIndex(after: &lineEnd) }
+            var contentEnd = lineEnd
+            if contentEnd > lineStart, utf8[utf8.index(before: contentEnd)] == 0x0D {
+                utf8.formIndex(before: &contentEnd)
+            }
+            var indent = 0
+            var cursor = lineStart
+            while cursor < contentEnd {
+                let byte = utf8[cursor]
+                if byte == 0x20 {
+                    indent += 1
+                } else if byte == 0x09 {
+                    indent += 4 - (indent % 4)
+                } else {
+                    break
+                }
+                utf8.formIndex(after: &cursor)
+            }
+            if indent < 4, cursor < contentEnd {
+                let marker = utf8[cursor]
+                if marker == UInt8(ascii: "`") || marker == UInt8(ascii: "~") {
+                    var runEnd = cursor
+                    var length = 0
+                    while runEnd < contentEnd, utf8[runEnd] == marker {
+                        length += 1
+                        utf8.formIndex(after: &runEnd)
+                    }
+                    if length >= 3 {
+                        let rest = utf8[runEnd..<contentEnd]
+                        if let current = open {
+                            if marker == current.marker, length >= current.length,
+                                rest.allSatisfy({ $0 == 0x20 || $0 == 0x09 })
+                            {
+                                open = nil
+                            }
+                        } else if marker != UInt8(ascii: "`") || !rest.contains(UInt8(ascii: "`")) {
+                            let language = String(source[runEnd..<contentEnd]).trimmingCharacters(in: .whitespaces)
+                            let contentStart = lineEnd < utf8.endIndex ? utf8.index(after: lineEnd) : lineEnd
+                            let isFirst = source[..<lineStart].allSatisfy(\.isWhitespace)
+                            open = OpenFence(
+                                marker: marker, length: length, contentStart: contentStart,
+                                language: language.isEmpty ? nil : language, isFirstBlock: isFirst)
                         }
-                    } else if marker != "`" || !rest.contains("`") {
-                        let language = rest.trimmingCharacters(in: .whitespaces)
-                        let contentStart = lineEnd < source.endIndex ? source.index(after: lineEnd) : lineEnd
-                        open = (
-                            marker, length,
-                            OpenFence(
-                                contentStart: contentStart, language: language.isEmpty ? nil : language,
-                                isFirstBlock: source[..<lineStart].allSatisfy(\.isWhitespace))
-                        )
                     }
                 }
             }
-            lineStart = lineEnd < source.endIndex ? source.index(after: lineEnd) : source.endIndex
+            lineStart = lineEnd < utf8.endIndex ? utf8.index(after: lineEnd) : utf8.endIndex
         }
-        return open?.fence
+        return open
     }
 
     // MARK: Tables
@@ -81,19 +103,28 @@ nonisolated enum MarkdownTailHealer {
     /// A header and a partly typed delimiter row are enough to show a table:
     /// the missing delimiter cells are filled in.
     private static func completePartialTableDelimiter(_ text: inout String) {
-        guard let lastBreak = text.lastIndex(of: "\n") else { return }
-        let delimiterStart = text.index(after: lastBreak)
-        let headerBreak = text[..<lastBreak].lastIndex(of: "\n")
-        let headerStart = headerBreak.map { text.index(after: $0) } ?? text.startIndex
+        let utf8 = text.utf8
+        guard let lastBreak = lastByte(0x0A, in: utf8, before: utf8.endIndex) else { return }
+        let delimiterStart = utf8.index(after: lastBreak)
+        var headerEnd = lastBreak
+        if headerEnd > utf8.startIndex, utf8[utf8.index(before: headerEnd)] == 0x0D {
+            utf8.formIndex(before: &headerEnd)
+        }
+        let headerBreak = lastByte(0x0A, in: utf8, before: headerEnd)
+        let headerStart = headerBreak.map { utf8.index(after: $0) } ?? utf8.startIndex
         // A body row of a table already under way ("| - |") looks like a
         // partial delimiter row; a table's header is never below a row with
         // pipes.
         if let headerBreak {
-            let rowAboveStart = text[..<headerBreak].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
-            if text[rowAboveStart..<headerBreak].contains("|") { return }
+            var beforeEnd = headerBreak
+            if beforeEnd > utf8.startIndex, utf8[utf8.index(before: beforeEnd)] == 0x0D {
+                utf8.formIndex(before: &beforeEnd)
+            }
+            let beforeStart = lastByte(0x0A, in: utf8, before: beforeEnd).map { utf8.index(after: $0) } ?? utf8.startIndex
+            if utf8[beforeStart..<beforeEnd].contains(UInt8(ascii: "|")) { return }
         }
-        let headerCells = cells(in: text[headerStart..<lastBreak])
-        let delimiter = text[delimiterStart...].trimmingCharacters(in: .whitespaces)
+        let headerCells = cells(in: text[headerStart..<headerEnd])
+        let delimiter = text[delimiterStart...].trimmingCharacters(in: .whitespacesAndNewlines)
         guard headerCells.count >= 2, delimiter.contains("|"), delimiter.contains("-"),
             delimiter.allSatisfy({ "|:-".contains($0) || $0.isWhitespace })
         else { return }
@@ -208,8 +239,9 @@ nonisolated enum MarkdownTailHealer {
     /// A line holding only a block marker (`#`, `>`, `-`, `1.`, `|`) would
     /// render as an empty heading, quote or item; it waits for its text.
     private static func dropTrailingBlockMarker(_ text: inout String) {
-        let lineStart = text.lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
-        let marker = text[lineStart...].trimmingCharacters(in: .whitespaces)
+        let utf8 = text.utf8
+        let lineStart = lastByte(0x0A, in: utf8, before: utf8.endIndex).map { utf8.index(after: $0) } ?? utf8.startIndex
+        let marker = text[lineStart...].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !marker.isEmpty else { return }
         let isHeading = marker.count <= 6 && marker.allSatisfy { $0 == "#" }
         let isQuote = marker.allSatisfy { $0 == ">" }
@@ -367,8 +399,30 @@ nonisolated enum MarkdownTailHealer {
 
     // MARK: Helpers
 
+    private static func stripOneTrailingNewline(_ slice: Substring) -> String {
+        let utf8 = slice.utf8
+        guard utf8.last == 0x0A else { return String(slice) }
+        var end = utf8.index(before: utf8.endIndex)
+        if end > utf8.startIndex, utf8[utf8.index(before: end)] == 0x0D {
+            utf8.formIndex(before: &end)
+        }
+        return String(slice[..<end])
+    }
+
     private static func trailingParagraphStart(of text: String) -> String.Index {
-        text.range(of: "\n\n", options: .backwards)?.upperBound ?? text.startIndex
+        let utf8 = text.utf8
+        var cursor = utf8.endIndex
+        while let br = lastByte(0x0A, in: utf8, before: cursor) {
+            var before = br
+            if before > utf8.startIndex, utf8[utf8.index(before: before)] == 0x0D {
+                utf8.formIndex(before: &before)
+            }
+            if before > utf8.startIndex, utf8[utf8.index(before: before)] == 0x0A {
+                return utf8.index(after: br)
+            }
+            cursor = before
+        }
+        return utf8.startIndex
     }
 
     /// Balanced inline-code ranges `[open..<closeEnd]` from `start`.

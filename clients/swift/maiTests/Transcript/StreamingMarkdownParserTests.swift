@@ -124,4 +124,25 @@ struct StreamingMarkdownParserTests {
         #expect(MarkdownTailHealer.healed(table) == table)
         #expect(MarkdownTailHealer.healed("| A | B |\n| -") == "| A | B |\n| --- | --- |")
     }
+
+    /// Any agent may send CRLF (a Windows file quoted in a fence): a CRLF
+    /// blank line commits, an open CRLF fence streams as code, a rule keeps
+    /// its spelling, and streaming ends in the one-shot blocks.
+    @Test func crlfStreamsLikeLF() {
+        #expect(MarkdownCommitBoundary.committedLength(of: Array("Para\r\n\r\nNext".utf8)) == 8)
+        #expect(
+            MarkdownTailHealer.blocks(forOpenTail: "```go\r\nlet a = 1\r\n") == [.code(language: "go", code: "let a = 1")])
+        #expect(MarkdownPlanner.blocks(from: "***\r\n") == [.rule(spelling: "***")])
+        let source =
+            "# Title\r\n\r\n```swift\r\nlet a = 1\r\n\t}\r\n```\r\n\r\n---\r\n\r\n| A | B |\r\n| --- | --- |\r\n| 1 | 2 |\r\n\r\nEnd\r\n"
+        var parser = StreamingMarkdownParser()
+        var committed: [MarkdownBlock] = []
+        for end in stride(from: 1, through: source.utf8.count, by: 5) {
+            let snapshot = parser.update(String(decoding: Array(source.utf8.prefix(end)), as: UTF8.self))
+            #expect(Array(snapshot.committed.prefix(committed.count)) == committed)
+            committed = snapshot.committed
+        }
+        #expect(!committed.isEmpty)
+        #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+    }
 }

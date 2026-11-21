@@ -96,7 +96,7 @@ nonisolated struct StreamingMarkdownParser: Sendable {
             var lineEnd = lineStart
             while lineEnd < source.count, source[lineEnd] != 0x0A { lineEnd += 1 }
             let isTerminated = lineEnd < source.count
-            let contentEnd = lineEnd
+            let contentEnd = lineEnd > lineStart && source[lineEnd - 1] == 0x0D ? lineEnd - 1 : lineEnd
             var indent = 0
             var cursor = lineStart
             while cursor < contentEnd {

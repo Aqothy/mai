@@ -57,7 +57,8 @@ nonisolated struct CodeLayout: Sendable {
             options: .init(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight))
         let headerHeight = style.codeHeaderHeight
         let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
-        let lineCount = max(1, code.reduce(into: 1) { count, character in if character == "\n" { count += 1 } })
+        // Bytes, not Characters: "\r\n" is one Character.
+        let lineCount = max(1, code.utf8.reduce(into: 1) { count, byte in if byte == 0x0A { count += 1 } })
         let height = headerHeight + CGFloat(lineCount) * style.codeLineHeight + style.codeBottomInset
         return CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,

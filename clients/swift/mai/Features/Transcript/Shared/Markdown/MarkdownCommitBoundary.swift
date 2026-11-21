@@ -168,7 +168,7 @@ nonisolated enum MarkdownCommitBoundary {
 
 extension MarkdownCommitBoundary {
     /// One source line: where its text starts after its indentation, where
-    /// it ends, and where the next line starts. `indent` is in columns, with
+    /// it ends (before `\r\n` or `\n`), and where the next line starts. `indent` is in columns, with
     /// tab stops of 4 (CommonMark 2.2), so it is not a byte count.
     fileprivate nonisolated struct Line {
         let contentStart: Int
@@ -189,9 +189,10 @@ extension MarkdownCommitBoundary {
             while start < bytes.count {
                 var end = start
                 while end < bytes.count, bytes[end] != 0x0A { end += 1 }
+                let contentEnd = end > start && bytes[end - 1] == 0x0D ? end - 1 : end
                 var indent = 0
                 var cursor = start
-                while cursor < end {
+                while cursor < contentEnd {
                     let byte = bytes[cursor]
                     if byte == UInt8(ascii: " ") {
                         indent += 1
@@ -205,8 +206,8 @@ extension MarkdownCommitBoundary {
                 let terminated = end < bytes.count
                 lines.append(
                     Line(
-                        contentStart: cursor, contentEnd: end, end: terminated ? end + 1 : end,
-                        isTerminated: terminated, indent: indent, isBlank: cursor == end))
+                        contentStart: cursor, contentEnd: contentEnd, end: terminated ? end + 1 : end,
+                        isTerminated: terminated, indent: indent, isBlank: cursor == contentEnd))
                 start = end + 1
             }
             return lines

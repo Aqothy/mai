@@ -130,4 +130,12 @@ struct TextLayoutEngineTests {
         #expect(layout.gridSize.width >= 2 * style.tableMinimumColumnWidth + style.tableColumnSpacing)
         #expect(TableLayout.tabSeparatedText(table) == "Name\tValue\na\t1")
     }
+
+    /// A CRLF code block is as tall as its lines: "\r\n" is one Character,
+    /// so counting Characters saw one line and clipped the rest.
+    @Test func crlfCodeHasOneLinePerLine() {
+        let crlf = CodeLayout.make(code: "a\r\nb\r\nc", language: nil, colors: nil, width: 400, style: style)
+        let lf = CodeLayout.make(code: "a\nb\nc", language: nil, colors: nil, width: 400, style: style)
+        #expect(crlf.size.height == lf.size.height)
+    }
 }

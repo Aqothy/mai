@@ -26,7 +26,8 @@ nonisolated struct MarkdownSourceLines {
         guard let location = rule.range?.lowerBound,
             let start = utf8Offset(line: location.line, column: location.column)
         else { return nil }
-        let end = starts.indices.contains(location.line) ? starts[location.line] - 1 : bytes.count
+        var end = starts.indices.contains(location.line) ? starts[location.line] - 1 : bytes.count
+        if end > start, bytes[end - 1] == 0x0D { end -= 1 }
         guard start <= end else { return nil }
         return String(decoding: bytes[start..<end], as: UTF8.self).trimmingCharacters(in: .whitespaces)
     }
