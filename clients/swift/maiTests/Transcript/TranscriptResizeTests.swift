@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import Testing
 
@@ -64,5 +65,30 @@ struct TranscriptResizeTests {
         let grown = CodeLayout.make(code: old + "\nprint(x)", language: "swift", colors: colors, width: 600, style: style)
         #expect(!grown.isHighlighted)
         #expect(CodeLayout.make(code: old, language: "swift", colors: colors, width: 600, style: style).isHighlighted)
+    }
+
+    /// What draws differently is redrawn even when the glyphs do not move:
+    /// a rule's line spans the new width, a strikethrough appears, a code
+    /// label takes a new text size.
+    @Test func decorationsAndLabelsRedrawWhenOnlyTheyChange() {
+        let rule = TranscriptRowKind.markdownBlock(.rule(spelling: "---"), .init(isFirst: true, isLast: true))
+        #expect(
+            RowContentDiff.unchangedHeight(layout(rule, width: 600).content, layout(rule, width: 300).content)
+                < .infinity)
+
+        let plain = RowLayoutBuilder.prose([.paragraph([MarkdownInline(text: "abc")])], width: 400, style: style)
+        let struck = RowLayoutBuilder.prose(
+            [.paragraph([MarkdownInline(text: "abc", style: .strikethrough)])], width: 400, style: style)
+        #expect(RowContentDiff.unchangedHeight(plain, struck) < .infinity)
+
+        let bigger = TextStyle(version: style.version + 1) { role in
+            CTFontCreateCopyWithAttributes(style.font(role).font, CTFontGetSize(style.font(role).font) + 4, nil, nil)
+        }
+        let small = CodeLayout.make(code: "let a = 1", language: "swift", colors: nil, width: 400, style: style)
+        let large = CodeLayout.make(code: "let a = 1", language: "swift", colors: nil, width: 400, style: bigger)
+        let frame = CGRect(x: 0, y: 8, width: 400, height: 0)
+        #expect(
+            RowContentDiff.unchangedHeight(
+                .code(small, frame: frame), .code(large, frame: frame)) < frame.minY + small.headerHeight)
     }
 }

@@ -13,17 +13,26 @@ nonisolated enum RowContentDiff {
         case (.text(let before, let oldOrigin), .text(let after, let newOrigin)) where oldOrigin == newOrigin:
             return oldOrigin.y + unchangedHeight(before, after)
         case (.code(let before, let oldFrame), .code(let after, let newFrame))
-        // The block's width is its shape layer's: the label and an unclipped
-        // body (a clipped one scrolls in its own view) draw the same.
-        where oldFrame.origin == newFrame.origin
-            && before.colorsAreDark == after.colorsAreDark && before.label.string == after.label.string:
+        // The block's width is its shape layer's: a header and label that
+        // draw the same and an unclipped body (a clipped one scrolls in its
+        // own view) draw the same. A new text size changes the label but not
+        // its string.
+        where oldFrame.origin == newFrame.origin && before.colorsAreDark == after.colorsAreDark
+            && before.headerHeight == after.headerHeight && before.labelTop == after.labelTop
+            && unchangedHeight(before.label, after.label) == .infinity:
             return oldFrame.minY + before.bodyOrigin.y + unchangedHeight(before.body, after.body)
         default:
             return 0
         }
     }
 
+    /// Lines and decorations both: a rule's line is the same text at any
+    /// width, and strikethrough changes no glyph.
     static func unchangedHeight(_ before: TextLayout, _ after: TextLayout) -> CGFloat {
+        min(unchangedLinesHeight(before, after), unchangedDecorationsHeight(before.decorations, after.decorations))
+    }
+
+    private static func unchangedLinesHeight(_ before: TextLayout, _ after: TextLayout) -> CGFloat {
         let shared = min(before.lines.count, after.lines.count)
         for index in 0..<shared {
             let old = before.lines[index]
@@ -36,12 +45,26 @@ nonisolated enum RowContentDiff {
         return (shared < before.lines.count ? before.lines[shared] : after.lines[shared]).top
     }
 
+    private static func unchangedDecorationsHeight(_ before: [TextDecoration], _ after: [TextDecoration]) -> CGFloat {
+        let shared = min(before.count, after.count)
+        for index in 0..<shared {
+            let old = before[index]
+            let new = after[index]
+            guard old.kind == new.kind, old.rect == new.rect, old.color == new.color else {
+                return max(0, min(old.rect.minY, new.rect.minY))
+            }
+        }
+        if before.count == after.count { return .infinity }
+        return max(0, (shared < before.count ? before[shared] : after[shared]).rect.minY)
+    }
+
     private static func sameRuns(_ a: TextLayout, _ aRuns: Range<Int>, _ b: TextLayout, _ bRuns: Range<Int>) -> Bool {
         guard aRuns.count == bRuns.count else { return false }
         for (left, right) in zip(aRuns, bRuns) {
             let x = a.runs[left]
             let y = b.runs[right]
-            guard x.color == y.color, x.linkIndex == y.linkIndex, x.glyphs == y.glyphs, x.positions == y.positions
+            guard x.color == y.color, x.linkIndex == y.linkIndex, x.font.font == y.font.font, x.glyphs == y.glyphs,
+                x.positions == y.positions
             else { return false }
         }
         return true
