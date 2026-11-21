@@ -37,20 +37,19 @@ nonisolated struct StreamingMarkdownParser: Sendable {
         if parsesWholeDocument {
             return Snapshot(committed: [], open: MarkdownTailHealer.blocks(forOpenTail: text))
         }
-        let tail = Array(source[committedLength...])
         if scanForDefinition() {
             parsesWholeDocument = true
             committed = []
             committedLength = 0
             return Snapshot(committed: [], open: MarkdownTailHealer.blocks(forOpenTail: text))
         }
-        let boundary = MarkdownCommitBoundary.committedLength(of: tail)
+        let boundary = MarkdownCommitBoundary.committedLength(of: source[committedLength...])
         if boundary > 0 {
-            let closed = String(decoding: tail[..<boundary], as: UTF8.self)
-            committed += MarkdownPlanner.locatedBlocks(from: closed).map(\.block)
+            let closed = String(decoding: source[committedLength..<(committedLength + boundary)], as: UTF8.self)
+            committed += MarkdownPlanner.parseBlocks(from: closed)
             committedLength += boundary
         }
-        let open = String(decoding: tail[boundary...], as: UTF8.self)
+        let open = String(decoding: source[committedLength...], as: UTF8.self)
         return Snapshot(committed: committed, open: MarkdownTailHealer.blocks(forOpenTail: open))
     }
 
@@ -64,15 +63,31 @@ nonisolated struct StreamingMarkdownParser: Sendable {
             return committed
         }
         let tail = String(decoding: source[committedLength...], as: UTF8.self)
-        committed += MarkdownPlanner.locatedBlocks(from: tail).map(\.block)
+        committed += MarkdownPlanner.parseBlocks(from: tail)
         committedLength = source.count
         if committed.isEmpty { committed = MarkdownPlanner.blocks(from: text) }
         return committed
     }
 
     /// Streams only append. Anything else (a replaced message) starts over.
+    /// An append adds only its new bytes: the message is not copied again
+    /// every update.
     private mutating func accept(_ text: String) {
-        let bytes = Array(text.utf8)
+        let utf8 = text.utf8
+        if utf8.count >= source.count {
+            let isAppend = utf8.withContiguousStorageIfAvailable { new in
+                source.withUnsafeBufferPointer { old in
+                    guard let oldBase = old.baseAddress else { return true }
+                    guard let newBase = new.baseAddress else { return false }
+                    return memcmp(oldBase, newBase, old.count) == 0
+                }
+            }
+            if isAppend == true {
+                source.append(contentsOf: utf8.dropFirst(source.count))
+                return
+            }
+        }
+        let bytes = Array(utf8)
         if bytes.count < committedLength || !bytes.starts(with: source.prefix(committedLength)) {
             committed = []
             committedLength = 0

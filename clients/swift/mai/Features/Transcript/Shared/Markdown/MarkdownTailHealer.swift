@@ -16,9 +16,9 @@ nonisolated enum MarkdownTailHealer {
             if fence.isFirstBlock {
                 return [.code(language: fence.language, code: stripOneTrailingNewline(tail[fence.contentStart...]))]
             }
-            return MarkdownPlanner.locatedBlocks(from: tail).map(\.block)
+            return MarkdownPlanner.parseBlocks(from: tail)
         }
-        return MarkdownPlanner.locatedBlocks(from: healed(tail)).map(\.block)
+        return MarkdownPlanner.parseBlocks(from: healed(tail))
     }
 
     static func healed(_ tail: String) -> String {

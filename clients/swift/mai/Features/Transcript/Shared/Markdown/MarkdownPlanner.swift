@@ -8,45 +8,46 @@ nonisolated enum MarkdownPlanner {
     /// The blocks of a whole message. Source with no blocks (whitespace
     /// aside) shows as written.
     static func blocks(from source: String) -> [MarkdownBlock] {
-        let located = locatedBlocks(from: source)
-        if located.isEmpty, source.contains(where: { !$0.isWhitespace }) {
+        let parsed = parseBlocks(from: source)
+        if parsed.isEmpty, source.contains(where: { !$0.isWhitespace }) {
             return [.paragraph([MarkdownInline(text: source)])]
         }
-        return located.map(\.block)
+        return parsed
     }
 
-    /// Each top-level block with the UTF-8 offset in `source` it starts at.
-    static func locatedBlocks(from source: String) -> [(offset: Int, block: MarkdownBlock)] {
+    /// Top-level blocks of `source` without the whole-message whitespace
+    /// fallback (for prefixes and tails of a streaming message).
+    static func parseBlocks(from source: String) -> [MarkdownBlock] {
         guard !source.isEmpty else { return [] }
-        let lines = MarkdownSourceLines(source)
         // Smart punctuation would turn quotes, `--` and `...` into
         // typographic characters, so displayed and copied text would no
         // longer match commands and flags in the source.
         let document = Document(parsing: source, options: .disableSmartOpts)
-        var result: [(offset: Int, block: MarkdownBlock)] = []
+        var lines: MarkdownSourceLines?
+        var result: [MarkdownBlock] = []
         result.reserveCapacity(document.childCount)
         for child in document.children {
-            guard let location = child.range?.lowerBound,
-                let offset = lines.utf8Offset(line: location.line, column: location.column)
-            else { continue }
-            result.append((offset, block(child, lines: lines)))
+            result.append(block(child, source: source, lines: &lines))
         }
         return result
     }
 
-    private static func block(_ markup: Markup, lines: MarkdownSourceLines) -> MarkdownBlock {
+    private static func block(
+        _ markup: Markup, source: String, lines: inout MarkdownSourceLines?
+    ) -> MarkdownBlock {
         switch markup {
         case let paragraph as Paragraph:
             return .paragraph(inlines(paragraph.children))
         case let heading as Heading:
             return .heading(level: max(1, min(6, heading.level)), inlines(heading.children))
         case let quote as BlockQuote:
-            return .quote(quote.children.map { block($0, lines: lines) })
+            return .quote(quote.children.map { block($0, source: source, lines: &lines) })
         case let list as UnorderedList:
-            return .list(MarkdownList(startIndex: nil, items: items(list.listItems, lines: lines)))
+            return .list(MarkdownList(startIndex: nil, items: items(list.listItems, source: source, lines: &lines)))
         case let list as OrderedList:
             return .list(
-                MarkdownList(startIndex: Int(list.startIndex), items: items(list.listItems, lines: lines)))
+                MarkdownList(
+                    startIndex: Int(list.startIndex), items: items(list.listItems, source: source, lines: &lines)))
         case let code as CodeBlock:
             return .code(language: code.language, code: removingOneTrailingNewline(code.code))
         case let html as HTMLBlock:
@@ -54,15 +55,22 @@ nonisolated enum MarkdownPlanner {
         case let table as Markdown.Table:
             return .table(self.table(table))
         case let rule as ThematicBreak:
-            return .rule(spelling: lines.spelling(of: rule) ?? rule.format())
+            let resolved = lines ?? {
+                let built = MarkdownSourceLines(source)
+                lines = built
+                return built
+            }()
+            return .rule(spelling: resolved.spelling(of: rule) ?? rule.format())
         default:
             // A future or custom node shows as its source rather than vanishing.
             return .paragraph([MarkdownInline(text: markup.format())])
         }
     }
 
-    private static func items(_ items: some Sequence<ListItem>, lines: MarkdownSourceLines) -> [[MarkdownBlock]] {
-        items.map { item in item.children.map { block($0, lines: lines) } }
+    private static func items(
+        _ items: some Sequence<ListItem>, source: String, lines: inout MarkdownSourceLines?
+    ) -> [[MarkdownBlock]] {
+        items.map { item in item.children.map { block($0, source: source, lines: &lines) } }
     }
 
     private static func table(_ table: Markdown.Table) -> MarkdownTable {

@@ -12,8 +12,14 @@ import Foundation
 /// place.
 nonisolated enum MarkdownCommitBoundary {
     static func committedLength(of bytes: [UInt8]) -> Int {
+        committedLength(of: bytes[...])
+    }
+
+    /// The same for a slice (the open tail of a message's bytes), as a
+    /// length from the slice's start.
+    static func committedLength(of bytes: ArraySlice<UInt8>) -> Int {
         let lines = Line.split(bytes)
-        var committed = 0
+        var committed = bytes.startIndex
         var regionStart = true
         var regionHasList = false
         var regionIsIndentedCode = false
@@ -90,7 +96,7 @@ nonisolated enum MarkdownCommitBoundary {
             if line.indent < 4, Self.startsListItem(content) { regionHasList = true }
             regionStart = false
         }
-        return committed
+        return committed - bytes.startIndex
     }
 
     // MARK: Recognizers
@@ -168,8 +174,9 @@ nonisolated enum MarkdownCommitBoundary {
 
 extension MarkdownCommitBoundary {
     /// One source line: where its text starts after its indentation, where
-    /// it ends (before `\r\n` or `\n`), and where the next line starts. `indent` is in columns, with
-    /// tab stops of 4 (CommonMark 2.2), so it is not a byte count.
+    /// it ends (before `\r\n` or `\n`), and where the next line starts.
+    /// `indent` is in columns, with tab stops of 4 (CommonMark 2.2), so it is
+    /// not a byte count.
     fileprivate nonisolated struct Line {
         let contentStart: Int
         let contentEnd: Int
@@ -179,16 +186,16 @@ extension MarkdownCommitBoundary {
         let indent: Int
         let isBlank: Bool
 
-        func content(in bytes: [UInt8]) -> ArraySlice<UInt8> {
+        func content(in bytes: ArraySlice<UInt8>) -> ArraySlice<UInt8> {
             bytes[contentStart..<contentEnd]
         }
 
-        static func split(_ bytes: [UInt8]) -> [Line] {
+        static func split(_ bytes: ArraySlice<UInt8>) -> [Line] {
             var lines: [Line] = []
-            var start = 0
-            while start < bytes.count {
+            var start = bytes.startIndex
+            while start < bytes.endIndex {
                 var end = start
-                while end < bytes.count, bytes[end] != 0x0A { end += 1 }
+                while end < bytes.endIndex, bytes[end] != 0x0A { end += 1 }
                 let contentEnd = end > start && bytes[end - 1] == 0x0D ? end - 1 : end
                 var indent = 0
                 var cursor = start
@@ -203,7 +210,7 @@ extension MarkdownCommitBoundary {
                     }
                     cursor += 1
                 }
-                let terminated = end < bytes.count
+                let terminated = end < bytes.endIndex
                 lines.append(
                     Line(
                         contentStart: cursor, contentEnd: contentEnd, end: terminated ? end + 1 : end,
