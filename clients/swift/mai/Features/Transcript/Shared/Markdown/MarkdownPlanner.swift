@@ -149,6 +149,10 @@ nonisolated enum MarkdownPlanner {
     }
 
     private static func removingOneTrailingNewline(_ text: String) -> String {
-        text.hasSuffix("\n") ? String(text.dropLast()) : text
+        // Check the last UTF-8 byte directly; `hasSuffix("\n")` with Foundation
+        // imported scans the whole code block.
+        let utf8 = text.utf8
+        guard utf8.last == 0x0A else { return text }
+        return String(text[..<utf8.index(before: utf8.endIndex)])
     }
 }
