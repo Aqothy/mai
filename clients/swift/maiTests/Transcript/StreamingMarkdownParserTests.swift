@@ -98,4 +98,22 @@ struct StreamingMarkdownParserTests {
         #expect(parser.update(String(source.dropLast("After.\n".count))).committed.count == 2)
         #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
     }
+
+    /// The open tail heals as CommonMark will read it once closed: code spans
+    /// match runs of equal length (a backslash in code is literal), a code
+    /// span inside open emphasis still lets it close, `_` inside a word is
+    /// not emphasis, and an unclosed `***` at the end goes whole.
+    @Test func theOpenTailHealsByCommonMarkRules() {
+        #expect(
+            MarkdownTailHealer.blocks(forOpenTail: "Run **bold `code` more") == [
+                .paragraph([
+                    MarkdownInline(text: "Run "), MarkdownInline(text: "bold ", style: .strong),
+                    MarkdownInline(text: "code", style: [.strong, .code]), MarkdownInline(text: " more", style: .strong),
+                ])
+            ])
+        #expect(MarkdownTailHealer.healed("set max_tokens higher") == "set max_tokens higher")
+        #expect(MarkdownTailHealer.healed("``foo ` bar``") == "``foo ` bar``")
+        #expect(MarkdownTailHealer.healed("`\\`") == "`\\`")
+        #expect(MarkdownTailHealer.healed("hello ***") == "hello ")
+    }
 }
