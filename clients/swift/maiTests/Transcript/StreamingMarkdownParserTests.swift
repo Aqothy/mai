@@ -72,4 +72,11 @@ struct StreamingMarkdownParserTests {
         for end in 1...source.count { _ = parser.update(String(source.prefix(end))) }
         #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
     }
+
+    /// CommonMark ends an HTML block at its closing tag in any letter case;
+    /// an uppercase closer used to keep everything after it uncommitted.
+    @Test func anUppercaseHTMLCloserEndsItsBlock() {
+        let committed = "<PRE>\nhello\n</PRE>\n\n"
+        #expect(MarkdownCommitBoundary.committedLength(of: Array((committed + "After\n").utf8)) == committed.utf8.count)
+    }
 }

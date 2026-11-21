@@ -40,7 +40,7 @@ nonisolated enum MarkdownCommitBoundary {
                 continue
             }
             if let end = htmlEnd {
-                if content.firstRange(of: end) != nil { htmlEnd = nil }
+                if Self.containsASCIICaseInsensitive(content, needle: end) { htmlEnd = nil }
                 continue
             }
             if line.isBlank {
@@ -75,7 +75,7 @@ nonisolated enum MarkdownCommitBoundary {
                 continue
             }
             if line.indent < 4, let end = Self.htmlBlockEnd(opening: content) {
-                if content.dropFirst(1).firstRange(of: end) == nil { htmlEnd = end }
+                if !Self.containsASCIICaseInsensitive(content.dropFirst(1), needle: end) { htmlEnd = end }
                 regionStart = false
                 continue
             }
@@ -131,13 +131,35 @@ nonisolated enum MarkdownCommitBoundary {
     /// The end marker of an HTML block that can span blank lines (CommonMark
     /// types 1 and 2); other HTML blocks end at a blank line like a paragraph.
     private static func htmlBlockEnd(opening content: ArraySlice<UInt8>) -> [UInt8]? {
+        guard content.first == UInt8(ascii: "<") else { return nil }
         let text = String(decoding: content.prefix(10), as: UTF8.self).lowercased()
         if text.hasPrefix("<!--") { return Array("-->".utf8) }
         for tag in ["pre", "script", "style", "textarea"] where text.hasPrefix("<\(tag)") {
             let after = text.dropFirst(tag.count + 1).first
-            if after == nil || after == ">" || after == " " { return Array("</\(tag)>".utf8) }
+            if after == nil || after == ">" || after == " " || after == "\t" { return Array("</\(tag)>".utf8) }
         }
         return nil
+    }
+
+    /// Whether `haystack` holds `needle` (lowercase ASCII) in any letter case:
+    /// CommonMark matches HTML block end conditions case-insensitively.
+    private static func containsASCIICaseInsensitive(_ haystack: ArraySlice<UInt8>, needle: [UInt8]) -> Bool {
+        guard !needle.isEmpty, haystack.count >= needle.count else { return false }
+        var start = haystack.startIndex
+        while start <= haystack.endIndex - needle.count {
+            var matches = true
+            for offset in needle.indices {
+                var byte = haystack[start + offset]
+                if byte >= UInt8(ascii: "A"), byte <= UInt8(ascii: "Z") { byte += 32 }
+                if byte != needle[offset] {
+                    matches = false
+                    break
+                }
+            }
+            if matches { return true }
+            start += 1
+        }
+        return false
     }
 }
 
