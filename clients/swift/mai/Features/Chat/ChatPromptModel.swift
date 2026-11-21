@@ -190,7 +190,7 @@ final class ChatPromptModel {
         defer { isSending = false }
 
         let attempt = SendAttempt(text: submittedText, attachmentIDs: submittedAttachmentIDs, annotationIDs: submittedAnnotationIDs, mode: mode)
-        let key = unansweredSend?.attempt == attempt ? unansweredSend!.key : UUID().uuidString
+        let key = unansweredSend.flatMap { $0.attempt == attempt ? $0.key : nil } ?? UUID().uuidString
         let fileLinks = store.workingDirectory(forThread: threadID).map {
             promptCompletion.fileMentionLinks(in: submittedText, directory: $0)
         } ?? []

@@ -49,7 +49,6 @@ final class DraftPromptModel {
     /// later choice of agent stands.
     private var appliedForkDraftID: String?
 
-
     init(
         store: ThreadStore,
         draftStore: ThreadDraftStore,

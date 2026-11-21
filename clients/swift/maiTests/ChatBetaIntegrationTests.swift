@@ -86,7 +86,6 @@ struct ChatBetaIntegrationTests {
         #expect(!model.moveSelection(by: 1))
     }
 
-
     @Test @MainActor
     func completionCursorCountsUnicodeCharactersAtEveryValidBoundary() {
         let text = "café e\u{301} 👩🏽‍💻\n@文件"

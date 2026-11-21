@@ -14,4 +14,3 @@ nonisolated indirect enum MarkdownBlock: Hashable, Sendable {
     /// A thematic break, keeping its source spelling so copied text matches.
     case rule(spelling: String)
 }
-

@@ -14,7 +14,7 @@ enum PromptCompletionCursor {
             return text.indices.enumerated().first {
                 $0.element == range.lowerBound
             }?.offset
-        case .multiSelection(_):
+        case .multiSelection:
             return nil
         @unknown default:
             return nil

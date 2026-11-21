@@ -480,7 +480,7 @@ struct ComposerAddMenu: View {
     let isImageAttachmentDisabled: Bool
     let maximumImageSelectionCount: Int
     let commands: [SlashCommand]
-    var addWorkspaceFile: (() -> Void)? = nil
+    var addWorkspaceFile: (() -> Void)?
     let addImages: ([URL]) async -> Void
     let addPhotos: ([PhotosPickerItem]) -> Void
     let addCameraImage: (ChatComposerThumbnail) -> Void

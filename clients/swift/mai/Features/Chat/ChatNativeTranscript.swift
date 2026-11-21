@@ -12,14 +12,14 @@
         let width: CGFloat
         var isPrepared = true
         var measurementKeys: [ChatNativeRowMeasurementKey?] = []
-        var presentationTheme: ChatCodeHighlightTheme? = nil
+        var presentationTheme: ChatCodeHighlightTheme?
         /// The store the rows' prepared heights came from.
-        var layoutStore: ObjectIdentifier? = nil
+        var layoutStore: ObjectIdentifier?
         var historyLoadDistance: CGFloat = 0
-        var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)? = nil
-        var onAttach: ((ChatTranscriptScrollDocument) -> Void)? = nil
-        var nativeRowHeight: ((Int, CGFloat) -> CGFloat?)? = nil
-        var nativeRowFactory: ((Int, NSView?) -> NSView?)? = nil
+        var onGeometryChange: ((ChatScrollGeometry, ChatScrollGeometry) -> Void)?
+        var onAttach: ((ChatTranscriptScrollDocument) -> Void)?
+        var nativeRowHeight: ((Int, CGFloat) -> CGFloat?)?
+        var nativeRowFactory: ((Int, NSView?) -> NSView?)?
         @ViewBuilder let content: (Int) -> Content
 
         func makeCoordinator() -> Coordinator { Coordinator() }

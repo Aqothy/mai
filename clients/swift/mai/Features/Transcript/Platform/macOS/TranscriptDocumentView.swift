@@ -42,7 +42,7 @@
 
         // Constant, so AppKit's frequent calls skip the main-actor check.
         nonisolated override var isFlipped: Bool { true }
-        override class var isCompatibleWithResponsiveScrolling: Bool { true }
+        override static var isCompatibleWithResponsiveScrolling: Bool { true }
         override var wantsUpdateLayer: Bool { true }
 
         init(controller: TranscriptController) {

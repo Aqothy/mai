@@ -3,7 +3,7 @@ import SwiftUI
 struct ThreadListStatusModifier: ViewModifier {
     let store: ThreadStore
     /// Merged-list hosts override this so terminal rows count as content.
-    var contentIsEmpty: Bool? = nil
+    var contentIsEmpty: Bool?
 
     func body(content: Content) -> some View {
         content

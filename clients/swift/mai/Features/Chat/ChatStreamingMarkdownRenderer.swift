@@ -83,10 +83,8 @@ nonisolated enum ChatStreamingMarkdownRepairer {
         if repairDelimiter("~~", in: &display) {
             kinds.insert(.strikethrough)
         }
-        for delimiter in ["**", "__", "*", "_"] {
-            if repairDelimiter(delimiter, in: &display) {
-                kinds.insert(.emphasis)
-            }
+        for delimiter in ["**", "__", "*", "_"] where repairDelimiter(delimiter, in: &display) {
+            kinds.insert(.emphasis)
         }
 
         return ChatStreamingMarkdownRepair(
@@ -349,16 +347,17 @@ nonisolated enum ChatStreamingMarkdownRepairer {
             return false
         }
         let suffix = source[last.upperBound...]
-        if suffix.isEmpty {
+        guard let first = suffix.first else {
             source.removeSubrange(last)
-        } else if !suffix.first!.isWhitespace,
+            return true
+        }
+        guard !first.isWhitespace,
             !suffix.contains("\n"),
             !hasOpenInlineCode(String(suffix))
-        {
-            source += delimiter
-        } else {
+        else {
             return false
         }
+        source += delimiter
         return true
     }
 

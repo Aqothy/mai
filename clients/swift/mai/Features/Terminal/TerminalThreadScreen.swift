@@ -12,8 +12,8 @@ struct TerminalThreadScreen: View {
     let request: TerminalOpenRequest
     /// Tells the container the created terminal's identity so navigation can
     /// point at the persisted row.
-    var onCreated: ((String) -> Void)? = nil
-    var onDeleted: (() -> Void)? = nil
+    var onCreated: ((String) -> Void)?
+    var onDeleted: (() -> Void)?
 
     @State private var isRenamePresented = false
     @State private var renameTitle = ""

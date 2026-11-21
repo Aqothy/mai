@@ -131,7 +131,7 @@ extension ChatNativeTranscript {
                 onAttach?(self.virtualDocument)
                 #if DEBUG
                     ChatBenchmarkAutoRun.trace(
-                        "native geometry rows=\(result.count) measured=\(self.lastMeasuredRowCount) width=\(width) totalHeight=\(result.reduce(0,+)) elapsed=\(started.duration(to: .now))"
+                        "native geometry rows=\(result.count) measured=\(self.lastMeasuredRowCount) width=\(width) totalHeight=\(result.reduce(0, +)) elapsed=\(started.duration(to: .now))"
                     )
                     ChatBenchmarkAutoRun.isNativeGeometryWarm = true
                 #endif

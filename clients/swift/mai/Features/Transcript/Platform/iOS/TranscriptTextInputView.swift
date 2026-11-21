@@ -214,7 +214,7 @@
         var markedTextRange: UITextRange? { nil }
         var markedTextStyle: [NSAttributedString.Key: Any]? {
             get { nil }
-            set {}
+            set { _ = newValue }
         }
 
         func setMarkedText(_ markedText: String?, selectedRange: NSRange) {}

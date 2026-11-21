@@ -106,7 +106,6 @@
                 then: [event(.leftMouseUp, fixture.window, at: word)])
             #expect(fixture.controller.selection == nil)
         }
-    
 
         /// A click whose pointer wobbles a point or two is a click: it clears
         /// the selection (and opens a link) instead of selecting a character.

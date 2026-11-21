@@ -190,7 +190,7 @@ nonisolated enum MarkdownTailHealer {
         var cursor = open
         while cursor < utf8.endIndex {
             let byte = utf8[cursor]
-            if (byte == UInt8(ascii: "(") || byte == UInt8(ascii: ")")), !isEscaped(cursor, in: utf8) {
+            if byte == UInt8(ascii: "(") || byte == UInt8(ascii: ")"), !isEscaped(cursor, in: utf8) {
                 if byte == UInt8(ascii: "(") {
                     depth += 1
                 } else {

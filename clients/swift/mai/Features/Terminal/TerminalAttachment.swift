@@ -314,4 +314,3 @@ final class TerminalAttachment: TerminalIO {
 private final class FeedEventRelay {
     weak var attachment: TerminalAttachment?
 }
-

@@ -17,8 +17,8 @@ struct ChatMessageSegmentRowModel {
 /// assistant column, followed by annotation cards and attachments.
 struct ChatMessageBubble<Content: View>: View {
     let role: String
-    var annotations: [PromptAnnotation]? = nil
-    var attachments: [Attachment]? = nil
+    var annotations: [PromptAnnotation]?
+    var attachments: [Attachment]?
     @ViewBuilder let content: () -> Content
 
     var body: some View {
