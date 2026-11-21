@@ -81,10 +81,13 @@ nonisolated struct AttributedTextBuilder {
         let depth = environment.listDepth
         for (offset, item) in list.items.enumerated() {
             for (blockIndex, child) in item.enumerated() {
-                guard blockIndex == 0, case .paragraph(let inlines) = child else {
+                guard blockIndex == 0 else {
                     append(child, environment: nested)
                     continue
                 }
+                // The marker starts the item's first paragraph; an item that
+                // starts with another block (code, a list) gets it on a line
+                // of its own above that block.
                 var first = environment
                 first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
                 beginParagraph(first, headIndent: nested.indent)
@@ -94,7 +97,11 @@ nonisolated struct AttributedTextBuilder {
                     let bullet = ["•", "◦", "▪"][depth % 3]
                     text.append("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
                 }
-                append(inlines, Inline())
+                if case .paragraph(let inlines) = child {
+                    append(inlines, Inline())
+                } else {
+                    append(child, environment: nested)
+                }
             }
         }
     }

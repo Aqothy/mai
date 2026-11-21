@@ -146,4 +146,15 @@ struct TextLayoutEngineTests {
         let text = AttributedTextBuilder.build([.quote([.quote([list])])], style: style)
         #expect(text.string.string.hasPrefix("•"))
     }
+
+    /// An item that starts with code or a nested list still shows its marker.
+    @Test func aListItemStartingWithABlockKeepsItsMarker() {
+        let code = AttributedTextBuilder.build(
+            [.list(MarkdownList(startIndex: nil, items: [[.code(language: nil, code: "make")]]))], style: style)
+        #expect(code.string.string.hasPrefix("•"))
+        #expect(code.string.string.hasSuffix("make"))
+        let numbered = AttributedTextBuilder.build(
+            [.list(MarkdownList(startIndex: 3, items: [[.code(language: nil, code: "make")]]))], style: style)
+        #expect(numbered.string.string.hasPrefix("3."))
+    }
 }
