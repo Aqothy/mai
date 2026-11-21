@@ -3,14 +3,10 @@
 
     struct DesktopSidebarView: View {
         @Bindable var store: ThreadStore
-        let terminalStore: TerminalStore
-        @Binding var terminalRoute: TerminalOpenRequest?
 
         @State private var filter = ThreadListFilter()
         @State private var isAgentRegistryPresented = false
         @State private var isSessionImportPresented = false
-        @State private var isDeleteErrorPresented = false
-        @State private var deleteErrorMessage = ""
 
         @AppStorage(ThreadListDisplayMode.appStorageKey)
         private var displayModeRaw = ThreadListDisplayMode.recent.rawValue
@@ -22,32 +18,10 @@
             ThreadListDisplayMode(rawValue: displayModeRaw) ?? .recent
         }
 
-        /// Bridges the merged workspace selection to the two stores: chats route
-        /// through ThreadStore, terminals through the terminal route.
-        private var selection: Binding<WorkspaceItemID?> {
+        private var selection: Binding<String?> {
             Binding(
-                get: {
-                    if case .existing(let terminalID) = terminalRoute {
-                        return .terminal(terminalID)
-                    }
-                    if let threadID = store.selectedThreadID {
-                        return .agentThread(threadID)
-                    }
-                    return nil
-                },
-                set: { newValue in
-                    switch newValue {
-                    case .agentThread(let threadID):
-                        terminalRoute = nil
-                        store.selectThread(threadID)
-                    case .terminal(let terminalID):
-                        store.selectThread(nil)
-                        terminalRoute = .existing(terminalID: terminalID)
-                    case nil:
-                        terminalRoute = nil
-                        store.selectThread(nil)
-                    }
-                }
+                get: { store.selectedThreadID },
+                set: { store.selectThread($0) }
             )
         }
 
@@ -55,20 +29,16 @@
             VStack(spacing: 0) {
                 DesktopSidebarHeader(
                     store: store,
-                    filter: $filter,
-                    terminalRoute: $terminalRoute
+                    filter: $filter
                 )
                 Divider()
 
                 DesktopSidebarList(
                     store: store,
-                    terminalStore: terminalStore,
                     filter: filter,
                     displayMode: displayMode,
                     selection: selection,
-                    collapsedProjects: $collapsedProjects,
-                    openTerminalHere: openTerminalHereAction,
-                    deleteTerminal: deleteTerminal
+                    collapsedProjects: $collapsedProjects
                 )
 
                 Divider()
@@ -76,11 +46,6 @@
                     isAgentRegistryPresented: $isAgentRegistryPresented,
                     isSessionImportPresented: $isSessionImportPresented
                 )
-            }
-            .alert("Couldn’t Delete Terminal", isPresented: $isDeleteErrorPresented) {
-                Button("OK") {}
-            } message: {
-                Text(deleteErrorMessage)
             }
             .sheet(isPresented: $isAgentRegistryPresented) {
                 NavigationStack {
@@ -101,7 +66,6 @@
                         store: store,
                         openThread: { threadID in
                             isSessionImportPresented = false
-                            terminalRoute = nil
                             store.selectThread(threadID)
                         }
                     )
@@ -116,40 +80,11 @@
                 .frame(minWidth: 500, minHeight: 440)
             }
         }
-
-        // MARK: - Actions
-
-        private func openTerminalHereAction(for thread: ThreadSummary) -> (() -> Void)? {
-            let cwd = thread.workspace.cwd
-            guard !cwd.isEmpty else { return nil }
-            return {
-                store.selectThread(nil)
-                terminalRoute = .new(
-                    cwd: cwd,
-                    title: URL(filePath: cwd).lastPathComponent
-                )
-            }
-        }
-
-        private func deleteTerminal(_ terminalID: String) {
-            Task {
-                do {
-                    try await terminalStore.deleteTerminal(terminalID: terminalID)
-                    if terminalRoute == .existing(terminalID: terminalID) {
-                        terminalRoute = nil
-                    }
-                } catch {
-                    deleteErrorMessage = error.localizedDescription
-                    isDeleteErrorPresented = true
-                }
-            }
-        }
     }
 
     private struct DesktopSidebarHeader: View {
         let store: ThreadStore
         @Binding var filter: ThreadListFilter
-        @Binding var terminalRoute: TerminalOpenRequest?
 
         @FocusState private var isSearchFocused: Bool
 
@@ -196,19 +131,10 @@
 
                 HStack(spacing: SidebarMetrics.actionSpacing) {
                     Button("New Chat", systemImage: "square.and.pencil") {
-                        terminalRoute = nil
                         store.selectThread(nil)
                     }
                     .keyboardShortcut("n", modifiers: .command)
                     .help("New Chat (⌘N)")
-                    .buttonStyle(SidebarActionButtonStyle())
-
-                    Button("New Terminal", systemImage: "terminal") {
-                        store.selectThread(nil)
-                        terminalRoute = .new(cwd: "", title: nil)
-                    }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .help("New Terminal (⇧⌘N)")
                     .buttonStyle(SidebarActionButtonStyle())
 
                     Spacer(minLength: 0)
@@ -231,51 +157,57 @@
 
     private struct DesktopSidebarList: View {
         let store: ThreadStore
-        let terminalStore: TerminalStore
         let filter: ThreadListFilter
         let displayMode: ThreadListDisplayMode
-        @Binding var selection: WorkspaceItemID?
+        @Binding var selection: String?
         @Binding var collapsedProjects: CollapsedProjectDirectories
-        let openTerminalHere: (ThreadSummary) -> (() -> Void)?
-        let deleteTerminal: (String) -> Void
 
         @State private var topAligner = DesktopSidebarTopAligner()
 
         var body: some View {
-            let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
+            let threads = filter.apply(to: store)
             List(selection: $selection) {
                 switch displayMode {
                 case .recent:
-                    ForEach(items) { item in
-                        DesktopWorkspaceRow(
-                            store: store,
-                            item: item,
+                    ForEach(threads, id: \.id) { thread in
+                        DesktopThreadRow(
+                            thread: thread,
+                            isUnread: store.isThreadUnread(thread.id),
                             isCompact: false,
-                            openTerminalHere: openTerminalHere,
-                            deleteTerminal: deleteTerminal
+                            providerName: store.providerDisplayName(for: thread),
+                            markRead: { store.markThreadRead(thread.id) },
+                            markUnread: { store.markThreadUnread(thread.id) },
+                            rename: { try await store.renameThread(threadID: thread.id, title: $0) }
                         )
+                        .tag(thread.id)
                     }
                 case .byProject:
-                    let groups = WorkspaceListGroups(items: items)
-                    ForEach(groups.ungrouped) { item in
-                        DesktopWorkspaceRow(
-                            store: store,
-                            item: item,
+                    let groups = WorkspaceListGroups(threads: threads)
+                    ForEach(groups.ungrouped, id: \.id) { thread in
+                        DesktopThreadRow(
+                            thread: thread,
+                            isUnread: store.isThreadUnread(thread.id),
                             isCompact: true,
-                            openTerminalHere: openTerminalHere,
-                            deleteTerminal: deleteTerminal
+                            providerName: store.providerDisplayName(for: thread),
+                            markRead: { store.markThreadRead(thread.id) },
+                            markUnread: { store.markThreadUnread(thread.id) },
+                            rename: { try await store.renameThread(threadID: thread.id, title: $0) }
                         )
+                        .tag(thread.id)
                     }
                     ForEach(groups.projects) { section in
                         Section(isExpanded: expansionBinding(for: section.id)) {
-                            ForEach(section.items) { item in
-                                DesktopWorkspaceRow(
-                                    store: store,
-                                    item: item,
+                            ForEach(section.threads, id: \.id) { thread in
+                                DesktopThreadRow(
+                                    thread: thread,
+                                    isUnread: store.isThreadUnread(thread.id),
                                     isCompact: true,
-                                    openTerminalHere: openTerminalHere,
-                                    deleteTerminal: deleteTerminal
+                                    providerName: store.providerDisplayName(for: thread),
+                                    markRead: { store.markThreadRead(thread.id) },
+                                    markUnread: { store.markThreadUnread(thread.id) },
+                                    rename: { try await store.renameThread(threadID: thread.id, title: $0) }
                                 )
+                                .tag(thread.id)
                             }
                         } header: {
                             Text(section.name)
@@ -291,7 +223,7 @@
             .task {
                 topAligner.requestTopAlignment()
             }
-            .onChange(of: items.first?.id) { oldID, newID in
+            .onChange(of: threads.first?.id) { oldID, newID in
                 guard oldID == nil || selection == newID else { return }
                 topAligner.requestTopAlignment()
             }
@@ -303,20 +235,11 @@
             )
             .padding(.top, SidebarMetrics.listTopInset)
             .overlay {
-                if filter.isActive, items.isEmpty, hasUnfilteredItems {
+                if filter.isActive, threads.isEmpty, !store.threads.isEmpty {
                     DesktopSidebarFilteredEmptyState(query: filter.trimmedQuery)
                 }
             }
-            .modifier(
-                ThreadListStatusModifier(
-                    store: store,
-                    contentIsEmpty: !hasUnfilteredItems
-                )
-            )
-        }
-
-        private var hasUnfilteredItems: Bool {
-            !store.threads.isEmpty || !terminalStore.terminals.isEmpty
+            .modifier(ThreadListStatusModifier(store: store))
         }
 
         private func expansionBinding(for projectDirectory: String) -> Binding<Bool> {
@@ -325,7 +248,6 @@
                 set: { collapsedProjects.setExpanded($0, for: projectDirectory) }
             )
         }
-
     }
 
     private struct DesktopSidebarFilteredEmptyState: View {
@@ -416,41 +338,6 @@
         }
     }
 
-    /// A concrete row root keeps List identity independent of which workspace
-    /// domain the item belongs to.
-    private struct DesktopWorkspaceRow: View {
-        let store: ThreadStore
-        let item: WorkspaceListItem
-        let isCompact: Bool
-        let openTerminalHere: (ThreadSummary) -> (() -> Void)?
-        let deleteTerminal: (String) -> Void
-
-        var body: some View {
-            VStack(spacing: 0) {
-                switch item {
-                case .agentThread(let thread):
-                    DesktopThreadRow(
-                        thread: thread,
-                        isUnread: store.isThreadUnread(thread.id),
-                        isCompact: isCompact,
-                        providerName: store.providerDisplayName(for: thread),
-                        markRead: { store.markThreadRead(thread.id) },
-                        markUnread: { store.markThreadUnread(thread.id) },
-                        openTerminalHere: openTerminalHere(thread),
-                        rename: { try await store.renameThread(threadID: thread.id, title: $0) }
-                    )
-                case .terminal(let summary):
-                    DesktopTerminalRow(
-                        summary: summary,
-                        isCompact: isCompact,
-                        delete: { deleteTerminal(summary.terminalID) }
-                    )
-                }
-            }
-            .tag(item.id)
-        }
-    }
-
     private struct DesktopThreadRow: View {
         let thread: ThreadSummary
         let isUnread: Bool
@@ -458,7 +345,6 @@
         let providerName: String?
         let markRead: () -> Void
         let markUnread: () -> Void
-        let openTerminalHere: (() -> Void)?
         let rename: (String) async throws -> Void
 
         @State private var isRenaming = false
@@ -479,28 +365,6 @@
                 } else {
                     Button("Mark as Unread", systemImage: "envelope.badge", action: markUnread)
                 }
-                if let openTerminalHere {
-                    Button("Open Terminal Here", systemImage: "terminal", action: openTerminalHere)
-                }
-            }
-        }
-    }
-
-    private struct DesktopTerminalRow: View {
-        let summary: TerminalSummary
-        let isCompact: Bool
-        let delete: () -> Void
-
-        var body: some View {
-            VStack(spacing: 0) {
-                if isCompact {
-                    CompactTerminalRow(summary: summary)
-                } else {
-                    TerminalThreadRow(summary: summary)
-                }
-            }
-            .contextMenu {
-                Button("Delete Terminal", systemImage: "trash", role: .destructive, action: delete)
             }
         }
     }
@@ -508,12 +372,8 @@
     #if DEBUG
         #Preview("Desktop Sidebar") {
             NavigationSplitView {
-                DesktopSidebarView(
-                    store: PreviewData.threadStore(),
-                    terminalStore: TerminalStore(),
-                    terminalRoute: .constant(nil)
-                )
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
+                DesktopSidebarView(store: PreviewData.threadStore())
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
             } detail: {
                 Color.clear
             }
@@ -521,12 +381,8 @@
 
         #Preview("Desktop Sidebar Empty") {
             NavigationSplitView {
-                DesktopSidebarView(
-                    store: ThreadStore(previewThreads: []),
-                    terminalStore: TerminalStore(),
-                    terminalRoute: .constant(nil)
-                )
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
+                DesktopSidebarView(store: ThreadStore(previewThreads: []))
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
             } detail: {
                 Color.clear
             }
@@ -534,12 +390,8 @@
 
         #Preview("Desktop Sidebar Loading") {
             NavigationSplitView {
-                DesktopSidebarView(
-                    store: ThreadStore(),
-                    terminalStore: TerminalStore(),
-                    terminalRoute: .constant(nil)
-                )
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
+                DesktopSidebarView(store: ThreadStore())
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
             } detail: {
                 Color.clear
             }

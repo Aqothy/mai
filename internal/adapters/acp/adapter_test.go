@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -469,7 +468,7 @@ func TestConfigChoicesPreserveDescriptionsAndGroups(t *testing.T) {
 	}
 }
 
-func TestTerminalAuthMethods(t *testing.T) {
+func TestUnsupportedAuthMethodsIgnored(t *testing.T) {
 	var methods []schema.AuthMethod
 	if err := json.Unmarshal([]byte(`[
 		{"type":"_future","id":"future-login","name":"Future"},
@@ -478,26 +477,16 @@ func TestTerminalAuthMethods(t *testing.T) {
 		t.Fatalf("decode auth methods: %v", err)
 	}
 	initResp := schema.InitializeResponse{AuthMethods: methods}
-	if !capabilitySet(initResp, false).Auth {
-		t.Fatal("a terminal method should advertise auth support")
+	if capabilitySet(initResp, false).Auth {
+		t.Fatal("unsupported auth methods should not advertise auth support")
 	}
-	if auth := authStateFromACP(initResp); len(auth.Methods) != 1 || auth.Methods[0].ID != "terminal-login" || auth.Methods[0].Kind != provider.AuthKindTerminal {
-		t.Fatalf("auth methods = %#v, want only the terminal method", auth.Methods)
+	if auth := authStateFromACP(initResp); len(auth.Methods) != 0 {
+		t.Fatalf("auth methods = %#v, want none", auth.Methods)
 	}
 
-	// No agent connection: a terminal method must never reach ACP authenticate.
-	h := &Instance{initialize: initResp, config: Config{Command: []string{"agent", "--acp"}, Env: map[string]string{"MODE": "acp", "TOKEN": "x"}}}
-	result, err := h.Authenticate(context.Background(), provider.AuthenticateInput{MethodID: "terminal-login"})
-	if err != nil || result.Terminal == nil {
-		t.Fatalf("Authenticate = %#v, %v; want a terminal command", result, err)
-	}
-	command := *result.Terminal
-	if want := []string{"agent", "--acp", "--login"}; !slices.Equal(command.Argv, want) {
-		t.Fatalf("argv = %v, want %v", command.Argv, want)
-	}
-	// exec keeps the last of duplicated keys, so the method's MODE wins.
-	if want := []string{"MODE=acp", "TOKEN=x", "MODE=login"}; !slices.Equal(command.Env, want) {
-		t.Fatalf("env = %v, want %v", command.Env, want)
+	h := &Instance{initialize: initResp}
+	if _, err := h.Authenticate(context.Background(), provider.AuthenticateInput{MethodID: "terminal-login"}); err == nil {
+		t.Fatal("Authenticate accepted an unsupported terminal auth method")
 	}
 }
 

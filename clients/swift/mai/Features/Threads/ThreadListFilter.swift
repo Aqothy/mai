@@ -38,24 +38,8 @@ struct ThreadListFilter: Equatable {
         }
     }
 
-    /// Filters terminal rows for the unified Threads list. Provider filters
-    /// describe agent threads, so selecting one hides terminals.
-    func apply(toTerminals terminals: [TerminalSummary]) -> [TerminalSummary] {
-        guard providerID == nil else { return [] }
-        let query = trimmedQuery
-        return terminals.filter { terminal in
-            (projectCwd == nil || terminal.cwd == projectCwd)
-                && (query.isEmpty
-                    || terminal.displayTitle.localizedStandardContains(query)
-                    || terminal.programTitle?.localizedStandardContains(query) == true)
-        }
-    }
-
-    /// The filtered agent threads and terminals merged into one list.
-    func workspaceItems(store: ThreadStore, terminalStore: TerminalStore) -> [WorkspaceListItem] {
-        WorkspaceListItem.merged(
-            threads: apply(to: store.threads, providerID: store.providerID(for:)),
-            terminals: apply(toTerminals: terminalStore.terminals)
-        )
+    /// The filtered threads from the store.
+    func apply(to store: ThreadStore) -> [ThreadSummary] {
+        apply(to: store.threads, providerID: store.providerID(for:))
     }
 }

@@ -15,10 +15,10 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// LayoutVersion names what maid.db holds: its tables (Schema here, and the
-// terminals' in internal/store), the JSON its columns keep, which is the
-// encoding of the Go types stored there, and the values stored as text. A
-// file of another version is set aside at startup (store.Open).
+// LayoutVersion names what maid.db holds: its tables (Schema), the JSON its
+// columns keep, which is the encoding of the Go types stored there, and the
+// values stored as text. A file of another version is set aside at startup
+// (store.Open).
 //
 // maiD is unreleased, so there is no file to migrate from: the number stays
 // as it is through layout changes, and whoever changes the layout deletes

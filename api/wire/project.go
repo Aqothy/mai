@@ -6,8 +6,7 @@ import "github.com/Aqothy/maiD/internal/orchestration"
 // one list. The daemon works only in a project, a folder inside one, or a
 // folder a chat already works in: thread creation, workspace.searchFiles with
 // a cwd and provider.options.get refuse any other folder with invalid params.
-// Importing a native session adds its folder as a project. Terminals aren't
-// restricted.
+// Importing a native session adds its folder as a project.
 const (
 	// MethodProjectAdd adds an existing absolute directory, by its canonical
 	// path (symlinks resolved), and returns the project. Adding one twice

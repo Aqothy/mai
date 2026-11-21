@@ -50,7 +50,7 @@ func capabilities() provider.Capabilities {
 		History: provider.HistoryExact, HistoryVersion: historyVersion,
 		Resume: true, Fork: true, Steer: true, Subagents: true, Instructions: true, MessageIDs: true,
 		MCP:                   provider.MCPCapabilities{HTTP: true, Stdio: true},
-		AdditionalDirectories: true, Sessions: true, Delete: true, Rename: true, Auth: true, Logout: true,
+		AdditionalDirectories: true, Sessions: true, Delete: true, Rename: true, Logout: true,
 		// The stream-json user message accepts base64 image blocks. Audio
 		// and embedded-resource blocks are not part of the SDK prompt
 		// surface, so they are not advertised.
@@ -222,7 +222,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider
 		InstanceID: spec.InstanceID, Name: spec.Name, Driver: DriverKind,
 		Status: provider.InstanceStatusConfigured, StartedAt: time.Now(),
 		Capabilities: capabilities(), Access: accessModes(),
-		Auth: provider.Auth{Status: provider.AuthStatusUnknown, Methods: claudeAuthMethods()},
+		Auth: provider.Auth{Status: provider.AuthStatusUnknown},
 	}
 	// The probe performs the SDK initialize handshake only — the CLI answers
 	// it before any API request, so this is free and works logged-out too.

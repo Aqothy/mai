@@ -82,7 +82,7 @@ func TestProviderAuthenticateAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 2 || started.Auth.Methods[0].ID != "agent-login" {
+	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 1 || started.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("auth = %#v, want unknown with the advertised agent-login", started.Auth)
 	}
 	if err := client.callErr(wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}, nil); err == nil {
@@ -132,44 +132,6 @@ func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 	if result.Instance.Auth.Status != provider.AuthStatusAuthenticated {
 		t.Fatalf("auth = %q, want authenticated", result.Instance.Auth.Status)
 	}
-}
-
-// A terminal sign-in runs the agent's own command in a maiD terminal; once
-// it succeeds the provider restarts to pick up the credentials, but only once
-// no turn runs on it.
-func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
-	s := newTestServer(t)
-	client := newRecordingClient(t, s)
-	startFakeACPAgent(t, s, "agent")
-	thread := client.createThread(t, "agent", t.TempDir()).Thread
-	client.subscribe(t, thread)
-	gate := t.TempDir()
-	blocked := client.deliver(t, thread, "block "+gate).Delivery
-	waitForFile(t, gate+"/ready")
-	before, _ := s.providerService.Info("agent")
-
-	var result provider.AuthenticationResult
-	client.call(t, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "agent", MethodID: "terminal-login"}, &result)
-	if result.Challenge == nil || result.Challenge.Kind != provider.AuthKindTerminal || result.Challenge.TerminalID == "" {
-		t.Fatalf("challenge = %#v, want a terminal to open", result.Challenge)
-	}
-	waitUntil(t, "the sign-in program to exit, which removes its terminal", func() bool {
-		_, err := s.terminals.service.Get(result.Challenge.TerminalID)
-		return err != nil
-	})
-	// A restart that doesn't happen sends no event to wait for: give a wrong one
-	// time to cut the turn off. This can miss that bug, but can't fail correct code.
-	time.Sleep(500 * time.Millisecond)
-	if err := os.WriteFile(gate+"/release", nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if turn := client.waitSettled(t, thread, blocked); turn.State != provider.TurnCompleted {
-		t.Fatalf("the turn the sign-in waited for = %s", turn.State)
-	}
-	waitUntil(t, "the provider restarted once idle", func() bool {
-		info, _ := s.providerService.Info("agent")
-		return info.PID != before.PID && info.Status == provider.InstanceStatusInitialized
-	})
 }
 
 // A message sent while a provider restarts waits for it: a turn started then

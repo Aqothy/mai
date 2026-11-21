@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ThreadListStatusModifier: ViewModifier {
     let store: ThreadStore
-    /// Merged-list hosts override this so terminal rows count as content.
+    /// Project-grouped hosts override this so saved empty folders count as content.
     var contentIsEmpty: Bool?
 
     func body(content: Content) -> some View {

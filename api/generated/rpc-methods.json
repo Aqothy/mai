@@ -139,51 +139,6 @@
       "resultNull": true
     },
     {
-      "name": "terminal.create",
-      "params": "TerminalCreateParams",
-      "result": "TerminalAttachResult"
-    },
-    {
-      "name": "terminal.attach",
-      "params": "TerminalAttachParams",
-      "result": "TerminalAttachResult"
-    },
-    {
-      "name": "terminal.subscribeList",
-      "params": "EmptyParams",
-      "result": "TerminalListStreamItem"
-    },
-    {
-      "name": "terminal.rename",
-      "params": "TerminalRenameParams",
-      "result": "TerminalSummary"
-    },
-    {
-      "name": "terminal.delete",
-      "params": "TerminalIDParams",
-      "resultNull": true
-    },
-    {
-      "name": "terminal.write",
-      "params": "TerminalWriteParams",
-      "resultNull": true
-    },
-    {
-      "name": "terminal.resize",
-      "params": "TerminalResizeParams",
-      "resultNull": true
-    },
-    {
-      "name": "terminal.focus",
-      "params": "TerminalIDParams",
-      "resultNull": true
-    },
-    {
-      "name": "terminal.detach",
-      "params": "TerminalDetachParams",
-      "resultNull": true
-    },
-    {
       "name": "workspace.browseDirectories",
       "params": "WorkspaceBrowseDirectoriesParams",
       "result": "WorkspaceBrowseDirectoriesResult"
@@ -229,10 +184,6 @@
     {
       "name": "provider.question.asked",
       "payload": "ProviderQuestion"
-    },
-    {
-      "name": "terminal.subscribeList",
-      "payload": "TerminalListStreamItem"
     },
     {
       "name": "project.list",

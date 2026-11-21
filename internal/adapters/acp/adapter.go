@@ -212,13 +212,11 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 
 func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
 	title := "Mai Daemon"
-	terminalAuth := true
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
 		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 		// fs and terminal stay unadvertised on purpose (see connectClient).
 		ClientCapabilities: &schema.ClientCapabilities{
-			Auth: &schema.AuthCapabilities{Terminal: &terminalAuth},
 			Elicitation: &schema.ElicitationCapabilities{
 				Form: &schema.ElicitationFormCapabilities{},
 				URL:  &schema.ElicitationUrlCapabilities{},
@@ -256,9 +254,8 @@ func cloneInstanceInfo(conn provider.InstanceInfo) provider.InstanceInfo {
 	return conn
 }
 
-// Authenticate signs in with an advertised method: agent methods run through
-// ACP authenticate; terminal methods run the agent's own command with the
-// method's args and env, which the host shows in a terminal.
+// Authenticate signs in with an advertised agent-handled method through ACP
+// authenticate.
 func (h *Instance) Authenticate(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	if input.Secret != "" {
 		return provider.AuthenticationResult{}, fmt.Errorf("ACP sign-in methods take no secret")
@@ -266,15 +263,6 @@ func (h *Instance) Authenticate(ctx context.Context, input provider.Authenticate
 	method, ok := h.authMethod(input.MethodID)
 	if !ok || !isSupportedAuthMethod(method) {
 		return provider.AuthenticationResult{}, fmt.Errorf("ACP auth method %q was not advertised as a supported method", input.MethodID)
-	}
-	if !isAgentAuthMethod(method) {
-		command := provider.TerminalCommand{Argv: append(slices.Clone(h.config.Command), method.Args...)}
-		for _, env := range []map[string]string{h.config.Env, method.Env} {
-			for _, key := range slices.Sorted(maps.Keys(env)) {
-				command.Env = append(command.Env, key+"="+env[key])
-			}
-		}
-		return provider.AuthenticationResult{Instance: h.Info(), Terminal: &command}, nil
 	}
 	h.mu.Lock()
 	h.signInAsk = input.Ask

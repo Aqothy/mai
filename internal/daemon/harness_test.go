@@ -5,7 +5,6 @@ package daemon
 // order, the way a thin UI replica would.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -87,13 +86,8 @@ type recordingClient struct {
 	changed            chan struct{}
 	threadEvents       []orchestration.ThreadEvent
 	listItems          []orchestration.ThreadListItem
-	terminalListItems  []wire.TerminalListStreamItem
-	terminalListCursor int
 	projectLists       []wire.ProjectList
 	acpLists           []wire.ACPRegistryList
-	// terminalOutput is the output of every terminal stream the client
-	// opened.
-	terminalOutput     bytes.Buffer
 	providerQuestions  []wire.ProviderQuestion
 	optionsUpdates     []wire.ProviderOptionsResult
 	optionsInvalidated []wire.ProviderOptionsInvalidated
@@ -139,12 +133,6 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			return nil, err
 		}
 		c.listItems = append(c.listItems, item)
-	case wire.MethodTerminalSubscribeList:
-		var item wire.TerminalListStreamItem
-		if err := decodeRPCParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.terminalListItems = append(c.terminalListItems, item)
 	case wire.MethodProjectList:
 		var list wire.ProjectList
 		if err := decodeRPCParams(req, &list); err != nil {
@@ -195,15 +183,6 @@ func (c *recordingClient) call(t testing.TB, method string, params any, result a
 	t.Helper()
 	if err := c.callErr(method, params, result); err != nil {
 		t.Fatalf("%s: %v", method, err)
-	}
-}
-
-func (c *recordingClient) notify(t *testing.T, method string, params any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := c.conn.Notify(ctx, method, params); err != nil {
-		t.Fatalf("notify %s: %v", method, err)
 	}
 }
 

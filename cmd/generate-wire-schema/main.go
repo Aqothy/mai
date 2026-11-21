@@ -107,18 +107,6 @@ type contract struct {
 	ACPRegistryList                  wire.ACPRegistryList                  `json:"aCPRegistryList"`
 	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"aCPRegistryInstallParams"`
 	ACPCustomAgentAddParams          wire.ACPCustomAgentAddParams          `json:"aCPCustomAgentAddParams"`
-	TerminalSummary                  wire.TerminalSummary                  `json:"terminalSummary"`
-	TerminalAttachResult             wire.TerminalAttachResult             `json:"terminalAttachResult"`
-	TerminalStreamSnapshot           wire.TerminalStreamSnapshot           `json:"terminalStreamSnapshot"`
-	TerminalStreamResized            wire.TerminalStreamResized            `json:"terminalStreamResized"`
-	TerminalListStreamItem           wire.TerminalListStreamItem           `json:"terminalListStreamItem"`
-	TerminalRenameParams             wire.TerminalRenameParams             `json:"terminalRenameParams"`
-	TerminalCreateParams             wire.TerminalCreateParams             `json:"terminalCreateParams"`
-	TerminalIDParams                 wire.TerminalIDParams                 `json:"terminalIDParams"`
-	TerminalAttachParams             wire.TerminalAttachParams             `json:"terminalAttachParams"`
-	TerminalDetachParams             wire.TerminalDetachParams             `json:"terminalDetachParams"`
-	TerminalWriteParams              wire.TerminalWriteParams              `json:"terminalWriteParams"`
-	TerminalResizeParams             wire.TerminalResizeParams             `json:"terminalResizeParams"`
 	WorkspaceBrowseDirectoriesParams wire.WorkspaceBrowseDirectoriesParams `json:"workspaceBrowseDirectoriesParams"`
 	WorkspaceDirectoryEntry          wire.WorkspaceDirectoryEntry          `json:"workspaceDirectoryEntry"`
 	WorkspaceBrowseDirectoriesResult wire.WorkspaceBrowseDirectoriesResult `json:"workspaceBrowseDirectoriesResult"`

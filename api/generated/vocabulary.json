@@ -207,8 +207,7 @@
       "values": [
         "browser",
         "device-code",
-        "secret",
-        "terminal"
+        "secret"
       ]
     },
     {
@@ -372,43 +371,6 @@
         "unknown",
         "authenticated",
         "unauthenticated"
-      ]
-    },
-    {
-      "name": "TerminalListStreamItemKind",
-      "description": "Payload discriminator of a terminal.subscribeList snapshot or update.",
-      "values": [
-        "snapshot",
-        "terminal-upserted",
-        "terminal-removed"
-      ]
-    },
-    {
-      "name": "TerminalProgramState",
-      "description": "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
-      "values": [
-        "idle",
-        "working",
-        "done",
-        "blocked",
-        "error"
-      ]
-    },
-    {
-      "name": "TerminalProgramNeed",
-      "description": "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
-      "values": [
-        "permission",
-        "answer",
-        "auth"
-      ]
-    },
-    {
-      "name": "TerminalColorScheme",
-      "description": "Whether a terminal view's theme is light or dark.",
-      "values": [
-        "light",
-        "dark"
       ]
     }
   ]

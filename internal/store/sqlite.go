@@ -1,3 +1,5 @@
+// Package store opens the daemon's SQLite database. The orchestration ledger
+// and session cache own its tables.
 package store
 
 import (
@@ -6,35 +8,20 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-// SQLite implements TerminalStore in one database file, which the
-// orchestration ledger shares (DB).
+// SQLite wraps the daemon's single database file, shared by the orchestration
+// ledger (DB).
 type SQLite struct {
 	db *sql.DB
 }
 
-var _ TerminalStore = (*SQLite)(nil)
-
-// terminalSchema is the one table this package keeps. It is part of the
-// file's layout, which the caller of Open versions.
-const terminalSchema = `
-CREATE TABLE IF NOT EXISTS terminal_threads (
-	terminal_id TEXT PRIMARY KEY,
-	title       TEXT NOT NULL DEFAULT '',
-	cwd         TEXT NOT NULL,
-	created_at  TEXT NOT NULL,
-	updated_at  TEXT NOT NULL
-) STRICT;
-`
-
-// Open opens or creates the database at path, with this package's table and
-// those of schemas. version names that layout as a whole. maiD is unreleased
-// and keeps no migrations: a file of another version is renamed beside it
-// (path.<its version>.old) rather than changed, and a new one started.
+// Open opens or creates the database at path with schemas. version names that
+// layout as a whole. maiD is unreleased and keeps no migrations: a file of
+// another version is renamed beside it (path.<its version>.old) rather than
+// changed, and a new one started.
 func Open(path string, version int, schemas ...string) (*SQLite, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store: create data directory: %w", err)
@@ -52,7 +39,7 @@ func Open(path string, version int, schemas ...string) (*SQLite, error) {
 		var tables int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables)
 		if found == version || tables == 0 {
-			for _, schema := range append([]string{terminalSchema}, schemas...) {
+			for _, schema := range schemas {
 				if _, err := db.Exec(schema); err != nil {
 					_ = db.Close()
 					return nil, fmt.Errorf("store: ensure schema: %w", err)
@@ -96,68 +83,4 @@ func (s *SQLite) DB() *sql.DB { return s.db }
 
 func (s *SQLite) Close() error {
 	return s.db.Close()
-}
-
-func (s *SQLite) UpsertTerminal(meta TerminalMeta) error {
-	if meta.TerminalID == "" {
-		return fmt.Errorf("store: upsert terminal requires a terminal id")
-	}
-	_, err := s.db.Exec(`INSERT INTO terminal_threads (terminal_id, title, cwd, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (terminal_id) DO UPDATE SET
-			title = excluded.title,
-			cwd = excluded.cwd,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at`,
-		meta.TerminalID, meta.Title, meta.Cwd, timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt))
-	if err != nil {
-		return fmt.Errorf("store: upsert terminal %q: %w", meta.TerminalID, err)
-	}
-	return nil
-}
-
-func (s *SQLite) DeleteTerminal(terminalID string) error {
-	if _, err := s.db.Exec(`DELETE FROM terminal_threads WHERE terminal_id = ?`, terminalID); err != nil {
-		return fmt.Errorf("store: delete terminal %q: %w", terminalID, err)
-	}
-	return nil
-}
-
-func (s *SQLite) ListTerminals() ([]TerminalMeta, error) {
-	rows, err := s.db.Query(`SELECT terminal_id, title, cwd, created_at, updated_at
-		FROM terminal_threads ORDER BY updated_at DESC, terminal_id`)
-	if err != nil {
-		return nil, fmt.Errorf("store: list terminals: %w", err)
-	}
-	defer rows.Close()
-	var terminals []TerminalMeta
-	for rows.Next() {
-		var meta TerminalMeta
-		var createdAt, updatedAt string
-		if err := rows.Scan(&meta.TerminalID, &meta.Title, &meta.Cwd, &createdAt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("store: scan terminal: %w", err)
-		}
-		meta.CreatedAt = parseTimestamp(createdAt)
-		meta.UpdatedAt = parseTimestamp(updatedAt)
-		terminals = append(terminals, meta)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list terminals: %w", err)
-	}
-	return terminals, nil
-}
-
-// timestamp stores times as fixed-width RFC3339 UTC (9 fraction digits) so
-// lexical ordering matches chronological ordering (ListThreads sorts by the
-// TEXT column). RFC3339Nano would trim trailing zeros and break that.
-func timestamp(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
-}
-
-func parseTimestamp(value string) time.Time {
-	t, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }

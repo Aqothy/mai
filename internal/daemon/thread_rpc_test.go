@@ -563,9 +563,8 @@ func TestClientThatStopsAnsweringPingsIsDropped(t *testing.T) {
 }
 
 // One call hanging on a registry fetch, as a slow provider start would,
-// doesn't hold up other calls or terminal input on the same connection.
+// doesn't hold up other calls on the same connection.
 func TestSlowCallDoesNotBlockConnection(t *testing.T) {
-	useQuietTestShell(t)
 	fetching, release := make(chan struct{}, 1), make(chan struct{})
 	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetching <- struct{}{}
@@ -583,9 +582,6 @@ func TestSlowCallDoesNotBlockConnection(t *testing.T) {
 	<-fetching
 	var list []provider.InstanceInfo
 	client.call(t, wire.MethodProviderList, nil, &list)
-	created := createTestTerminal(t, client)
-	client.writeTerminal(t, created.Terminal.TerminalID, "printf 'NOT-BLOCKED-%d\\n' $((6*7))\n")
-	client.waitForOutput(t, "NOT-BLOCKED-42")
 	select {
 	case err := <-slow:
 		t.Fatalf("registry list returned before its fetch was released: %v", err)

@@ -4,7 +4,6 @@ import SwiftUI
 struct IOSAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let terminalStore: TerminalStore
 
     @State private var path: [IOSNavigationRoute] = []
 
@@ -12,19 +11,12 @@ struct IOSAppContainer: View {
         NavigationStack(path: $path) {
             IOSThreadListView(
                 store: store,
-                terminalStore: terminalStore,
                 newChat: { workingDirectory in
                     path.append(.newChat(workingDirectory: workingDirectory))
-                },
-                newTerminal: { request in
-                    path.append(.terminal(request))
                 },
                 selectThread: { threadID in
                     store.selectThread(threadID)
                     path.append(.thread(threadID))
-                },
-                selectTerminal: { terminalID in
-                    path.append(.terminal(.existing(terminalID: terminalID)))
                 },
                 openAgentRegistry: {
                     path.append(.agentRegistry)
@@ -44,8 +36,6 @@ struct IOSAppContainer: View {
                             path = [.thread(threadID)]
                         }
                     )
-                } else if case .terminal(let request) = route {
-                    TerminalThreadScreen(store: terminalStore, request: request)
                 } else {
                     IOSChatDestinationView(
                         route: route,
@@ -61,15 +51,6 @@ struct IOSAppContainer: View {
                     )
                 }
             }
-        }
-        .onChange(of: path, initial: true) { _, path in
-            // Detach is navigation-driven: when the visible top of the stack
-            // stops being a terminal, release control; the shell keeps
-            // running on the daemon.
-            if case .terminal = path.last {
-                return
-            }
-            terminalStore.closeActiveTerminal()
         }
         #if DEBUG
             .modifier(
@@ -89,8 +70,7 @@ struct IOSAppContainer: View {
     #Preview("iOS App") {
         IOSAppContainer(
             store: PreviewData.threadStore(),
-            draftStore: ThreadDraftStore(),
-            terminalStore: TerminalStore()
+            draftStore: ThreadDraftStore()
         )
     }
 #endif

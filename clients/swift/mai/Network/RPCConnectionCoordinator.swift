@@ -108,9 +108,8 @@ final class RPCConnectionCoordinator {
         defer { watchdog.cancel() }
 
         do {
-            // Keep initial publication deterministic: agent-thread state is
-            // registered first, followed by terminal state, and both use the
-            // same transport attempt and retry outcome.
+            // Keep initial publication deterministic across every registered
+            // feature using the same transport attempt and retry outcome.
             for participant in participants {
                 try await participant.synchronize()
             }

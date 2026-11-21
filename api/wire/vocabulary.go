@@ -3,7 +3,6 @@ package wire
 import (
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
-	"github.com/Aqothy/maiD/internal/terminal"
 )
 
 // Vocabularies registers the closed string vocabularies clients branch on. The
@@ -215,7 +214,6 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.AuthKindBrowser),
 			string(provider.AuthKindDeviceCode),
 			string(provider.AuthKindSecret),
-			string(provider.AuthKindTerminal),
 		},
 	},
 	{
@@ -377,43 +375,6 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.AuthStatusUnknown),
 			string(provider.AuthStatusAuthenticated),
 			string(provider.AuthStatusUnauthenticated),
-		},
-	},
-	{
-		Name:        "TerminalListStreamItemKind",
-		Description: "Payload discriminator of a terminal.subscribeList snapshot or update.",
-		Values: []string{
-			string(TerminalListItemSnapshot),
-			string(TerminalListItemUpserted),
-			string(TerminalListItemRemoved),
-		},
-	},
-	{
-		Name:        "TerminalProgramState",
-		Description: "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
-		Values: []string{
-			string(terminal.ProgramIdle),
-			string(terminal.ProgramWorking),
-			string(terminal.ProgramDone),
-			string(terminal.ProgramBlocked),
-			string(terminal.ProgramError),
-		},
-	},
-	{
-		Name:        "TerminalProgramNeed",
-		Description: "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
-		Values: []string{
-			string(terminal.ProgramNeedsPermission),
-			string(terminal.ProgramNeedsAnswer),
-			string(terminal.ProgramNeedsAuth),
-		},
-	},
-	{
-		Name:        "TerminalColorScheme",
-		Description: "Whether a terminal view's theme is light or dark.",
-		Values: []string{
-			string(terminal.ColorSchemeLight),
-			string(terminal.ColorSchemeDark),
 		},
 	},
 }

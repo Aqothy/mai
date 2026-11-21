@@ -814,9 +814,9 @@ func isAgentAuthMethod(method schema.AuthMethod) bool {
 }
 
 // isSupportedAuthMethod reports whether maiD can run the method: agent-handled
-// ones, or terminal ones run in a maiD terminal.
+// ones only.
 func isSupportedAuthMethod(method schema.AuthMethod) bool {
-	return method.ID != "" && (isAgentAuthMethod(method) || stringValue(method.Type) == schema.AuthMethodTypeTerminal)
+	return method.ID != "" && isAgentAuthMethod(method)
 }
 
 func hasSupportedAuthMethod(methods []schema.AuthMethod) bool {
@@ -830,9 +830,6 @@ func authMethodsFromACP(methods []schema.AuthMethod) []provider.AuthMethod {
 			continue
 		}
 		am := provider.AuthMethod{ID: string(method.ID), Name: method.Name}
-		if !isAgentAuthMethod(method) {
-			am.Kind = provider.AuthKindTerminal
-		}
 		if method.Description != nil {
 			am.Description = *method.Description
 		}

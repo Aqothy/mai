@@ -28,7 +28,6 @@ import (
 //	-linger          ignore stdin EOF, like real agents that only die with their process group
 //	-ignore-term     ignore SIGTERM too, so only SIGKILL ends it
 //	-pidfile <path>  write the agent's pid at startup
-//	-login           act as the terminal sign-in program: exit 0 at once
 //	-ask-to-sign-in  offer an "ask-login" method that asks for a code (a
 //	                 session-less elicitation) and succeeds only with 1234
 //	-history <dir>   keep each session's prompts in dir, across agent
@@ -85,17 +84,12 @@ func TestHelperProcess(t *testing.T) {
 	linger := flags.Bool("linger", false, "")
 	ignoreTerm := flags.Bool("ignore-term", false, "")
 	pidPath := flags.String("pidfile", "", "")
-	login := flags.Bool("login", false, "")
 	askToSignIn := flags.Bool("ask-to-sign-in", false, "")
 	history := flags.String("history", "", "")
 	sessions := flags.String("sessions", "", "")
 	_ = flags.Parse(args)
 	if *ignoreTerm {
 		signal.Ignore(syscall.SIGTERM)
-	}
-	if *login {
-		fmt.Println("signed in")
-		os.Exit(0)
 	}
 	if *pidPath != "" {
 		if err := os.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
@@ -176,12 +170,6 @@ type fakeACPMessage struct {
 		Cwd       string `json:"cwd"`
 		SessionID string `json:"sessionId"`
 		MethodID  string `json:"methodId"`
-		// ClientCapabilities is set on initialize.
-		ClientCapabilities struct {
-			Auth struct {
-				Terminal bool `json:"terminal"`
-			} `json:"auth"`
-		} `json:"clientCapabilities"`
 		ConfigID string `json:"configId"`
 		Value    string `json:"value"`
 		Prompt   []struct {
@@ -302,12 +290,8 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			sessionCapabilities["delete"] = map[string]any{}
 		}
 		authMethods := []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
-		// Terminal methods may only be offered to clients that run them.
 		if a.askToSignIn {
 			authMethods = append(authMethods, map[string]any{"id": "ask-login", "name": "Ask login"})
-		}
-		if msg.Params.ClientCapabilities.Auth.Terminal {
-			authMethods = append(authMethods, map[string]any{"id": "terminal-login", "name": "Terminal login", "type": "terminal", "args": []string{"-login"}})
 		}
 		result = map[string]any{
 			"protocolVersion":   1,

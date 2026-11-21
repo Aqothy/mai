@@ -148,7 +148,6 @@ struct ProviderAccountDetailView: View {
                 openURL(challengeURL)
             }
         }
-        .modifier(ProviderSignInTerminalPresenter(model: model))
         .sheet(item: .constant(model.question)) { question in
             ProviderQuestionSheet(question: question, account: model)
         }

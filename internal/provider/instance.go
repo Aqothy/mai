@@ -192,7 +192,7 @@ type MCPServer struct {
 	Name    string
 	URL     string
 	Headers map[string]string
-	Stdio   *TerminalCommand
+	Stdio   *StdioCommand
 }
 
 type Opened struct {

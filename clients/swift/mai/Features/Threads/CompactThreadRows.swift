@@ -33,35 +33,6 @@ struct CompactThreadRow: View {
     }
 }
 
-/// The terminal counterpart, marked by a glyph in place of project context.
-struct CompactTerminalRow: View {
-    let summary: TerminalSummary
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text(summary.displayTitle)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 8)
-
-            if let status = summary.rowIndicatorStatus {
-                ThreadRowStatusView(status: status)
-            } else {
-                ThreadRowTimestampText(updatedAt: summary.updatedAt)
-            }
-        }
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Terminal, \(summary.displayTitle)")
-    }
-}
-
 /// Compact relative recency that keeps ticking while on screen, driven by
 /// the schedule's date rather than Date.now.
 struct ThreadRowTimestampText: View {

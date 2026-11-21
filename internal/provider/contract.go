@@ -139,9 +139,6 @@ const (
 	AuthKindBrowser    AuthKind = "browser"
 	AuthKindDeviceCode AuthKind = "device-code"
 	AuthKindSecret     AuthKind = "secret"
-	// AuthKindTerminal runs the agent's own login program in an interactive
-	// terminal instead of an authenticate call.
-	AuthKindTerminal AuthKind = "terminal"
 )
 
 type AuthMethod struct {
@@ -176,14 +173,11 @@ type AuthChallenge struct {
 	URL             string   `json:"url,omitempty"`
 	UserCode        string   `json:"userCode,omitempty"`
 	VerificationURL string   `json:"verificationUrl,omitempty"`
-	// TerminalID names the maiD terminal running a terminal sign-in (Kind
-	// "terminal"). The provider restarts once that program exits successfully.
-	TerminalID string `json:"terminalId,omitempty"`
 }
 
-// TerminalCommand is a program to run in an interactive terminal: Argv, with
-// Env (KEY=VALUE) overriding the inherited environment.
-type TerminalCommand struct {
+// StdioCommand describes a local child process to spawn: Argv, with Env
+// (KEY=VALUE) overriding the inherited environment.
+type StdioCommand struct {
 	Argv []string
 	Env  []string
 }
@@ -191,10 +185,6 @@ type TerminalCommand struct {
 type AuthenticationResult struct {
 	Instance  InstanceInfo   `json:"instance"`
 	Challenge *AuthChallenge `json:"challenge,omitempty"`
-	// Terminal asks the host to run this sign-in program in an interactive
-	// terminal. The host reports it to clients as a terminal challenge and
-	// restarts the provider once the program exits successfully.
-	Terminal *TerminalCommand `json:"-"`
 }
 
 // Auth is the provider-neutral auth state surfaced to clients (for a provider

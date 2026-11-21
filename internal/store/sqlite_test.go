@@ -11,16 +11,6 @@ import (
 // testLayout is a layout version for the tests' files.
 const testLayout = 7
 
-func openTestStore(t *testing.T) *SQLite {
-	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "maid.db"), testLayout)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
-
 // A database of another layout is set aside, not changed, and a new one
 // starts in its place.
 func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
@@ -66,7 +56,7 @@ func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if err := again.UpsertTerminal(TerminalMeta{TerminalID: "x", Cwd: "/"}); err != nil {
+	if _, err := again.DB().Exec(`INSERT INTO threads (thread_id, title) VALUES ('x', 'kept')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(fmt.Sprintf("%s.%d.old", path, testLayout)); !os.IsNotExist(err) {

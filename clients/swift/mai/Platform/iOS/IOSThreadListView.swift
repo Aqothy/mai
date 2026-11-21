@@ -3,16 +3,12 @@ import SwiftUI
 
 struct IOSThreadListView: View {
     let store: ThreadStore
-    let terminalStore: TerminalStore
     let newChat: (String?) -> Void
-    let newTerminal: (TerminalOpenRequest) -> Void
     let selectThread: (String) -> Void
-    let selectTerminal: (String) -> Void
     let openAgentRegistry: () -> Void
     let openSessionImport: () -> Void
 
     @State private var filter = ThreadListFilter()
-    @State private var isTerminalFolderSelectionPresented = false
     @State private var projectErrorMessage: String?
 
     @AppStorage(ThreadListDisplayMode.appStorageKey)
@@ -26,28 +22,28 @@ struct IOSThreadListView: View {
     }
 
     var body: some View {
-        // Hoisted so the filter/merge runs once per body evaluation; the
-        // overlay below reads it as well.
-        let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
+        // Hoisted so the filter runs once per body evaluation; the overlay
+        // below reads it as well.
+        let threads = filter.apply(to: store)
         List {
             switch displayMode {
             case .recent:
-                workspaceRows(items: items, isCompact: false)
+                workspaceRows(threads: threads, isCompact: false)
             case .byProject:
                 let groups = WorkspaceListGroups(
-                    items: items,
+                    threads: threads,
                     projectDirectories: store.projects
                 )
-                workspaceRows(items: groups.ungrouped, isCompact: true)
+                workspaceRows(threads: groups.ungrouped, isCompact: true)
                 ForEach(groups.projects) { section in
                     Section {
                         if collapsedProjects.isExpanded(section.id) {
-                            if section.items.isEmpty {
+                            if section.threads.isEmpty {
                                 Button("New Chat", systemImage: "square.and.pencil") {
                                     newChat(section.id)
                                 }
                             } else {
-                                workspaceRows(items: section.items, isCompact: true)
+                                workspaceRows(threads: section.threads, isCompact: true)
                             }
                         }
                     } header: {
@@ -102,14 +98,11 @@ struct IOSThreadListView: View {
         }
         .modifier(
             IOSThreadListBottomToolbar(
-                newChat: { newChat(nil) },
-                newTerminal: { isTerminalFolderSelectionPresented = true }
+                newChat: { newChat(nil) }
             )
         )
         .overlay {
-            if filter.isActive, items.isEmpty,
-                !(store.threads.isEmpty && terminalStore.terminals.isEmpty)
-            {
+            if filter.isActive, threads.isEmpty, !store.threads.isEmpty {
                 if filter.trimmedQuery.isEmpty {
                     ContentUnavailableView(
                         "No Matching Threads",
@@ -125,19 +118,9 @@ struct IOSThreadListView: View {
             ThreadListStatusModifier(
                 store: store,
                 contentIsEmpty: store.threads.isEmpty
-                    && terminalStore.terminals.isEmpty
                     && (displayMode != .byProject || store.projects.isEmpty)
             )
         )
-        .sheet(isPresented: $isTerminalFolderSelectionPresented) {
-            FolderSelectionSheet(
-                store: store,
-                title: "New Terminal",
-                selectedFolder: nil,
-                onSelectExisting: openNewTerminal(at:),
-                onSelectBrowsed: openNewTerminal(at:)
-            )
-        }
         .alert(
             "Couldn’t Remove Project",
             isPresented: Binding(
@@ -161,26 +144,14 @@ struct IOSThreadListView: View {
         }
     }
 
-    private func workspaceRows(items: [WorkspaceListItem], isCompact: Bool) -> some View {
+    private func workspaceRows(threads: [ThreadSummary], isCompact: Bool) -> some View {
         IOSWorkspaceRows(
             store: store,
-            items: items,
+            threads: threads,
             isCompact: isCompact,
-            selectThread: selectThread,
-            selectTerminal: selectTerminal,
-            openTerminalHere: openNewTerminal(at:)
+            selectThread: selectThread
         )
     }
-
-    private func openNewTerminal(at directory: String) {
-        newTerminal(
-            .new(
-                cwd: directory,
-                title: URL(filePath: directory).lastPathComponent
-            )
-        )
-    }
-
 }
 
 /// A tappable project header carrying the fold chevron.
@@ -227,11 +198,8 @@ private struct IOSProjectSectionHeader: View {
         NavigationStack {
             IOSThreadListView(
                 store: PreviewData.threadStore(),
-                terminalStore: TerminalStore(),
                 newChat: { _ in },
-                newTerminal: { _ in },
                 selectThread: { _ in },
-                selectTerminal: { _ in },
                 openAgentRegistry: {},
                 openSessionImport: {}
             )
@@ -242,11 +210,8 @@ private struct IOSProjectSectionHeader: View {
         NavigationStack {
             IOSThreadListView(
                 store: ThreadStore(),
-                terminalStore: TerminalStore(),
                 newChat: { _ in },
-                newTerminal: { _ in },
                 selectThread: { _ in },
-                selectTerminal: { _ in },
                 openAgentRegistry: {},
                 openSessionImport: {}
             )

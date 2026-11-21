@@ -32,8 +32,8 @@ func TestInitializeAdvertisesSupportedClientCapabilities(t *testing.T) {
 	if caps.Elicitation == nil || caps.Elicitation.Form == nil || caps.Elicitation.URL == nil {
 		t.Fatalf("elicitation capabilities = %#v, want form and url", caps.Elicitation)
 	}
-	if caps.Auth == nil || caps.Auth.Terminal == nil || !*caps.Auth.Terminal {
-		t.Fatalf("auth capabilities = %#v, want terminal sign-in", caps.Auth)
+	if caps.Auth != nil {
+		t.Fatalf("auth capabilities = %#v, want unadvertised", caps.Auth)
 	}
 	if caps.FS != nil || caps.Terminal != nil {
 		t.Fatalf("client capabilities = %#v, want fs and terminal unadvertised", caps)

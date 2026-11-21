@@ -181,31 +181,18 @@ func TestCloseDoesNotWaitForAClientThatStoppedReading(t *testing.T) {
 	}
 }
 
-// Closing the daemon stops agents and terminals at the same time, each
-// within its grace: the terminal's program hears its hangup while an agent
-// is still stopping, not after, and Close is done once the slowest is.
-func TestCloseStopsAgentsAndTerminalsTogether(t *testing.T) {
+// Closing the daemon stops a lingering agent within its grace periods.
+func TestCloseStopsLingeringAgent(t *testing.T) {
 	dir := t.TempDir()
-	shell := filepath.Join(dir, "shell")
-	script := fmt.Sprintf("#!/bin/sh\necho $$ > '%[1]s/shell.pid'\ntrap 'echo hup >> %[1]s/hup' HUP\ntrap '' TERM\nwhile :; do sleep 0.05; done\n", dir)
-	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SHELL", shell)
 	s := newTestServer(t)
 	// An agent that ignores stdin closing and SIGTERM takes both of its
 	// one-second graces before it is killed.
 	startFakeACPAgent(t, s, "agent", "-linger", "-ignore-term", "-pidfile", filepath.Join(dir, "agent.pid"))
-	createTestTerminal(t, newRecordingClient(t, s))
-	agent, shellPID := readPID(t, filepath.Join(dir, "agent.pid")), readPID(t, filepath.Join(dir, "shell.pid"))
+	agent := readPID(t, filepath.Join(dir, "agent.pid"))
 
 	started := time.Now()
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	waitForFile(t, filepath.Join(dir, "hup"))
-	if syscall.Kill(agent, 0) != nil {
-		t.Fatal("the terminal heard its hangup only after the agent was gone")
-	}
 	select {
 	case err := <-closed:
 		if err != nil {
@@ -215,12 +202,10 @@ func TestCloseStopsAgentsAndTerminalsTogether(t *testing.T) {
 		t.Fatal("Close did not return")
 	}
 	if elapsed := time.Since(started); elapsed < 2*time.Second || elapsed > 3*time.Second {
-		t.Fatalf("Close took %v, want the agent's two 1 s graces (2 s), with the terminal's 1 s alongside", elapsed)
+		t.Fatalf("Close took %v, want the agent's two 1 s graces (2 s)", elapsed)
 	}
-	for name, pid := range map[string]int{"agent": agent, "terminal program": shellPID} {
-		if syscall.Kill(pid, 0) == nil {
-			t.Fatalf("the %s (pid %d) outlived Close", name, pid)
-		}
+	if syscall.Kill(agent, 0) == nil {
+		t.Fatalf("the agent (pid %d) outlived Close", agent)
 	}
 }
 

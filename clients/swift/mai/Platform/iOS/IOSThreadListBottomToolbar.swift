@@ -1,20 +1,13 @@
 #if os(iOS)
 import SwiftUI
 
-/// Places the searchable field and create buttons in the bottom toolbar.
-/// On iOS 26, fixed toolbar spacing gives New Chat and New Terminal separate
-/// circular glass backgrounds. Earlier systems keep the search field in its
-/// default navigation-bar placement.
+/// Places the searchable field and New Chat button in the bottom toolbar on
+/// iOS 26. Earlier systems keep the search field in its default navigation-bar
+/// placement.
 struct IOSThreadListBottomToolbar: ViewModifier {
     let newChat: () -> Void
-    let newTerminal: () -> Void
 
     func body(content: Content) -> some View {
-        let terminalButton = Button(
-            "New Terminal",
-            systemImage: "terminal",
-            action: newTerminal
-        )
         let chatButton = Button(
             "New Chat",
             systemImage: "square.and.pencil",
@@ -26,10 +19,6 @@ struct IOSThreadListBottomToolbar: ViewModifier {
                 DefaultToolbarItem(kind: .search, placement: .bottomBar)
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
-                    terminalButton
-                }
-                ToolbarSpacer(.fixed, placement: .bottomBar)
-                ToolbarItem(placement: .bottomBar) {
                     chatButton
                 }
             }
@@ -37,7 +26,6 @@ struct IOSThreadListBottomToolbar: ViewModifier {
             content.toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Spacer()
-                    terminalButton
                     chatButton
                 }
             }

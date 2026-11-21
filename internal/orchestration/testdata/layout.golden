@@ -76,13 +76,6 @@ CREATE TABLE sessions (
 ) STRICT;
 CREATE INDEX sessions_participant ON sessions(participant_id);
 CREATE INDEX sessions_unowned ON sessions(instance_id) WHERE participant_id IS NULL;
-CREATE TABLE terminal_threads (
-	terminal_id TEXT PRIMARY KEY,
-	title       TEXT NOT NULL DEFAULT '',
-	cwd         TEXT NOT NULL,
-	created_at  TEXT NOT NULL,
-	updated_at  TEXT NOT NULL
-) STRICT;
 CREATE TABLE threads (
 	thread_id TEXT PRIMARY KEY,
 	title TEXT NOT NULL,

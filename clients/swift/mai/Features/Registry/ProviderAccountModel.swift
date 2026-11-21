@@ -22,8 +22,6 @@ final class ProviderAccountModel {
     private(set) var errorMessage: String?
     var selectedMethodID: String?
     var secret = ""
-    /// The terminal running a terminal sign-in method, while it is shown.
-    var signInTerminalID: String?
 
     private let store: ThreadStore
 
@@ -60,11 +58,6 @@ final class ProviderAccountModel {
             url.scheme == "https" || url.scheme == "http"
         else { return nil }
         return url
-    }
-
-    var isSignInTerminalPresented: Bool {
-        get { signInTerminalID != nil }
-        set { if !newValue { signInTerminalID = nil } }
     }
 
     /// A question the agent asks during the sign-in in progress.
@@ -164,16 +157,7 @@ final class ProviderAccountModel {
                 secret: submittedSecret
             )
             provider = result.instance
-            if result.challenge?.kind == MaidAuthKind.terminal.rawValue,
-                let terminalID = result.challenge?.terminalID
-            {
-                // The agent's own login program runs in this terminal; the
-                // daemon restarts the agent once it succeeds.
-                signInTerminalID = terminalID
-                challenge = nil
-            } else {
-                challenge = result.challenge
-            }
+            challenge = result.challenge
             if isAuthenticated {
                 selectedMethodID = nil
             }

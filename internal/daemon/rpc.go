@@ -36,15 +36,13 @@ const (
 
 // orderedRPCCalls run one at a time in wire order: the order of commands and
 // subscriptions is the client's intent. They are all quick. Every other call
-// runs concurrently so a slow provider, registry, or terminal operation
-// cannot hold up the connection. Notifications (terminal input, resize,
-// focus, detach) are always handled in wire order.
+// runs concurrently so a slow provider or registry operation cannot hold up
+// the connection.
 var orderedRPCCalls = map[string]bool{
 	wire.MethodThreadCommand:            true,
 	wire.MethodThreadSubscribe:          true,
 	wire.MethodThreadUnsubscribe:        true,
 	wire.MethodThreadSubscribeList:      true,
-	wire.MethodTerminalSubscribeList:    true,
 	wire.MethodProjectSubscribeList:     true,
 	wire.MethodACPRegistrySubscribeList: true,
 }
@@ -76,7 +74,6 @@ type rpcClient struct {
 	subscription *orchestration.Subscription
 
 	subscriptionsMu           sync.Mutex
-	terminalListSubscribed    bool
 	acpRegistryListSubscribed bool
 
 	// questions are the sign-in questions this client was asked and has not
@@ -170,11 +167,10 @@ func (s *Server) RunWebSocket(addr string) error {
 	return s.fatalErr
 }
 
-// handler serves the JSON-RPC connection and the terminal streams beside it.
+// handler serves the JSON-RPC WebSocket endpoint.
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rpc", s.serveRPC)
-	mux.HandleFunc("GET "+wire.TerminalStreamPath, s.serveTerminalStream)
 	return mux
 }
 
@@ -280,7 +276,6 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	// path, and each step is harmless to repeat.
 	client.subscription.Close()
 	go s.closeClientOptionsSessions(client)
-	go s.detachClientTerminals(client)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -342,18 +337,6 @@ func (c *rpcClient) subscribedACPRegistryList() bool {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 	return c.acpRegistryListSubscribed
-}
-
-func (c *rpcClient) subscribeTerminalList() {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	c.terminalListSubscribed = true
-}
-
-func (c *rpcClient) subscribedTerminalList() bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	return c.terminalListSubscribed
 }
 
 // ask sends this client a question an agent asks during its sign-in and
@@ -633,58 +616,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.setProviderOption(ctx, params)
-	case wire.MethodTerminalCreate:
-		var params wire.TerminalCreateParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return h.server.createTerminal(h.client, params)
-	case wire.MethodTerminalAttach:
-		var params wire.TerminalAttachParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return h.server.attachTerminal(h.client, params)
-	case wire.MethodTerminalDetach:
-		var params wire.TerminalDetachParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		h.server.detachTerminal(h.client, params)
-		return nil, nil
-	case wire.MethodTerminalSubscribeList:
-		return h.server.subscribeTerminalList(h.client), nil
-	case wire.MethodTerminalRename:
-		var params wire.TerminalRenameParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return h.server.renameTerminal(params)
-	case wire.MethodTerminalDelete:
-		var params wire.TerminalIDParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return nil, h.server.deleteTerminal(params.TerminalID)
-	case wire.MethodTerminalWrite:
-		var params wire.TerminalWriteParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return nil, h.server.writeTerminal(h.client, params)
-	case wire.MethodTerminalResize:
-		var params wire.TerminalResizeParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return nil, h.server.resizeTerminal(h.client, params)
-	case wire.MethodTerminalFocus:
-		var params wire.TerminalIDParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		h.server.focusTerminal(h.client, params.TerminalID)
-		return nil, nil
 	case wire.MethodWorkspaceBrowseDirectories:
 		var params wire.WorkspaceBrowseDirectoriesParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -930,17 +861,6 @@ func decodeRPCParams(req *jsonrpc2.Request, dst any) error {
 		return fmt.Errorf("%w: decode %s params: %v", jsonrpc2.ErrInvalidParams, req.Method, err)
 	}
 	return nil
-}
-
-// marshalNotification encodes a notification's params once for every
-// subscriber.
-func (s *Server) marshalNotification(item any, method string) (json.RawMessage, bool) {
-	params, err := json.Marshal(item)
-	if err != nil {
-		s.logger.Error("notification encoding failed", "method", method, "error", err)
-		return nil, false
-	}
-	return params, true
 }
 
 func (c *rpcClient) notify(method string, params any) {

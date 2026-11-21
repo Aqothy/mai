@@ -186,9 +186,8 @@ id search every project directory.
 `{InstanceID:"claude-code", Name:"Claude Code"}`. Config accepts
 `{command, env, configDir}`; defaults to `["claude"]` on PATH.
 
-Sign-in (`auth.go`): the CLI only signs in interactively, so Authenticate
-returns `claude auth login [--console]` for the daemon to run in a terminal;
-the daemon restarts the instance afterwards. Logout runs `claude auth logout`.
+Account (`auth.go`): the CLI only signs in interactively (`claude auth login`),
+so sign-in stays in the user's own terminal. Logout runs `claude auth logout`.
 An assistant message with `error: "authentication_failed"` marks the instance
 signed out.
 

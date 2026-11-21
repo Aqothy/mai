@@ -171,7 +171,6 @@ public enum MaidAuthKind: String, Codable, Sendable, CaseIterable {
     case browser = "browser"
     case deviceCode = "device-code"
     case secret = "secret"
-    case terminal = "terminal"
 }
 
 /// What a message or tool attachment carries.
@@ -303,33 +302,4 @@ public enum MaidAuthStatus: String, Codable, Sendable, CaseIterable {
     case unknown = "unknown"
     case authenticated = "authenticated"
     case unauthenticated = "unauthenticated"
-}
-
-/// Payload discriminator of a terminal.subscribeList snapshot or update.
-public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseIterable {
-    case snapshot = "snapshot"
-    case terminalUpserted = "terminal-upserted"
-    case terminalRemoved = "terminal-removed"
-}
-
-/// What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.
-public enum MaidTerminalProgramState: String, Codable, Sendable, CaseIterable {
-    case idle = "idle"
-    case working = "working"
-    case done = "done"
-    case blocked = "blocked"
-    case error = "error"
-}
-
-/// What a blocked terminal program needs from the user. Unknown future values render like no need given.
-public enum MaidTerminalProgramNeed: String, Codable, Sendable, CaseIterable {
-    case permission = "permission"
-    case answer = "answer"
-    case auth = "auth"
-}
-
-/// Whether a terminal view's theme is light or dark.
-public enum MaidTerminalColorScheme: String, Codable, Sendable, CaseIterable {
-    case light = "light"
-    case dark = "dark"
 }

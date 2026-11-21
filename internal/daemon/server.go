@@ -35,8 +35,6 @@ type Server struct {
 	engine          *orchestration.Engine
 	metadataStore   *store.SQLite
 
-	terminals *terminalRuntime
-
 	// workspaceSearch owns the warm per-workspace FFF file indexes behind
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
@@ -80,7 +78,6 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		metadataStore: metadata,
 	}
 	s.acpRegistry = newACPRegistry(ctx, dataDir, logger, s.publishACPRegistryList)
-	s.terminals = newTerminalRuntime(metadata, logger)
 	s.workspaceSearch = workspacesearch.NewService()
 	// The engine and the providers need each other: the providers report to
 	// the engine, which they don't call until it has started.
@@ -173,19 +170,14 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	// Agents and terminal shells never survive daemon shutdown. Stop them at
-	// once, so shutdown takes one grace, and wait for every process group to be
-	// cleaned up before releasing clients and the store.
+	// Agents never survive daemon shutdown. Stop them and wait for every
+	// process group and install job to finish before releasing clients and
+	// the store.
 	var stopped sync.WaitGroup
-	stopped.Go(s.terminals.service.Close)
 	stopped.Go(s.acpRegistry.waitForJobs)
 	s.providerService.Close()
 	s.engine.Close()
 	stopped.Wait()
-	// Close streams before the process exits, so their clients hear why.
-	for _, stream := range s.terminals.closeStreams() {
-		<-stream.finished
-	}
 	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()
@@ -209,33 +201,13 @@ func (s *Server) doClose() error {
 	return err
 }
 
-// authenticateProvider signs in to a provider. A provider whose sign-in is an
-// interactive program gets it run in a maiD terminal the client then opens;
-// once it exits successfully the provider restarts, as soon as no turn is
-// running on it, so it picks up the new credentials.
+// authenticateProvider signs in to a provider.
 func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	result, err := s.providerService.Authenticate(ctx, instanceID, input)
 	if err != nil {
 		return result, err
 	}
-	if result.Terminal == nil {
-		s.spreadAccountChange(instanceID)
-		return result, nil
-	}
-	terminalID, err := s.startCommandTerminal("Sign in to "+result.Instance.Name, *result.Terminal, func(exitCode *int) {
-		if exitCode == nil || *exitCode != 0 {
-			s.logger.Info("terminal sign-in did not succeed", "provider", instanceID, "exitCode", exitCode)
-			return
-		}
-		s.restartProviderWhenIdle(instanceID, func(ctx context.Context) error {
-			_, err := s.providerService.RestartInstance(ctx, instanceID)
-			return err
-		})
-	})
-	if err != nil {
-		return provider.AuthenticationResult{}, err
-	}
-	result.Challenge = &provider.AuthChallenge{Kind: provider.AuthKindTerminal, TerminalID: terminalID}
+	s.spreadAccountChange(instanceID)
 	return result, nil
 }
 

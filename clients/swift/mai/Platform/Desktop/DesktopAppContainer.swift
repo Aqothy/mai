@@ -4,11 +4,7 @@ import SwiftUI
 struct DesktopAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let terminalStore: TerminalStore
 
-    /// The open terminal, if any. Chat selection lives in ThreadStore; only
-    /// presentation merges the two domains.
-    @State private var terminalRoute: TerminalOpenRequest?
     @State private var columnVisibility = Self.initialColumnVisibility
 
     /// A transcript-only benchmark shows the detail column alone.
@@ -21,45 +17,21 @@ struct DesktopAppContainer: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            DesktopSidebarView(
-                store: store,
-                terminalStore: terminalStore,
-                terminalRoute: $terminalRoute
-            )
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
+            DesktopSidebarView(store: store)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
         } detail: {
-            if let terminalRoute {
-                TerminalThreadScreen(
-                    store: terminalStore,
-                    request: terminalRoute,
-                    onCreated: { terminalID in
-                        self.terminalRoute = .existing(terminalID: terminalID)
-                    },
-                    onDeleted: {
-                        self.terminalRoute = nil
-                    }
-                )
-            } else {
-                ChatView(
-                    store: store,
-                    draftStore: draftStore,
-                    openThread: { threadID in
-                        store.selectThread(threadID)
-                    },
-                    openDraft: {
-                        store.selectThread(nil)
-                    }
-                )
-            }
+            ChatView(
+                store: store,
+                draftStore: draftStore,
+                openThread: { threadID in
+                    store.selectThread(threadID)
+                },
+                openDraft: {
+                    store.selectThread(nil)
+                }
+            )
         }
         .toolbar(removing: .title)
-        .onChange(of: terminalRoute) { _, route in
-            // Detach is navigation-driven: leaving the terminal detail
-            // releases control without terminating the shell.
-            if route == nil {
-                terminalStore.closeActiveTerminal()
-            }
-        }
         #if DEBUG
             .modifier(
                 ChatRealThreadBenchmarkRunner(store: store, selectThread: { store.selectThread($0) })
@@ -72,8 +44,7 @@ struct DesktopAppContainer: View {
 #Preview("Desktop App") {
     DesktopAppContainer(
         store: PreviewData.threadStore(),
-        draftStore: ThreadDraftStore(),
-        terminalStore: TerminalStore()
+        draftStore: ThreadDraftStore()
     )
 }
 #endif

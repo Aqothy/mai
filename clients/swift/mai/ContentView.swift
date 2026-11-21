@@ -6,7 +6,6 @@ struct MaiApp: App {
     @State private var connection: RPCConnectionCoordinator
     @State private var threadStore: ThreadStore
     @State private var threadDraftStore = ThreadDraftStore()
-    @State private var terminalStore: TerminalStore
 
     /// A synthetic benchmark transcript replaces the daemon-backed store; the
     /// app must then never open the RPC connection.
@@ -31,17 +30,13 @@ struct MaiApp: App {
             initialValue: syntheticStore
                 ?? ThreadStore(rpc: rpc, connection: connection)
         )
-        _terminalStore = State(
-            initialValue: TerminalStore(rpc: rpc, connection: connection)
-        )
     }
 
     var body: some Scene {
         WindowGroup {
             AppRootView(
                 store: threadStore,
-                draftStore: threadDraftStore,
-                terminalStore: terminalStore
+                draftStore: threadDraftStore
             )
             .task {
                 guard !usesSyntheticBenchmarkStore else { return }
