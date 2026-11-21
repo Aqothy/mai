@@ -166,4 +166,18 @@ struct TextLayoutEngineTests {
         #expect(layout.lines.count == 3)
         #expect(layout.lines[0].height == layout.lines[1].height)
     }
+
+    /// A table's last column's cells end at the grid: their boxes (hit
+    /// testing, selection) reached half a column spacing past it.
+    @Test func theLastColumnsBoxesEndAtTheGrid() {
+        for columns in 1...3 {
+            let cell = [MarkdownInline(text: "x")]
+            let table = MarkdownTable(
+                alignments: Array(repeating: .leading, count: columns), header: Array(repeating: cell, count: columns),
+                rows: [Array(repeating: cell, count: columns)])
+            let layout = TableLayout.make(table, width: 400, style: style)
+            let last = layout.cells.filter { $0.column == columns - 1 }
+            #expect(last.allSatisfy { abs($0.box.maxX - layout.gridSize.width) < 1 }, "\(columns) columns")
+        }
+    }
 }

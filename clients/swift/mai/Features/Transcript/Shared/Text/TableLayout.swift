@@ -68,13 +68,17 @@ nonisolated struct TableLayout: Sendable {
                     case .center: (slack / 2).rounded()
                     case .trailing: slack
                     }
+                // Boxes meet halfway between columns and end at the grid's
+                // edges, where there is no spacing to share.
+                let leadingPad = column == 0 ? 0 : style.tableColumnSpacing / 2
+                let trailingPad = column == columns - 1 ? 0 : style.tableColumnSpacing / 2
                 cells.append(
                     Cell(
                         layout: layout,
                         origin: CGPoint(x: columnOrigins[column] + offset, y: y + style.tableCellVerticalPadding),
                         box: CGRect(
-                            x: columnOrigins[column] - (column == 0 ? 0 : style.tableColumnSpacing / 2), y: y,
-                            width: columnWidths[column] + (column == 0 ? style.tableColumnSpacing / 2 : style.tableColumnSpacing),
+                            x: columnOrigins[column] - leadingPad, y: y,
+                            width: columnWidths[column] + leadingPad + trailingPad,
                             height: rowHeight + 2 * style.tableCellVerticalPadding),
                         row: rowIndex, column: column))
             }
