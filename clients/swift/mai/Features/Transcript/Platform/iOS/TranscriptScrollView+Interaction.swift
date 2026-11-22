@@ -1,27 +1,31 @@
 #if os(iOS)
     import UIKit
 
+    /// Ignores taps on native accessory controls without conforming
+    /// `TranscriptScrollView` itself to `UIGestureRecognizerDelegate` (which
+    /// also intercepts `UIScrollView.panGestureRecognizer` and blocks vertical
+    /// scrolling that starts on Copy/Fork buttons).
+    final class TranscriptTapGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            !(touch.view is UIControl)
+        }
+    }
+
     /// Touch on the iOS transcript. UIKit's non-editable text interaction
     /// gives long-press selection, handles, loupe and the edit menu over
     /// `contentView` (PLAN 5); its gestures live on the scroll view, which
     /// UIKit supports. A tap on a finished turn's header expands or
     /// collapses its work, on a link opens it, anywhere else clears the
     /// selection.
-    extension TranscriptScrollView: UIGestureRecognizerDelegate {
+    extension TranscriptScrollView {
         func installInteractions() {
             let selection = UITextInteraction(for: .nonEditable)
             selection.textInput = contentView
             addInteraction(selection)
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.cancelsTouchesInView = false
-            tap.delegate = self
+            tap.delegate = tapDelegate
             addGestureRecognizer(tap)
-        }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            // Do not clear selection or trigger underlying row actions when
-            // tapping an accessory button (Copy / Fork).
-            !(touch.view is UIControl)
         }
 
         @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {

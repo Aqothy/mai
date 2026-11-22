@@ -263,7 +263,6 @@ extension TranscriptController {
             let key = currentKey(rows[rowIndex])
             let layout = RowLayout(rowID: id, key: key, height: row.layout.height, content: row.layout.content)
             layouts[id] = layout
-            measuredKeys[id] = key
             if let drawn = row.drawn { streamedBands[id] = (layout, drawn) }
         }
         if isAwaitingInitialEnd { alignInitialEndIfPossible() }

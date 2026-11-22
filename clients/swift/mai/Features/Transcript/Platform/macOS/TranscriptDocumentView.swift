@@ -307,7 +307,13 @@
             var buttons = accessoryButtons[rowID] ?? []
             while buttons.count > accessories.count { recycle(buttons.removeLast()) }
             while buttons.count < accessories.count {
-                let button = accessoryPool.popLast() ?? TranscriptAccessoryButton()
+                let action = accessories[buttons.count].action
+                let button: TranscriptAccessoryButton
+                if let match = accessoryPool.lastIndex(where: { $0.matchesKind(of: action) }) {
+                    button = accessoryPool.remove(at: match)
+                } else {
+                    button = accessoryPool.popLast() ?? TranscriptAccessoryButton()
+                }
                 if button.superview == nil { addSubview(button) }
                 buttons.append(button)
             }

@@ -60,17 +60,83 @@ nonisolated struct TranscriptGeometry {
         _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat]
     ) {
         let start = range.lowerBound
-        // Forget the index entries that point at or after the change.
-        for index in start..<ids.count {
-            if indices[ids[index]] == index { indices[ids[index]] = nil }
-            if sourceStarts[sources[index]] == index { sourceStarts[sources[index]] = nil }
+        let oldEnd = range.upperBound
+        let delta = newIDs.count - range.count
+        // Forget only the removed rows instead of tearing down and rehashing
+        // every unchanged entry in the tail.
+        var clearedID = false
+        var clearedSource = false
+        for index in range {
+            if indices[ids[index]] == index {
+                indices[ids[index]] = nil
+                clearedID = true
+            }
+            if sourceStarts[sources[index]] == index {
+                sourceStarts[sources[index]] = nil
+                clearedSource = true
+            }
         }
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
         heights.replaceSubrange(range, with: newHeights.map(Self.clamped))
-        for index in start..<ids.count {
-            if indices[ids[index]] == nil { indices[ids[index]] = index }
-            if sourceStarts[sources[index]] == nil { sourceStarts[sources[index]] = index }
+        let newEnd = start + newIDs.count
+        // Shift/repair surviving tail entries into post-replacement coordinates
+        // first so writing `start..<newEnd` cannot collide with unshifted tail
+        // indices. Reverse order for `delta > 0` prevents cascading overwrites.
+        if delta > 0 {
+            for index in (newEnd..<ids.count).reversed() {
+                let id = ids[index]
+                if let existing = indices[id] {
+                    if (existing == index - delta && existing >= oldEnd) || existing > index { indices[id] = index }
+                } else {
+                    indices[id] = index
+                }
+                if index == newEnd || sources[index] != sources[index - 1] {
+                    let source = sources[index]
+                    if let existing = sourceStarts[source] {
+                        if (existing == index - delta && existing >= oldEnd) || existing > index {
+                            sourceStarts[source] = index
+                        }
+                    } else {
+                        sourceStarts[source] = index
+                    }
+                }
+            }
+        } else if delta < 0 || clearedID || clearedSource {
+            for index in newEnd..<ids.count {
+                if delta < 0 || clearedID {
+                    let id = ids[index]
+                    if let existing = indices[id] {
+                        if delta < 0, existing == index - delta, existing >= oldEnd { indices[id] = index }
+                    } else {
+                        indices[id] = index
+                    }
+                }
+                if delta < 0 || clearedSource, index == newEnd || sources[index] != sources[index - 1] {
+                    let source = sources[index]
+                    if let existing = sourceStarts[source] {
+                        if delta < 0, existing == index - delta, existing >= oldEnd { sourceStarts[source] = index }
+                    } else {
+                        sourceStarts[source] = index
+                    }
+                }
+            }
+        }
+        // Prefix entries are `< start` and tail entries are now `>= newEnd`, so
+        // forward writes in `start..<newEnd` keep the smallest index per key.
+        for index in start..<newEnd {
+            let id = ids[index]
+            if let existing = indices[id] {
+                if existing > index { indices[id] = index }
+            } else {
+                indices[id] = index
+            }
+            let source = sources[index]
+            if let existing = sourceStarts[source] {
+                if existing > index { sourceStarts[source] = index }
+            } else {
+                sourceStarts[source] = index
+            }
         }
         // Nodes before the change cover only rows before it and stay valid.
         tree.removeSubrange((start + 1)...)

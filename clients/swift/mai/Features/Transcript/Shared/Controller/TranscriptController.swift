@@ -24,13 +24,12 @@ final class TranscriptController {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    /// Thread-safe handoff from `LayoutQueue` workers so finished background
-    /// jobs coalesce into batches while urgent viewport work drains at once.
+    /// Thread-safe handoff from `LayoutQueue` workers so finished viewport
+    /// layouts coalesce into a single main-actor drain.
     final class LayoutInbox: Sendable {
         struct State {
             var items: [LayoutQueue.Result] = []
-            var hasUrgentScheduled = false
-            var hasBackgroundScheduled = false
+            var isDrainScheduled = false
         }
 
         let state = Mutex<State>(State())
@@ -79,40 +78,21 @@ final class TranscriptController {
     /// Layouts of rows in and near the viewport (state: being shown or about
     /// to be). Others are dropped.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
-    /// The key each row's height was measured at.
-    @ObservationIgnored var measuredKeys: [String: RowLayoutKey] = [:]
     @ObservationIgnored var synchronousHeights: [String: CGFloat] = [:]
     @ObservationIgnored let layoutInbox = LayoutInbox()
     @ObservationIgnored var urgentGeneration = 0
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
-    @ObservationIgnored var backgroundSweepTask: Task<Void, Never>?
-    @ObservationIgnored var isWarm = false
     @ObservationIgnored var openStarted = ContinuousClock.now
     @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) {
         [weak self, inbox = layoutInbox] result in
-        enum Action { case none, urgent, background }
-        let action: Action = inbox.state.withLock { state in
+        let shouldSchedule = inbox.state.withLock { state -> Bool in
             state.items.append(result)
-            if result.isUrgent {
-                guard !state.hasUrgentScheduled else { return .none }
-                state.hasUrgentScheduled = true
-                return .urgent
-            } else {
-                guard !state.hasUrgentScheduled, !state.hasBackgroundScheduled else { return .none }
-                state.hasBackgroundScheduled = true
-                return .background
-            }
+            guard !state.isDrainScheduled else { return false }
+            state.isDrainScheduled = true
+            return true
         }
-        switch action {
-        case .none:
-            break
-        case .urgent:
+        if shouldSchedule {
             Task { @MainActor [weak self] in self?.drainInbox() }
-        case .background:
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(32))
-                self?.drainInbox()
-            }
         }
     }
 
@@ -275,7 +255,9 @@ final class TranscriptController {
     /// touches only the rows from `range` on: a streamed message gaining a
     /// block or a parsed message expanding in place. A row that stays keeps its
     /// height unless `heights` has one.
-    func replaceRows(_ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat]) {
+    func replaceRows(
+        _ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat], marksArrived: Bool = true
+    ) {
         var old: [String: (row: TranscriptRow, height: CGFloat)] = [:]
         for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index)) }
         let width = columnWidth > 0 ? columnWidth : 600
@@ -292,26 +274,17 @@ final class TranscriptController {
                 heights[id] ?? old[id]?.height
                     ?? HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
         }
-        // Accumulates until a placement reads it: two replacements before
-        // one placement both arrive.
-        arrivedRowIDs.formUnion(versioned.lazy.map(\.id).filter { old[$0] == nil })
+        if marksArrived {
+            // Accumulates until a placement reads it: two replacements before
+            // one placement both arrive.
+            arrivedRowIDs.formUnion(versioned.lazy.map(\.id).filter { old[$0] == nil })
+        }
         changeGeometry {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
                 range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
         }
         scheduleWork()
-    }
-
-    /// Replaces the tail `start..<rows.count` in one geometry change (used by
-    /// batched background parse+measure drains).
-    func spliceTail(
-        from start: Int, rows tailRows: [TranscriptRow], ids: [String], sources: [String], heights: [CGFloat]
-    ) {
-        changeGeometry {
-            rows.replaceSubrange(start..<rows.count, with: tailRows)
-            geometry.replaceRows(start..<geometry.count, ids: ids, sources: sources, heights: heights)
-        }
     }
 
     /// Updates rows in place whose IDs stay, with their new heights: a

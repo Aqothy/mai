@@ -12,6 +12,19 @@
         /// changes every frame, its symbol does not.
         private var shown: (symbol: String, label: String)?
 
+        private static let copyImage = UIImage(systemName: "square.on.square")
+        private static let copiedImage = UIImage(systemName: "checkmark")
+        private static let forkImage = UIImage(systemName: "arrow.triangle.branch")
+
+        /// Whether this pooled control already shows the symbol for `action`,
+        /// avoiding a `UIButton.Configuration` rebuild on reuse.
+        func matchesKind(of action: RowAccessory.Action) -> Bool {
+            switch action {
+            case .copy: shown?.symbol == "square.on.square"
+            case .fork: shown?.symbol == "arrow.triangle.branch"
+            }
+        }
+
         init() {
             super.init(frame: .zero)
             var configuration = UIButton.Configuration.plain()
@@ -78,7 +91,15 @@
                 case nil: ("square.on.square", "")
                 }
             guard shown?.symbol != symbol || shown?.label != label else { return }
-            if shown?.symbol != symbol { configuration?.image = UIImage(systemName: symbol) }
+            if shown?.symbol != symbol {
+                configuration?.image =
+                    switch symbol {
+                    case "square.on.square": Self.copyImage
+                    case "checkmark": Self.copiedImage
+                    case "arrow.triangle.branch": Self.forkImage
+                    default: UIImage(systemName: symbol)
+                    }
+            }
             shown = (symbol, label)
             accessibilityLabel = label
         }

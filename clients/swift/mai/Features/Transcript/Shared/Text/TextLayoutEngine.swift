@@ -118,47 +118,6 @@ nonisolated enum TextLayoutEngine {
         return builder.finish()
     }
 
-    /// Measure-only height of `text` at `width` (for off-screen background
-    /// sweep): breaks lines and sums metrics without copying glyphs, positions,
-    /// carets or decorations.
-    static func measureHeight(_ text: StyledText, width: CGFloat, options: Options) -> CGFloat {
-        let length = text.length
-        guard length > 0 else { return 0 }
-        let typesetter = CTTypesetterCreateWithAttributedString(text.string)
-        let nsString = text.string.mutableString
-        var y: CGFloat = 0
-        var hasLines = false
-        var start = 0
-        var paragraphIndex = 0
-        while start < length {
-            while paragraphIndex + 1 < text.paragraphs.count, text.paragraphs[paragraphIndex + 1].start <= start {
-                paragraphIndex += 1
-            }
-            let paragraph = text.paragraphs.isEmpty ? nil : text.paragraphs[paragraphIndex]
-            let isParagraphStart = paragraph.map { $0.start == start } ?? (start == 0)
-            let indent = (isParagraphStart ? paragraph?.firstLineIndent : paragraph?.headIndent) ?? 0
-            let count = nextLineLength(
-                typesetter: typesetter, nsString: nsString, start: start, length: length,
-                availableWidth: max(1, width - indent), wraps: options.wraps)
-            if hasLines {
-                y += options.lineSpacing + (isParagraphStart ? paragraph?.spacingBefore ?? 0 : 0)
-            }
-            if let fixed = options.fixedLineHeight {
-                y += fixed
-            } else {
-                let line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
-                var ascent: CGFloat = 0
-                var descent: CGFloat = 0
-                var leading: CGFloat = 0
-                _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
-                y += ceil(ascent + descent + leading)
-            }
-            hasLines = true
-            start += count
-        }
-        return ceil(y)
-    }
-
     /// The UTF-16 length of the line starting at `start`: Core Text's break
     /// when wrapping, through the next newline when not.
     private static func nextLineLength(

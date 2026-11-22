@@ -13,6 +13,17 @@
         /// changes every frame, its symbol does not.
         private var shown: (symbol: String, label: String)?
 
+        private static let copyImage = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: nil)
+        private static let copiedImage = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        private static let forkImage = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+
+        func matchesKind(of action: RowAccessory.Action) -> Bool {
+            switch action {
+            case .copy: shown?.symbol == "square.on.square"
+            case .fork: shown?.symbol == "arrow.triangle.branch"
+            }
+        }
+
         init() {
             super.init(frame: .zero)
             isBordered = false
@@ -71,7 +82,15 @@
                 case nil: ("square.on.square", "")
                 }
             guard shown?.symbol != symbol || shown?.label != label else { return }
-            if shown?.symbol != symbol { image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) }
+            if shown?.symbol != symbol {
+                image =
+                    switch symbol {
+                    case "square.on.square": Self.copyImage
+                    case "checkmark": Self.copiedImage
+                    case "arrow.triangle.branch": Self.forkImage
+                    default: NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+                    }
+            }
             shown = (symbol, label)
             toolTip = label
             setAccessibilityLabel(label)

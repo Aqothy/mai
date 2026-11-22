@@ -45,6 +45,7 @@
         private var wideBlockPool: [TranscriptWideBlockScroller] = []
         private var accessoryButtons: [String: [TranscriptAccessoryControl]] = [:]
         private var accessoryPool: [TranscriptAccessoryControl] = []
+        let tapDelegate = TranscriptTapGestureDelegate()
         private var keyboardTransition: KeyboardTransition?
 
         /// The keyboard's own animation, so insets change with it and the
@@ -169,6 +170,14 @@
             super.adjustedContentInsetDidChange()
             controller.viewportDidChange()
             setNeedsLayout()
+        }
+
+        /// Allow drags that begin on a Copy/Fork button to scroll the
+        /// transcript instead of sticking on the button (UIKit's default
+        /// returns false for `UIControl`).
+        override func touchesShouldCancel(in view: UIView) -> Bool {
+            if view is UIButton { return true }
+            return super.touchesShouldCancel(in: view)
         }
 
         // MARK: Insets and keyboard
@@ -362,7 +371,13 @@
             var buttons = accessoryButtons[rowID] ?? []
             while buttons.count > accessories.count { recycle(buttons.removeLast()) }
             while buttons.count < accessories.count {
-                let button = accessoryPool.popLast() ?? TranscriptAccessoryControl()
+                let action = accessories[buttons.count].action
+                let button: TranscriptAccessoryControl
+                if let match = accessoryPool.lastIndex(where: { $0.matchesKind(of: action) }) {
+                    button = accessoryPool.remove(at: match)
+                } else {
+                    button = accessoryPool.popLast() ?? TranscriptAccessoryControl()
+                }
                 if button.superview == nil { contentView.addSubview(button) }
                 buttons.append(button)
             }

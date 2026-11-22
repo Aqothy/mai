@@ -1,6 +1,10 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 import Testing
+#if os(iOS)
+    import UIKit
+#endif
 
 @testable import mai
 
@@ -610,4 +614,101 @@ struct TranscriptControllerScrollTests {
         #expect(!controller.isFollowing)
         #expect(controller.rows.contains { $0.id == "\(messageID)#1" })
     }
+
+    @Test func staleNonReplacingSubmitDoesNotOverwriteNewerGeneration() async throws {
+        let delivered = Mutex<[RowLayoutKey]>([])
+        let queue = LayoutQueue(concurrency: 1) { result in
+            if case .layout(let layout) = result {
+                delivered.withLock { $0.append(layout.key) }
+            }
+        }
+        let style = TextStyle.current()
+        let oldKey = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
+        let newKey = RowLayoutKey(contentVersion: 0, width: 500, styleVersion: style.version)
+        let oldJob = LayoutQueue.Job(
+            id: "layout|row-0",
+            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(source: "Hello"), key: oldKey, style: style)),
+            priority: 0)
+        let newJob = LayoutQueue.Job(
+            id: "layout|row-0",
+            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(source: "Hello"), key: newKey, style: style)),
+            priority: 0)
+
+        await queue.submit(urgent: [newJob], generation: 2, replacingUrgent: true)
+        await queue.submit(urgent: [oldJob], generation: 1, replacingUrgent: false)
+
+        for _ in 0..<50 where delivered.withLock({ $0.isEmpty }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let keys = delivered.withLock { $0 }
+        #expect(keys == [newKey])
+    }
+
+    @Test func syncLayoutOfUnscheduledPendingMessageQueuesParse() async throws {
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 400, height: 200)
+        host.controller = controller
+        controller.attach(host)
+
+        let source = "First paragraph.\n\nSecond paragraph."
+        let tallUser = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(source: "Hi"), messageID: "u0", role: .user)
+        let pendingRow = TranscriptRow(
+            id: "m1#pending", sourceID: "m1", kind: .pendingMessage(source: source), messageID: "m1", role: .assistant)
+        let tailRows = (0..<30).map {
+            TranscriptRow(id: "t\($0)", sourceID: "t\($0)", kind: .userMessage(source: "Tail"), messageID: "t\($0)", role: .user)
+        }
+        // Put m1#pending at y=3000, outside both the initial end window and the
+        // top window (-400..400), so scheduleWork() never queues it.
+        var initialHeights: [String: CGFloat] = ["u0": 3000, "m1#pending": 60]
+        for row in tailRows { initialHeights[row.id] = 44 }
+        controller.setRows([tallUser, pendingRow] + tailRows, measuredHeights: initialHeights)
+        for _ in 0..<50 where controller.isAwaitingInitialEnd {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        host.readerScroll(toTop: 0)
+        controller.setHeights(["u0": 40])
+        #expect(controller.rows.contains { $0.id == "m1#pending" })
+
+        // Now m1#pending sits in the visible viewport without any reader scroll.
+        controller.layOutVisibleRows(minY: 0, maxY: 200)
+
+        for _ in 0..<50 where controller.rows.contains(where: { $0.id == "m1#pending" }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!controller.rows.contains { $0.id == "m1#pending" })
+        #expect(controller.rows.contains { $0.id == "m1#0" })
+        #expect(controller.rows.contains { $0.id == "m1#1" })
+    }
+
+    #if os(iOS)
+        private final class StubTouch: UITouch {
+            private let targetView: UIView
+            init(view: UIView) {
+                targetView = view
+                super.init()
+            }
+            override var view: UIView? { targetView }
+        }
+
+        @Test func verticalDragStartingOnAccessoryButtonScrollsTranscript() {
+            let controller = TranscriptController(configuration: .launch)
+            let scrollView = TranscriptScrollView(controller: controller)
+            let button = TranscriptAccessoryControl()
+            let touch = StubTouch(view: button)
+
+            let tap = scrollView.gestureRecognizers?
+                .compactMap { $0 as? UITapGestureRecognizer }
+                .first { $0.delegate === scrollView.tapDelegate }
+            #expect(tap != nil)
+            if let tap {
+                #expect(!scrollView.tapDelegate.gestureRecognizer(tap, shouldReceive: touch))
+            }
+            let panAcceptsButtonTouch =
+                scrollView.panGestureRecognizer.delegate?.gestureRecognizer?(
+                    scrollView.panGestureRecognizer, shouldReceive: touch) ?? true
+            #expect(panAcceptsButtonTouch)
+            #expect(scrollView.touchesShouldCancel(in: button))
+        }
+    #endif
 }

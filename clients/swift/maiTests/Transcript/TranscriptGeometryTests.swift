@@ -117,4 +117,81 @@ struct TranscriptGeometryTests {
         geometry.setHeights(["a": .nan, "b": .infinity, "absent": 500])
         #expect(geometry.totalHeight == 330)
     }
+
+    /// Expanding, shrinking, and equal-length `replaceRows` with shared
+    /// multi-block sources and duplicate IDs must match a full rebuild.
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func replaceRowsHandlesGrowthShrinkAndSharedSources(replacementCount: Int) {
+        let initialIDs = ["u0", "m0#pending", "u1", "m1#0", "m1#1", "m1#2", "dup", "dup", "tail"]
+        let initialSources = ["u0", "m0", "u1", "m1", "m1", "m1", "dup", "dup", "tail"]
+        var incremental = geometry(initialIDs, sources: initialSources, height: 40)
+        let newIDs = (0..<replacementCount).map { "m0#\($0)" }
+        let newSources = Array(repeating: "m0", count: replacementCount)
+        let newHeights = (0..<replacementCount).map { CGFloat(25 + $0 * 10) }
+
+        incremental.replaceRows(1..<3, ids: newIDs, sources: newSources, heights: newHeights)
+
+        let finalIDs = Array(initialIDs[..<1]) + newIDs + Array(initialIDs[3...])
+        let finalSources = Array(initialSources[..<1]) + newSources + Array(initialSources[3...])
+        var rebuilt = TranscriptGeometry()
+        rebuilt.replace(ids: finalIDs, sources: finalSources) { index in
+            if index >= 1, index < 1 + replacementCount { return newHeights[index - 1] }
+            return 40
+        }
+
+        #expect(incremental.totalHeight == rebuilt.totalHeight)
+        for id in Set(initialIDs + finalIDs) {
+            #expect(incremental.index(for: id) == rebuilt.index(for: id), "id \(id)")
+        }
+        for source in Set(initialSources + finalSources) {
+            let saved = TranscriptSavedPlace(
+                anchorID: "missing", offsetIntoRow: 0, source: source, offsetIntoSource: 10, expandedTurnIDs: [])
+            #expect(incremental.offset(for: saved) == rebuilt.offset(for: saved), "source \(source)")
+        }
+    }
+
+    /// Pure insertion (`range.isEmpty`), multi-message batch expansion past
+    /// `oldEnd`, and equal-length replacement dropping the first row of a
+    /// shared source must all preserve exact `index` and `sourceStarts`.
+    @Test func replaceRowsHandlesInsertionsMultiMessageBatchAndEqualDeltaSharedSource() {
+        func verify(_ incremental: TranscriptGeometry, matches ids: [String], sources: [String], heights: [CGFloat]) {
+            var rebuilt = TranscriptGeometry()
+            rebuilt.replace(ids: ids, sources: sources) { heights[$0] }
+            #expect(incremental.totalHeight == rebuilt.totalHeight)
+            for id in Set(ids) {
+                #expect(incremental.index(for: id) == rebuilt.index(for: id), "id \(id)")
+            }
+            for source in Set(sources) {
+                let saved = TranscriptSavedPlace(
+                    anchorID: "missing", offsetIntoRow: 0, source: source, offsetIntoSource: 5, expandedTurnIDs: [])
+                #expect(incremental.offset(for: saved) == rebuilt.offset(for: saved), "source \(source)")
+            }
+        }
+
+        // 1. Pure insertion (range.isEmpty) of a multi-block source.
+        var g1 = geometry(["u0", "u1", "tail"], sources: ["u0", "u1", "tail"], height: 40)
+        g1.replaceRows(2..<2, ids: ["m#0", "m#1", "m#2"], sources: ["m", "m", "m"], heights: [30, 35, 45])
+        verify(
+            g1, matches: ["u0", "u1", "m#0", "m#1", "m#2", "tail"],
+            sources: ["u0", "u1", "m", "m", "m", "tail"], heights: [40, 40, 30, 35, 45, 40])
+
+        // 2. Multi-message batch expansion pushing a second multi-block source past oldEnd.
+        var g2 = geometry(["u0", "m0#p", "u1", "m1#p", "tail"], sources: ["u0", "m0", "u1", "m1", "tail"], height: 40)
+        g2.replaceRows(
+            1..<4,
+            ids: ["m0#0", "m0#1", "m0#2", "u1", "m1#0", "m1#1", "m1#2"],
+            sources: ["m0", "m0", "m0", "u1", "m1", "m1", "m1"],
+            heights: [20, 25, 30, 40, 22, 26, 32])
+        verify(
+            g2, matches: ["u0", "m0#0", "m0#1", "m0#2", "u1", "m1#0", "m1#1", "m1#2", "tail"],
+            sources: ["u0", "m0", "m0", "m0", "u1", "m1", "m1", "m1", "tail"],
+            heights: [40, 20, 25, 30, 40, 22, 26, 32, 40])
+
+        // 3. Equal-length replacement (delta == 0) removing the first row of a shared source.
+        var g3 = geometry(["u0", "m0#0", "m0#1", "tail"], sources: ["u0", "m0", "m0", "tail"], height: 40)
+        g3.replaceRows(1..<2, ids: ["n"], sources: ["n"], heights: [50])
+        verify(
+            g3, matches: ["u0", "n", "m0#1", "tail"],
+            sources: ["u0", "n", "m0", "tail"], heights: [40, 50, 40, 40])
+    }
 }
