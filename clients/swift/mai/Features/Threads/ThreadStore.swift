@@ -88,6 +88,14 @@ final class ThreadStore {
         noteSelectedSessionChanged(selectedThreadID)
     }
 
+    func savedTranscriptPlace(for threadID: String) -> TranscriptSavedPlace? {
+        sessionsByID[threadID]?.savedTranscriptPlace
+    }
+
+    func setSavedTranscriptPlace(_ place: TranscriptSavedPlace?, for threadID: String) {
+        sessionsByID[threadID]?.savedTranscriptPlace = place
+    }
+
     private let rpc: any ThreadRPCClient
     private let connection: RPCConnectionCoordinator
     /// Chats a read command is on its way for, so a burst of updates sends

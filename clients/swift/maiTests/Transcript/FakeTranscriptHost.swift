@@ -66,6 +66,12 @@ final class FakeTranscriptHost: TranscriptViewportHost {
 
     func readerScroll(toTop top: CGFloat) { readerScroll(toOffset: top - topInset) }
 
+    /// Simulates AppKit detaching a document view from its clip view (viewport
+    /// becomes nil and viewportTop falls back to 0 without sending a scroll).
+    func resetOffsetForDetachedClip() {
+        offset = 0
+    }
+
     func setInsets(top: CGFloat, bottom: CGFloat) {
         moved {
             topInset = top

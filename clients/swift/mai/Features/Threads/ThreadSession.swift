@@ -26,6 +26,9 @@ struct ThreadSession {
     /// Incremental section projection for the chat timeline. Every turn
     /// change below invalidates it; the chat projects lazily in `body`.
     var timelineProjection = ChatTimelineProjection()
+    /// Saved reading place for the new transcript engine for this app run;
+    /// nil when following the end and removed when the thread is deleted.
+    var savedTranscriptPlace: TranscriptSavedPlace?
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
     /// Events that arrived while the snapshot was on its way.

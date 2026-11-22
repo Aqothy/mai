@@ -13,6 +13,9 @@ extension TranscriptController {
         self.store = store
         self.threadID = threadID
         openStarted = .now
+        if let saved = store.savedTranscriptPlace(for: threadID) {
+            restoreSavedPlace(saved)
+        }
         observeStore()
         // Rule 9's readiness waits at most a second; check again then even
         // if nothing else arrives.
@@ -160,7 +163,7 @@ extension TranscriptController {
             let text = stream.currentText
             guard stream.isFinishing || stream.releasedLength < text.utf8.count else { continue }
             let shown = stream.releasedLength
-            let released = String(stream.release(text, reducesMotion: reducesMotion))
+            let released = String(stream.release(text, reducesMotion: reducesMotion || isAwaitingInitialEnd))
             guard stream.isFinishing || stream.releasedLength > shown else { continue }
             stream.isInFlight = true
             streams[messageID] = stream
@@ -263,6 +266,7 @@ extension TranscriptController {
             measuredKeys[id] = key
             if let drawn = row.drawn { streamedBands[id] = (layout, drawn) }
         }
+        if isAwaitingInitialEnd { alignInitialEndIfPossible() }
         if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),
             let length = selectableLength(ofRowAt: index), var selection
         {

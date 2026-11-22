@@ -178,6 +178,24 @@ nonisolated struct TranscriptGeometry {
         return nil
     }
 
+    /// Where a saved place from an earlier session of this thread is now.
+    /// Matches by row ID first, then by source ID (for example a message still
+    /// represented as `.pendingMessage` before initial parse). Nil if neither
+    /// exists in the loaded rows.
+    func offset(for saved: TranscriptSavedPlace) -> CGFloat? {
+        if let index = indices[saved.anchorID] {
+            return prefix(index) + min(saved.offsetIntoRow, heights[index])
+        }
+        if let start = sourceStarts[saved.source] {
+            let startY = prefix(start)
+            // Stay strictly inside the source so an under-estimated `.pendingMessage`
+            // still overlaps the initial viewport and gets parsed before reveal.
+            let span = sourceEnd(from: start) - startY
+            return startY + min(saved.offsetIntoSource, max(0, span - 1))
+        }
+        return nil
+    }
+
     // MARK: Internals
 
     /// Rows are at least a point tall, so every row has a place to anchor.

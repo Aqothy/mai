@@ -42,6 +42,12 @@ struct TranscriptChatView: View {
             }
         }
         .onAppear { controller.start(store: store, threadID: threadID) }
+        .onDisappear { controller.persistSavedPlace() }
+        .onChange(of: controller.isEndVisible, initial: true) { _, isEndVisible in
+            if scrollState.isNearBottom != isEndVisible {
+                scrollState.isNearBottom = isEndVisible
+            }
+        }
         .onChange(of: scrollState.bottomScrollRequest) { _, request in
             controller.jumpToEnd(animated: request.animated)
         }

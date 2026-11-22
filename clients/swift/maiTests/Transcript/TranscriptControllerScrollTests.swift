@@ -335,4 +335,279 @@ struct TranscriptControllerScrollTests {
         #expect(host.viewportTop == 1_000)
         #expect(controller.isFollowing)
     }
+
+    // MARK: Rule 9: preserving scroll position across thread switches
+
+    @Test func savedPlaceIsNilWhileFollowingOrBeforeInitialAlignment() {
+        let (controller, host) = make()
+        #expect(controller.savedPlace() == nil)
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        #expect(controller.isFollowing)
+        #expect(controller.savedPlace() == nil)
+
+        host.readerScroll(toTop: 340)
+        let saved = controller.savedPlace()
+        #expect(saved?.anchorID == "row-3")
+        #expect(saved?.offsetIntoRow == 40)
+    }
+
+    @Test func restoringSavedPlaceLandsAtRowUnfollowedAndAnchorsOffscreenHeightChanges() throws {
+        let (first, firstHost) = make()
+        first.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        firstHost.readerScroll(toTop: 340)
+        let saved = try #require(first.savedPlace())
+
+        let second = TranscriptController(configuration: .testing)
+        let secondHost = FakeTranscriptHost()
+        secondHost.size = CGSize(width: 300, height: 200)
+        secondHost.controller = second
+        second.restoreSavedPlace(saved)
+        second.attach(secondHost)
+        second.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+
+        #expect(secondHost.isContentVisible)
+        #expect(secondHost.viewportTop == 340)
+        #expect(!second.isFollowing)
+        #expect(!second.isEndVisible)
+
+        // Background height measurement above the restored row must keep the
+        // reader's visible row pinned in place.
+        second.setHeights(["row-0": 220])
+        #expect(secondHost.viewportTop == 460)
+    }
+
+    @Test func restoringSavedPlaceMatchesBySourceIDBeforeMessageIsParsed() {
+        let saved = TranscriptSavedPlace(
+            anchorID: "msg-1#2", offsetIntoRow: 30, source: "msg-1", offsetIntoSource: 230,
+            expandedTurnIDs: [])
+        let controller = TranscriptController(configuration: .testing)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 300, height: 200)
+        host.controller = controller
+        controller.restoreSavedPlace(saved)
+        controller.attach(host)
+
+        // Initially msg-1 is represented by its pending row sharing sourceID.
+        controller.setRows(
+            rows(["user-0", "msg-1#pending", "tail"], sources: ["user-0", "msg-1", "tail"]),
+            measuredHeights: ["user-0": 200, "msg-1#pending": 500, "tail": 400])
+        #expect(host.viewportTop == 430)
+        #expect(!controller.isFollowing)
+        #expect(!controller.isEndVisible)
+    }
+
+    @Test func restoringSavedPlaceFallsBackToEndWhenRowNoLongerExists() {
+        let saved = TranscriptSavedPlace(
+            anchorID: "deleted-row", offsetIntoRow: 20, source: "deleted-source", offsetIntoSource: 20,
+            expandedTurnIDs: [])
+        let controller = TranscriptController(configuration: .testing)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 300, height: 200)
+        host.controller = controller
+        controller.restoreSavedPlace(saved)
+        controller.attach(host)
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+
+        #expect(host.viewportTop == 800)
+        #expect(controller.isFollowing)
+        #expect(controller.isEndVisible)
+    }
+
+    @Test func jumpToEndBeforeInitialAlignmentOverridesPendingRestorePlace() {
+        let saved = TranscriptSavedPlace(
+            anchorID: "row-2", offsetIntoRow: 10, source: "row-2", offsetIntoSource: 10,
+            expandedTurnIDs: [])
+        let controller = TranscriptController(configuration: .testing)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 300, height: 200)
+        host.controller = controller
+        controller.restoreSavedPlace(saved)
+        controller.attach(host)
+        controller.jumpToEnd(animated: false)
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+
+        #expect(host.viewportTop == 800)
+        #expect(controller.isFollowing)
+        #expect(controller.isEndVisible)
+    }
+
+    @Test func threadStoreSessionPreservesAndClearsSavedPlaceAcrossSwitches() {
+        let thread = ChatSyntheticBenchmarkThread.thread(turnCount: 10)
+        let store = ThreadStore(previewThreads: [thread.summary], selectedThread: thread)
+
+        // First open: scroll away from the end and detach.
+        let first = TranscriptController(configuration: .testing)
+        let firstHost = FakeTranscriptHost()
+        firstHost.size = CGSize(width: 300, height: 200)
+        firstHost.controller = first
+        first.attach(firstHost)
+        first.start(store: store, threadID: thread.id)
+        #expect(!first.rows.isEmpty)
+        firstHost.readerScroll(toTop: 250)
+        let expectedAnchor = first.savedPlace()
+        #expect(expectedAnchor != nil)
+        first.detach(firstHost)
+        #expect(store.savedTranscriptPlace(for: thread.id) == expectedAnchor)
+
+        // Reopen before initial alignment finishes and detach: must not erase
+        // the saved place.
+        let aborted = TranscriptController(configuration: .testing)
+        let abortedHost = FakeTranscriptHost()
+        abortedHost.size = .zero
+        abortedHost.controller = aborted
+        aborted.attach(abortedHost)
+        aborted.start(store: store, threadID: thread.id)
+        aborted.detach(abortedHost)
+        #expect(store.savedTranscriptPlace(for: thread.id) == expectedAnchor)
+
+        // Reopen with a real viewport: restores the saved scroll position.
+        let reopened = TranscriptController(configuration: .testing)
+        let reopenedHost = FakeTranscriptHost()
+        reopenedHost.size = CGSize(width: 300, height: 200)
+        reopenedHost.controller = reopened
+        reopened.attach(reopenedHost)
+        reopened.start(store: store, threadID: thread.id)
+        #expect(!reopened.isFollowing)
+        #expect(!reopened.isEndVisible)
+        #expect(abs(reopenedHost.viewportTop - 250) < 1)
+
+        // Jumping back to the end and detaching clears the saved place.
+        reopened.jumpToEnd(animated: false)
+        reopened.detach(reopenedHost)
+        #expect(store.savedTranscriptPlace(for: thread.id) == nil)
+    }
+
+    @Test func restoringIntoUnderestimatedPendingMessageStaysInsideSourceAndWaitsForParse() {
+        // offsetIntoSource (800) exceeds the estimated pending height (200);
+        // target must remain strictly inside msg-1#pending, not skip onto tail.
+        let saved = TranscriptSavedPlace(
+            anchorID: "msg-1#2", offsetIntoRow: 50, source: "msg-1", offsetIntoSource: 800,
+            expandedTurnIDs: [])
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 300, height: 200)
+        host.controller = controller
+        controller.restoreSavedPlace(saved)
+        controller.attach(host)
+        controller.setRows(
+            [
+                TranscriptRow(id: "user-0", sourceID: "user-0", kind: .notice(title: "u", text: nil)),
+                TranscriptRow(
+                    id: "msg-1#pending", sourceID: "msg-1", kind: .pendingMessage(source: "hello"),
+                    messageID: "msg-1", role: .assistant),
+                TranscriptRow(id: "tail", sourceID: "tail", kind: .notice(title: "t", text: nil)),
+            ],
+            measuredHeights: ["user-0": 100, "msg-1#pending": 200, "tail": 400])
+
+        let target = controller.initialTargetTop(TranscriptViewport(size: host.size, topInset: 0, bottomInset: 0))
+        #expect(target.restored)
+        #expect(target.top == 299)
+        #expect(controller.isAwaitingInitialEnd)
+        #expect(!controller.isEndScreenReady(TranscriptViewport(size: host.size, topInset: 0, bottomInset: 0)))
+    }
+
+    @Test func restoringPlaceNowNearEndResumesFollowingInsteadOfWedging() throws {
+        let (first, firstHost) = make(size: CGSize(width: 300, height: 200))
+        first.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        // Scroll slightly above the bottom (endTop = 800, top = 740 -> 60 pt away).
+        firstHost.readerScroll(toTop: 740)
+        let saved = try #require(first.savedPlace())
+
+        // Reopen in a taller viewport where row-7 + 40 is now at/past endTop (600).
+        let second = TranscriptController(configuration: .testing)
+        let secondHost = FakeTranscriptHost()
+        secondHost.size = CGSize(width: 300, height: 400)
+        secondHost.controller = second
+        second.restoreSavedPlace(saved)
+        second.attach(secondHost)
+        second.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+
+        #expect(secondHost.viewportTop == 600)
+        #expect(second.isEndVisible)
+        #expect(second.isFollowing)
+        // New content must continue to follow automatically.
+        second.setHeights(["row-9": 300])
+        #expect(secondHost.viewportTop == 800)
+    }
+
+    @Test func animatedJumpDuringInitialAlignmentDoesNotYankViewportAfterReveal() {
+        let saved = TranscriptSavedPlace(
+            anchorID: "row-1", offsetIntoRow: 20, source: "row-1", offsetIntoSource: 20,
+            expandedTurnIDs: [])
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.animatesJumps = true
+        host.size = CGSize(width: 300, height: 200)
+        host.controller = controller
+        controller.restoreSavedPlace(saved)
+        controller.attach(host)
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        #expect(controller.isAwaitingInitialEnd)
+
+        controller.jumpToEnd(animated: true)
+        #expect(controller.endJump == nil)
+        #expect(controller.pendingRestorePlace == nil)
+        #expect(host.viewportTop == 800)
+    }
+
+    @Test func detachingWithNilViewportPreservesBaselineScrollPosition() {
+        let (controller, host) = make()
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        host.readerScroll(toTop: 340)
+
+        // Simulate AppKit removing the document from its clip view before detach:
+        // viewport becomes nil and viewportTop reads 0.
+        host.size = .zero
+        host.resetOffsetForDetachedClip()
+        controller.detach(host)
+
+        let saved = controller.savedPlace()
+        #expect(saved?.anchorID == "row-3")
+        #expect(saved?.offsetIntoRow == 40)
+    }
+
+    @Test func restoringIntoActiveStreamWaitsUntilStreamProducesRows() async throws {
+        let turnID = "turn-live"
+        let entryRef = "assistant-1"
+        let messageID = "\(turnID)|\(entryRef)"
+        let liveText = Array(repeating: "Paragraph text with enough content to span multiple blocks.", count: 8)
+            .joined(separator: "\n\n")
+        let summary = ThreadFixtures.summary(
+            id: "live-thread", title: "Live", cwd: "/tmp", agent: ("a", "A"), status: .running,
+            createdAt: .now, updatedAt: .now)
+        let turn = ThreadFixtures.turn(
+            id: turnID, participant: summary.participants[0].id, state: .running, startedAt: .now, settledAt: nil,
+            entries: [
+                ThreadFixtures.entry(ref: "user-1", kind: .userMessage, text: "Hello"),
+                ThreadFixtures.entry(ref: entryRef, kind: .assistantMessage, text: liveText),
+            ])
+        let detail = ThreadFixtures.detail(summary: summary, turns: [turn])
+        let store = ThreadStore(previewThreads: [summary], selectedThread: detail)
+        let saved = TranscriptSavedPlace(
+            anchorID: "\(messageID)#1", offsetIntoRow: 10, source: messageID, offsetIntoSource: 80,
+            expandedTurnIDs: [])
+        store.setSavedTranscriptPlace(saved, for: detail.id)
+
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 400, height: 200)
+        host.controller = controller
+        controller.attach(host)
+        controller.start(store: store, threadID: detail.id)
+
+        // Before the stream worker finishes its first run, initial alignment
+        // must wait rather than discard the saved place and snap to the end.
+        #expect(controller.isAwaitingInitialEnd)
+        #expect(controller.pendingRestorePlace == saved)
+        #expect(!controller.isEndScreenReady(TranscriptViewport(size: host.size, topInset: 0, bottomInset: 0)))
+
+        // Driving one frame tick releases the already-received text in one shot.
+        controller.frameDidTick()
+        for _ in 0..<50 where controller.isAwaitingInitialEnd {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!controller.isAwaitingInitialEnd)
+        #expect(!controller.isFollowing)
+        #expect(controller.rows.contains { $0.id == "\(messageID)#1" })
+    }
 }

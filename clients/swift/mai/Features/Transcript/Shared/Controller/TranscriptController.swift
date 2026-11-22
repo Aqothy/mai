@@ -55,6 +55,9 @@ final class TranscriptController {
     /// The place to restore when the chat is shown again (rule 9).
     @ObservationIgnored private var detachedPlace: ReadingPlace?
     @ObservationIgnored private var detachedTop: CGFloat = 0
+    /// Saved place from a previous session of this thread, applied on initial
+    /// alignment instead of landing at the end.
+    @ObservationIgnored var pendingRestorePlace: TranscriptSavedPlace?
     /// An animated jump to the end (rule 7, iOS): when it started and how
     /// far from the end the viewport was.
     @ObservationIgnored private(set) var endJump: (start: ContinuousClock.Instant, distance: CGFloat)?
@@ -182,8 +185,9 @@ final class TranscriptController {
             endJump = nil
             move(to: endTop(viewport))
         }
-        detachedTop = host.viewportTop
+        detachedTop = host.viewport != nil ? host.viewportTop : baselineTop
         detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
+        persistSavedPlace()
         host.setNeedsFrameUpdates(false)
         self.host = nil
     }
@@ -203,6 +207,8 @@ final class TranscriptController {
             if viewport.size.width != last.size.width { widthDidChange(viewport.size.width) }
             if endJump != nil {
                 stepEndJump()
+            } else if isAwaitingInitialEnd {
+                move(to: initialTargetTop(viewport).top)
             } else {
                 move(to: isFollowingEnd ? endTop(viewport) : baselineTop)
             }
@@ -348,6 +354,8 @@ final class TranscriptController {
                 // Keep stepping the animated jump toward the newly grown end
                 // instead of snapping and oscillating back on the next tick.
                 stepEndJump()
+            } else if isAwaitingInitialEnd {
+                move(to: initialTargetTop(viewport).top)
             } else if follows {
                 move(to: endTop(viewport))
             } else {
@@ -365,9 +373,17 @@ final class TranscriptController {
     /// Send and the jump button (rule 7). Animated where the host animates
     /// jumps (iOS: 0.3 s, cubic ease-out); the Mac jumps at once.
     func jumpToEnd(animated: Bool) {
+        pendingRestorePlace = nil
         follow.noteJumpToEnd()
         endJump = nil
         guard let host, let viewport = host.viewport else { return }
+        if isAwaitingInitialEnd {
+            move(to: endTop(viewport))
+            scheduleWork()
+            alignInitialEndIfPossible()
+            updateFrameUpdates()
+            return
+        }
         let distance = endTop(viewport) - host.viewportTop
         guard animated, host.animatesJumps, abs(distance) > ScrollFollowPolicy.minimumMovement else {
             move(to: endTop(viewport))
@@ -438,8 +454,43 @@ final class TranscriptController {
         isAdjusting = wasAdjusting
     }
 
+    /// Compact reading place to persist across thread switches; nil while
+    /// following the end or before initial alignment has shown the transcript.
+    func savedPlace() -> TranscriptSavedPlace? {
+        guard !isAwaitingInitialEnd, !follow.isFollowing, !geometry.isEmpty else { return nil }
+        let top = host.map { $0.viewport != nil ? $0.viewportTop : baselineTop } ?? detachedTop
+        guard let place = geometry.readingPlace(atViewportTop: top) else { return nil }
+        return TranscriptSavedPlace(
+            anchorID: place.anchorID, offsetIntoRow: place.offsetIntoRow, source: place.source,
+            offsetIntoSource: place.offsetIntoSource, expandedTurnIDs: expandedTurnIDs)
+    }
+
+    /// Configures initial alignment to reopen at `saved` instead of the end.
+    func restoreSavedPlace(_ saved: TranscriptSavedPlace) {
+        guard isAwaitingInitialEnd else { return }
+        expandedTurnIDs = saved.expandedTurnIDs
+        pendingRestorePlace = saved
+    }
+
+    /// Saves the reader's position into the store's session cache if this
+    /// transcript has already shown. Never overwrites a saved place while still
+    /// hidden waiting for initial alignment.
+    func persistSavedPlace() {
+        guard let store, let threadID, !isAwaitingInitialEnd else { return }
+        store.setSavedTranscriptPlace(savedPlace(), for: threadID)
+    }
+
+    /// Where initial alignment wants the viewport: the restored saved place if
+    /// its row or source still exists, otherwise the end.
+    func initialTargetTop(_ viewport: TranscriptViewport) -> (top: CGFloat, restored: Bool) {
+        if let saved = pendingRestorePlace, let offset = geometry.offset(for: saved) {
+            return (min(max(0, offset), endTop(viewport)), true)
+        }
+        return (endTop(viewport), false)
+    }
+
     private func updateEndVisibility() {
-        guard let host, let viewport = host.viewport, !geometry.isEmpty else {
+        guard let host, let viewport = host.viewport, !geometry.isEmpty, !isAwaitingInitialEnd else {
             if !isEndVisible { isEndVisible = true }
             return
         }
@@ -448,16 +499,24 @@ final class TranscriptController {
         follow.noteEndVisible(visible)
     }
 
-    /// Rule 9: lands the first rows on the end once they and a viewport
-    /// exist and the rows on the end screen are laid out, then shows them.
+    /// Rule 9: lands the first rows on the end (or restored saved place) once
+    /// they and a viewport exist and the visible screen is laid out, then shows
+    /// them.
     func alignInitialEndIfPossible() {
         guard isAwaitingInitialEnd, let host, let viewport = host.viewport, viewport.visibleHeight > 0,
             !geometry.isEmpty, isEndScreenReady(viewport)
         else { return }
-        move(to: endTop(viewport))
+        let target = initialTargetTop(viewport)
+        if target.restored, !isNearEnd(top: target.top, viewport) {
+            follow.note(.awayFromEnd)
+        }
+        pendingRestorePlace = nil
+        endJump = nil
         isAwaitingInitialEnd = false
+        move(to: target.top)
         host.setContentVisible(true)
         host.setNeedsRowPlacement()
+        updateFrameUpdates()
         transcriptDidShow()
     }
 }

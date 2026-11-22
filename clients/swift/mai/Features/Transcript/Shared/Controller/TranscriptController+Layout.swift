@@ -162,13 +162,21 @@ extension TranscriptController {
     func scheduleWork() {
         guard configuration.laysOutRows, columnWidth > 0, let viewport = host?.viewport ?? lastViewport else { return }
         let screen = max(1, viewport.visibleHeight)
-        let top = isAwaitingInitialEnd ? endTop(viewport) : viewportTop
+        let top = isAwaitingInitialEnd ? initialTargetTop(viewport).top : viewportTop
         let downward = top >= lastScheduledTop
         lastScheduledTop = top
         let minY = top - (downward ? 1 : 2) * screen
         let maxY = top + screen + (downward ? 2 : 1) * screen
         var jobs: [LayoutQueue.Job] = []
-        if let range = geometry.indices(overlapping: max(0, minY), maxY) {
+        let overlapping = geometry.indices(overlapping: max(0, minY), maxY)
+        if isAwaitingInitialEnd, let saved = pendingRestorePlace, geometry.index(for: saved.anchorID) == nil,
+            let pendingIndex = geometry.index(for: "\(saved.source)#pending"),
+            !(overlapping?.contains(pendingIndex) ?? false),
+            let pendingJob = job(for: pendingIndex, priority: 0)
+        {
+            jobs.append(pendingJob)
+        }
+        if let range = overlapping {
             for index in range {
                 let distance = Int(abs(geometry.offset(at: index) - top))
                 if let job = job(for: index, priority: distance) { jobs.append(job) }
@@ -430,19 +438,27 @@ extension TranscriptController {
     private func keptWindow() -> ClosedRange<CGFloat>? {
         guard let viewport = host?.viewport ?? lastViewport else { return nil }
         let screen = max(1, viewport.visibleHeight)
-        let top = isAwaitingInitialEnd ? endTop(viewport) : viewportTop
+        let top = isAwaitingInitialEnd ? initialTargetTop(viewport).top : viewportTop
         return (top - 2 * screen)...(top + 3 * screen)
     }
 
-    /// Rule 9's readiness: the rows on the end screen are parsed and laid out
-    /// at the current key. Waits at most a second; after that the host lays
-    /// the screen out itself rather than stay blank.
+    /// Rule 9's readiness: the rows on the initial screen (the end, or a
+    /// restored saved place) are parsed and laid out at the current key. Waits
+    /// at most a second; after that the host lays the screen out itself rather
+    /// than stay blank.
     func isEndScreenReady(_ viewport: TranscriptViewport) -> Bool {
         guard configuration.laysOutRows else { return true }
         guard columnWidth > 0 else { return false }
         if openStarted.duration(to: .now) > .seconds(1) { return true }
-        let top = max(0, endTop(viewport) - viewport.topInset)
-        guard let range = geometry.indices(overlapping: top, endTop(viewport) + viewport.visibleHeight) else {
+        if let saved = pendingRestorePlace, geometry.index(for: saved.anchorID) == nil {
+            if geometry.index(for: "\(saved.source)#pending") != nil { return false }
+            if let stream = streams[saved.source], stream.shownLength < stream.currentText.utf8.count {
+                return false
+            }
+        }
+        let target = initialTargetTop(viewport).top
+        let top = max(0, target - viewport.topInset)
+        guard let range = geometry.indices(overlapping: top, target + viewport.visibleHeight) else {
             return true
         }
         for index in range {
