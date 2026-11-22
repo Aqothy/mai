@@ -52,6 +52,15 @@ struct IOSAppContainer: View {
                 }
             }
         }
+        // NavigationStack's path is the sole owner of iOS thread selection.
+        // Driving selection from the path instead of destination onDisappear
+        // avoids a delayed pop completion clearing a freshly re-pushed thread.
+        .onChange(of: path, initial: true) { _, newPath in
+            let target = IOSNavigationRoute.selectedThreadID(in: newPath)
+            if store.selectedThreadID != target {
+                store.selectThread(target)
+            }
+        }
         #if DEBUG
             .modifier(
                 ChatRealThreadBenchmarkRunner(

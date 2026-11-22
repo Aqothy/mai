@@ -36,29 +36,6 @@ struct IOSChatDestinationView: View {
                 EmptyView()
             }
         }
-        // Thread-list routes normally publish their selection before
-        // navigation so the bounded initial page is ready on arrival. The
-        // task remains the fallback for restored routes and owns new-draft
-        // selection after the destination appears.
-        .task(id: route) {
-            switch route {
-            case .newChat:
-                store.selectThread(nil)
-            case .thread(let threadID):
-                guard store.selectedThreadID != threadID else { return }
-                store.selectThread(threadID)
-            case .agentRegistry, .sessionImport:
-                break
-            }
-        }
-        // Going back leaves the chat: what finishes in it afterwards is
-        // unread. A chat pushed on top selects itself first, so this is a
-        // no-op then.
-        .onDisappear {
-            if case .thread(let threadID) = route, store.selectedThreadID == threadID {
-                store.selectThread(nil)
-            }
-        }
     }
 }
 
