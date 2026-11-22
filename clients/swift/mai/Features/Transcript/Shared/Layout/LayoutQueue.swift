@@ -2,16 +2,15 @@ import CoreGraphics
 import Foundation
 
 /// Background layout for one transcript (PLAN 4.2): parses messages, lays
-/// rows out, measures off-screen rows and highlights code, nearest to the
-/// viewport first, on a few tasks at once. Urgent work (the viewport and what
-/// scrolls in next) always goes before the background sweep that measures the
-/// rest of the history. Results reach the controller as values; Core Text
-/// objects never leave the task that made them.
+/// rows out, and measures off-screen rows, nearest to the viewport first, on a
+/// few tasks at once. Urgent work (the viewport and what scrolls in next)
+/// always goes before the background sweep that measures the rest of the
+/// history. Results reach the controller as values; Core Text objects never
+/// leave the task that made them.
 actor LayoutQueue {
     enum Work: Sendable {
         case layout(RowLayoutRequest)
         case measure(RowLayoutRequest)
-        case highlight(RowLayoutRequest, code: String, language: String?, isDark: Bool)
         case parse(messageID: String, source: String)
         /// Off-screen background sweep: parses a pending message and measures
         /// every resulting block's height in one worker job.
@@ -26,8 +25,8 @@ actor LayoutQueue {
             messageID: String, source: String, blocks: [MarkdownBlock], width: CGFloat, styleVersion: Int,
             heights: [CGFloat])
 
-        /// Urgent results (viewport layouts, parses, highlights) drain on the
-        /// next main-actor turn; background-sweep results coalesce into batches.
+        /// Urgent results (viewport layouts, parses) drain on the next
+        /// main-actor turn; background-sweep results coalesce into batches.
         var isUrgent: Bool {
             switch self {
             case .layout, .parsed: true
@@ -50,9 +49,7 @@ actor LayoutQueue {
     /// Background ids in the order to run them; stale ids are skipped.
     private var backgroundOrder: [String] = []
     private var backgroundCursor = 0
-    private var highlights: [String: Job] = [:]
     private var running: Set<String> = []
-    private var isHighlighting = false
     private let concurrency: Int
     private let deliver: @Sendable (Result) -> Void
 
@@ -70,12 +67,8 @@ actor LayoutQueue {
             urgent.removeAll(keepingCapacity: true)
         }
         for job in jobs {
-            if case .highlight = job.work {
-                highlights[job.id] = job
-            } else {
-                urgent[job.id] = job
-                background[job.id] = nil
-            }
+            urgent[job.id] = job
+            background[job.id] = nil
         }
         pump()
     }
@@ -95,14 +88,6 @@ actor LayoutQueue {
             Task.detached(priority: isUrgent ? .userInitiated : .utility) { [weak self] in
                 let result = Self.perform(job.work)
                 await self?.finish(job.id, result)
-            }
-        }
-        if !isHighlighting, let job = highlights.values.min(by: { $0.priority < $1.priority }) {
-            highlights[job.id] = nil
-            isHighlighting = true
-            Task.detached(priority: .userInitiated) { [weak self] in
-                let result = await Self.highlight(job.work)
-                await self?.finishHighlight(result)
             }
         }
     }
@@ -135,12 +120,6 @@ actor LayoutQueue {
         pump()
     }
 
-    private func finishHighlight(_ result: Result?) {
-        isHighlighting = false
-        if let result { deliver(result) }
-        pump()
-    }
-
     private nonisolated static func perform(_ work: Work) -> Result? {
         switch work {
         case .layout(let request):
@@ -162,17 +141,6 @@ actor LayoutQueue {
             return .parsedAndMeasured(
                 messageID: messageID, source: source, blocks: blocks, width: width, styleVersion: style.version,
                 heights: heights)
-        case .highlight:
-            return nil
         }
-    }
-
-    private nonisolated static func highlight(_ work: Work) async -> Result? {
-        guard case .highlight(var request, let code, let language, let isDark) = work,
-            let colors = await CodeHighlightColors.colors(code: code, language: language, isDark: isDark)
-        else { return nil }
-        request.codeColors = colors
-        request.previous = nil
-        return .layout(RowLayoutBuilder.layout(request))
     }
 }

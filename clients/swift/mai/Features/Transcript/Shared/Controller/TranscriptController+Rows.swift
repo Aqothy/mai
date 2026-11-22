@@ -277,11 +277,6 @@ extension TranscriptController {
             self.selection = selection
             host?.setNeedsSelectionDisplay()
         }
-        // Code the stream closed (or the end of the turn did) gets its
-        // colors; the open block stays plain until then.
-        submitHighlights(forRowIDs: newRows.compactMap { row in
-            if case .markdownBlock(.code, _) = row.kind { row.id } else { nil }
-        })
         host?.setNeedsRowPlacement()
     }
 

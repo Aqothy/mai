@@ -40,20 +40,6 @@ extension TranscriptController {
         return colors
     }
 
-    /// Highlights for the code rows among `rowIDs` whose colors are not
-    /// for their current code and theme.
-    func submitHighlights(forRowIDs rowIDs: some Sequence<String>) {
-        let jobs = rowIDs.compactMap { id in
-            geometry.index(for: id).flatMap { index in
-                highlightJob(
-                    for: index, priority: Int(abs(geometry.offset(at: index) - viewportTop)), within: nil)
-            }
-        }
-        guard !jobs.isEmpty else { return }
-        let generation = urgentGeneration
-        Task { await queue.submit(urgent: jobs, generation: generation, replacingUrgent: false) }
-    }
-
     // MARK: For the host
 
     /// The layout to show for row `index`: the current one, an older one
@@ -180,9 +166,6 @@ extension TranscriptController {
             for index in range {
                 let distance = Int(abs(geometry.offset(at: index) - top))
                 if let job = job(for: index, priority: distance) { jobs.append(job) }
-                if let job = highlightJob(for: index, priority: distance, within: top - screen...(top + 2 * screen)) {
-                    jobs.append(job)
-                }
             }
         }
         dropLayouts(outside: (top - 2 * screen)...(top + 3 * screen))
@@ -199,34 +182,6 @@ extension TranscriptController {
         }
         guard layouts[row.id]?.key != currentKey(row) else { return nil }
         return LayoutQueue.Job(id: "layout|\(row.id)", work: .layout(request(row)), priority: priority)
-    }
-
-    private func highlightJob(
-        for index: Int, priority: Int, within window: ClosedRange<CGFloat>?
-    ) -> LayoutQueue.Job? {
-        let row = rows[index]
-        guard case .markdownBlock(.code(let language, let code), _) = row.kind else { return nil }
-        if let window {
-            let frame = geometry.frame(at: index)
-            guard frame.minY < window.upperBound, frame.minY + frame.height > window.lowerBound else { return nil }
-        }
-        guard let palette, let layout = layouts[row.id], layout.key == currentKey(row),
-            let codeLayout = layout.content.codeLayout,
-            !(codeLayout.isHighlighted && codeLayout.colorsAreDark == palette.isDark),
-            !isOpenStreamTail(at: index)
-        else { return nil }
-        return LayoutQueue.Job(
-            id: "highlight|\(row.id)",
-            work: .highlight(request(row), code: code, language: language, isDark: palette.isDark),
-            priority: priority)
-    }
-
-    /// A code block a stream is still writing: highlighted once it closes
-    /// (the stream moves past it or ends), not again on every update.
-    private func isOpenStreamTail(at index: Int) -> Bool {
-        let row = rows[index]
-        guard isStreaming(row) else { return false }
-        return index + 1 == rows.count || rows[index + 1].messageID != row.messageID
     }
 
     /// Layouts are state only near the viewport; the rest are dropped so memory
@@ -305,7 +260,6 @@ extension TranscriptController {
         }
         guard !results.isEmpty else { return }
         var newlyParsed: [ParsedBatchItem] = []
-        var landedCode: [String] = []
         var heights: [String: CGFloat] = [:]
         let keep = keptWindow()
         for result in results {
@@ -340,7 +294,6 @@ extension TranscriptController {
                 let frame = geometry.frame(at: index)
                 if keep.map({ frame.minY < $0.upperBound && frame.minY + frame.height > $0.lowerBound }) ?? true {
                     layouts[layout.rowID] = layout
-                    if layout.content.codeLayout != nil { landedCode.append(layout.rowID) }
                 }
             }
         }
@@ -351,7 +304,6 @@ extension TranscriptController {
         setHeights(heights)
         host?.setNeedsRowPlacement()
         if parsedNearViewport { scheduleWork() }
-        submitHighlights(forRowIDs: landedCode)
         alignInitialEndIfPossible()
         checkWarm()
     }

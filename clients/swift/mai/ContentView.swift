@@ -43,8 +43,9 @@ struct MaiApp: App {
                 await connection.start()
             }
             .task(priority: .utility) {
-                // Off the launch path and off the main actor; the first code
-                // block a chat shows then highlights without a stall.
+                // Only warm highlight.js/JSC for the legacy transcript; the new
+                // engine renders plain code until the replacement highlighter lands.
+                guard !TranscriptEngine.isNewEngineEnabled else { return }
                 await ChatCodeHighlighter.shared.warmUp()
             }
             .onChange(of: scenePhase) {
