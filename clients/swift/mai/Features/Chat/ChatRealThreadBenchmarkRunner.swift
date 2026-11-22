@@ -84,6 +84,41 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 return
             }
         #endif
+        if ChatBenchmarkAutoRun.plan == "coldScroll",
+            let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount
+        {
+            // Insert and select a brand-new thread AFTER window pinning so
+            // scrolling starts the instant the end screen appears, with zero
+            // warmup sleep (catches background-settle main-thread freezes).
+            let identity = "synthetic-benchmark-cold"
+            let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turns, identity: identity)
+            store.insertSyntheticBenchmarkThread(thread)
+            ChatBenchmarkAutoRun.isTranscriptWarm = false
+            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+            selectThread(identity)
+            let deadline = ContinuousClock.now + .seconds(30)
+            while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+                ContinuousClock.now < deadline
+            {
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+            guard ChatBenchmarkAutoRun.isInitialAlignmentComplete else {
+                finish("invalid measurement: coldScroll initial alignment timed out")
+                return
+            }
+            _ = await benchmark.runScrollBenchmark(
+                pointsPerSecond: 3_000,
+                maximumSweepSeconds: 6,
+                label: "cold-scroll-3000pps"
+            )
+            _ = await benchmark.runScrollBenchmark(
+                pointsPerSecond: 8_000,
+                maximumSweepSeconds: 6,
+                label: "cold-fling-8000pps"
+            )
+            finish("CHAT_BENCHMARK_COMPLETE")
+            return
+        }
         // Let the initial mount settle at the bottom anchor, then wait for
         // the timeline's preparation task to finish priming every cache the
         // sweep will touch.

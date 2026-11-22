@@ -30,7 +30,7 @@ def main():
     parser.add_argument("app", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize", "sessionsRevisit", "resize"], default="scroll")
+    parser.add_argument("--plan", choices=["scroll", "coldScroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize", "sessionsRevisit", "resize"], default="scroll")
     parser.add_argument("--turns", type=int, default=300)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--scrub-period", type=float, default=0)
@@ -124,7 +124,7 @@ def main():
                     reports = [json.loads(line.removeprefix("CHAT_BENCHMARK_RESULT "))
                                for line in text.splitlines()
                                if line.startswith("CHAT_BENCHMARK_RESULT ")]
-                    expected = 11 if args.plan in ("sessionsResize", "sessionsRevisit") else 5 if args.plan == "sessions" else 3 if args.plan == "scroll" else 1
+                    expected = 11 if args.plan in ("sessionsResize", "sessionsRevisit") else 5 if args.plan == "sessions" else 3 if args.plan == "scroll" else 2 if args.plan == "coldScroll" else 1
                     if len(reports) != expected:
                         raise RuntimeError(f"Expected {expected} reports, got {len(reports)}: {log}")
                     if args.plan in ("open", "sessions", "sessionsResize", "sessionsRevisit") and any(not r.get("aligned") or not r.get("visible") for r in reports):

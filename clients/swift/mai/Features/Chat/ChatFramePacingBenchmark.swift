@@ -408,6 +408,10 @@ final class ChatBenchmarkModel {
                     let fraction = phase <= 1 ? 1 - phase : phase - 1
                     offsetY = minY + (maxY - minY) * fraction
                 } else {
+                    // Follow controller anchor shifts when rows above change
+                    // height during cold scrolling, rather than fighting them.
+                    let actualY = Self.contentOffsetY(of: scrollView)
+                    if abs(actualY - offsetY) > 1 { offsetY = actualY }
                     offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
                     offsetY = min(max(offsetY, minY), maxY)
                 }
