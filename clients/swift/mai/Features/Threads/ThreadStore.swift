@@ -1398,8 +1398,8 @@ final class ThreadStore {
         }
 
         func applySyntheticBenchmarkEvent(_ event: ThreadEvent) {
-            guard selectedThreadID == ChatSyntheticBenchmarkThread.threadID,
-                event.thread == ChatSyntheticBenchmarkThread.threadID
+            guard let selectedThreadID, selectedThreadID.hasPrefix("synthetic-benchmark-"),
+                event.thread == selectedThreadID
             else { return }
             applyThreadEvent(event)
         }

@@ -1,69 +1,49 @@
 # Chat benchmarks
 
-Both platforms render chat with a custom native transcript: a virtualized document (an `NSScrollView` document view on macOS, a `UIScrollView` that tiles its rows on iOS) showing native prepared rows for settled prose, code and tables, and hosted SwiftUI rows for interactive and live content.
-
-The benchmark fixtures and auto-run plans exist only in Debug builds. Build a signed Debug app in Xcode, then pass its product path (Products → mai.app → Show in Finder) to the scripts. Results are only comparable between builds with the same optimization settings.
-
-Run from the repository root. Quit any running copy of the app first, keep the machine unlocked and the benchmark window visible, and avoid other work during timing. Use a fresh output directory for every invocation; the scripts refuse to overwrite results.
+The benchmark fixtures and auto-run plans exist only in Debug/Profile builds (`#if DEBUG`). Build in Xcode (`mai Profile` for optimized timing), then pass the `.app` path to `benchmark-containers.py`. Compare only builds with matching optimization settings.
 
 ## macOS: `benchmark-containers.py`
 
 ```sh
-python3 clients/swift/scripts/benchmark-containers.py path/to/mai.app /tmp/chat-scroll --plan scroll --runs 3
+python3 clients/swift/scripts/benchmark-containers.py path/to/mai.app .scratch/bench/after
+python3 clients/swift/scripts/benchmark-containers.py --compare .scratch/bench/before .scratch/bench/after
 ```
+
+By default, one single app launch runs the full **`suite`** plan (~20–25s) in the **background** (`open -g`, no focus steal, App Nap disabled, `.userInitiated` + `.latencyCritical` activity):
+
+1. `open-1`, `open-2` — two cold switches to unique 1,000-turn chats (3 chats resident), measuring `visibleMilliseconds`, `settledMilliseconds`, and Mach `task_vm_info` physical footprint / peak footprint / RSS.
+2. `cold-scroll-3000pps` — immediate 3s up + 3s down sweep (0 ms warmup sleep) catching cold on-demand parse+layout, `replaceRows`, accessory reuse, and warm steady-state scroll.
+3. `cold-fling-8000pps` — 2s up + 2s down fast fling stressing `IOSurface` overscan rasterization.
+4. `stream-4000cps` — 12,000 chars @ 4,000 chars/s with exact-source verification.
+5. `stream-scroll-3000pps` — streaming @ 4,000 chars/s while scrolling at 3,000 pps.
+6. `live-resize-2s` — 1280 → 600 → 1280 width sweep over 2s with reflow lag counters.
+7. `memory-final` — end-of-suite physical footprint, peak footprint, and RSS.
 
 | `--plan` | Workload |
 |---|---|
-| `scroll` | Three automatic up/down sweeps at 1,200, 3,000 and 8,000 points/second. |
-| `stream` | Feed 20,000 characters through the production streaming reducer; verify the exact final source. |
-| `streamScroll` | Stream while scrolling at 3,000 points/second. |
-| `open` | Fixture selection to a prepared, aligned viewport (excludes process startup and network restoration). |
-| `lifecycle` | Pagination and resize anchor correctness; use with `--paginated`. |
-| `scrub` | Traverse the loaded history repeatedly; requires `--scrub-period N` (seconds per one-way traversal). |
-| `sessions` | Open five synthetic chats, retain prior sessions, sample process RSS. |
-| `sessionsResize` | Five chats, each resized through several window widths; sample RSS. |
+| `suite` (default) | Single-launch full regression suite above (~20–25s). |
+| `stream` | Standalone stream (used by `record-chat-stream.py` and stream-only profiling). |
+| `markdown` | Headless Markdown/StreamWorker replay microbenchmark (no window; add `--app-arg=-ChatMarkdownReplayExtreme --app-arg=YES` for extreme stress fixtures). |
 
 | Flag | Meaning |
 |---|---|
-| `--turns N` | Synthetic turn count, default 300. |
-| `--runs N` | Fresh app launches, default 3. |
-| `--paginated` | Load the normal recent page initially instead of the whole fixture. |
-| `--timeout N` | Seconds per launch before failure, default 300. |
-| `--scrub-period N` | Required positive for `scrub`. |
-| `--float-window` | Float the window with the AeroSpace CLI so resize plans can change its size. |
+| `--turns N` | Synthetic turn count, default 1000. |
+| `--runs N` | App launches, default 1. |
+| `--engine new\|legacy` | Transcript engine, default `new`. |
+| `--foreground` | Activate and focus the benchmark window instead of running behind active windows. |
+| `--with-chrome` | Keep sidebar, composer, and toolbar (default is transcript-only). |
+| `--compare <dirs...>` | Print summaries for saved result directories without launching the app. |
 
-Each output directory contains per-run `.json`, `.log`, `.stderr` and `.memory.json` files, plus `metadata.json` with the binary hash and configuration.
+> **Background visibility note:** macOS only drives `CADisplayLink` and Core Animation commits for windows with `occlusionState.contains(.visible) == true`. On multi-display setups the benchmark window automatically opens on a secondary display. On a single display, keep at least a strip of the window unobscured behind your active window (or pass `--foreground`).
 
 ## iOS simulator: `benchmark-simulator.py`
 
 ```sh
-python3 clients/swift/scripts/benchmark-simulator.py SIMULATOR_UUID /tmp/ios-chat-stream --plan stream --paginated --runs 3
+python3 clients/swift/scripts/benchmark-simulator.py SIMULATOR_UUID .scratch/bench/ios
 ```
 
-Supports `scroll`, `stream` and `streamScroll` with `--runs`, `--turns`, `--timeout` and `--paginated`. The Debug app must already be installed on the simulator. The script replaces any running instance, so use a dedicated simulator. Simulator callback rates say nothing definitive about device refresh rates.
+Runs `suite` (default, skips macOS resize) or `stream` in a single launch. Simulator callback rates do not measure physical-device refresh pacing.
 
 ## Screen recording: `record-chat-stream.py`
 
-Records the `stream` plan cropped to the app window for frame-by-frame inspection (requires `ffmpeg`). Flags: `--rate`, `--activity`. This is for visual inspection, not timing.
-
-## Manual launches
-
-The same launch arguments work from Xcode (Edit Scheme → Run → Arguments):
-
-| Argument | Meaning |
-|---|---|
-| `-ChatAutoBenchmark <plan>` | Run a plan from the table above and print `CHAT_BENCHMARK_RESULT` / `CHAT_BENCHMARK_COMPLETE` lines. |
-| `-ChatBenchmarkSyntheticTurns N` | Seed an offline synthetic transcript with `N` turns. |
-| `-ChatBenchmarkThread "<title substring>"` | Benchmark a real thread from the connected daemon instead. |
-| `-ChatBenchmarkPaginatedHistory YES/NO` | Normal recent-page loading vs. the whole fixture up front. |
-| `-ChatBenchmarkAnchorRow N` | Start sweeps at row `N` (the script uses 4800 for the 300-turn fixture). |
-| `-ChatBenchmarkScrubPeriod N` | Seconds per one-way traversal for `scrub`. |
-| `-ChatBenchmarkStreamActivity YES/NO` | Include thought/tool activity in the `stream` plan. |
-
-Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resizing and selection without any automation; it does not connect to the daemon.
-
-## Reading results
-
-`averageFPS` counts `CADisplayLink` callbacks per second, not verified presented frames. At 120 Hz the interval target is 8.33 ms; read p99 and maximum intervals alongside the average. RSS is whole-process memory. Discard hidden-window, incomplete or source-mismatch runs.
-
-The `…MainThreadMilliseconds` fields are the time the main run loop spent working between two display-link callbacks, and `framesOver120HzBudget` / `framesOver60HzBudget` count the frames whose work exceeded 8.33 ms / 16.67 ms. They measure headroom where the display caps the callback rate: a simulator or a 60 Hz phone reports 60 FPS whether a frame's work took 2 ms or 15 ms, and only the first would also hold 120 Hz. Work that yields between steps (measuring a page of rows) is summed into the frame it ran in, so read p50 and p95 for scrolling cost and the tail for pagination.
+Records the `stream` plan cropped to the app window for frame-by-frame inspection (`ffmpeg`). Flags: `--rate`, `--activity`.

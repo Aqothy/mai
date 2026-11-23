@@ -8,17 +8,15 @@ import SwiftUI
     import UIKit
 #endif
 
-/// Runs the auto-benchmark plans against the production chat timeline,
-/// either a real thread from the connected daemon or the synthetic transcript:
+/// Runs the auto-benchmark plans against the production chat transcript:
 ///
-///     -ChatAutoBenchmark scroll -ChatBenchmarkThread "<title substring>"
-///     -ChatAutoBenchmark <plan> -ChatBenchmarkSyntheticTurns 300
+///     -ChatAutoBenchmark suite -ChatBenchmarkSyntheticTurns 1000
+///     -ChatAutoBenchmark stream -ChatBenchmarkSyntheticTurns 20
+///     -ChatAutoBenchmark markdown
 ///
-/// The runner waits for the thread list, selects the first thread whose
-/// title matches, waits for its history to restore and its markdown and
-/// text-layout caches to be prepared, then runs the plan. Streaming plans
-/// need the synthetic transcript (a real agent would get a live prompt);
-/// for a real thread they fall back to the scroll sweeps.
+/// `suite` runs the entire regression suite (cold opens, cold→warm scroll,
+/// fast fling, high-rate stream, stream-while-scrolling, live resize, and
+/// physical memory footprint) in a single app launch.
 struct ChatRealThreadBenchmarkRunner: ViewModifier {
     let store: ThreadStore
     let selectThread: (String) -> Void
@@ -27,330 +25,240 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
     @State private var didRun = false
 
     func body(content: Content) -> some View {
-        content.task {
-            guard !didRun,
-                ChatBenchmarkAutoRun.plan != nil,
-                let query = ChatBenchmarkAutoRun.threadTitleQuery
-            else { return }
-            didRun = true
-            await run(query: query)
-        }
+        content
+            #if os(macOS)
+                .background {
+                    if ChatBenchmarkAutoRun.plan != nil {
+                        BenchmarkWindowConfigurator()
+                    }
+                }
+            #endif
+            .task {
+                guard !didRun,
+                    let plan = ChatBenchmarkAutoRun.plan,
+                    let query = ChatBenchmarkAutoRun.threadTitleQuery
+                else { return }
+                didRun = true
+                await run(plan: plan, query: query)
+            }
     }
 
-    private func run(query: String) async {
-        if ChatBenchmarkAutoRun.plan == "markdown" {
+    private func run(plan: String, query: String) async {
+        if plan == "markdown" {
             await ChatMarkdownReplayBenchmark.run()
             finish("CHAT_BENCHMARK_COMPLETE")
             return
         }
-        let started = ContinuousClock.now
-        ChatBenchmarkAutoRun.trace("real-thread benchmark start: \(query)")
+
+        // Prevent App Nap, timer coalescing, and background QoS throttling so
+        // unfocused benchmark runs stay on full-speed cores.
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "Chat benchmark"
+        )
+        defer { ProcessInfo.processInfo.endActivity(activity) }
+
+        ChatBenchmarkAutoRun.trace("benchmark start: plan=\(plan) query=\(query)")
         guard await pinWindowForDeterministicRuns() else {
-            finish("invalid measurement: benchmark window did not reach the requested size")
+            finish("invalid measurement: benchmark window did not reach the requested size or is occluded")
             return
         }
 
         guard let entry = await waitForThread(matching: query) else {
-            finish("real-thread benchmark: no thread matching \"\(query)\"")
+            finish("invalid measurement: no thread matching \"\(query)\"")
             return
         }
-        ChatBenchmarkAutoRun.trace(
-            "real-thread benchmark thread: \(entry.id) \(entry.title)"
-        )
         selectThread(entry.id)
-
         guard await waitForSelectedThreadLoaded() else {
-            finish("real-thread benchmark: thread failed to load")
-            return
-        }
-        #if os(macOS)
-            if ChatBenchmarkAutoRun.plan == "open" {
-                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-                let deadline = ContinuousClock.now + .seconds(30)
-                while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                    ContinuousClock.now < deadline
-                {
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-                benchmark.reportOpenBenchmark(started: started)
-                finish("CHAT_BENCHMARK_COMPLETE")
-                return
-            }
-        #endif
-        #if os(macOS)
-            if ["sessions", "sessionsResize", "sessionsRevisit"].contains(ChatBenchmarkAutoRun.plan ?? "") {
-                await runSessionMemoryBenchmark()
-                finish("CHAT_BENCHMARK_COMPLETE")
-                return
-            }
-        #endif
-        if ChatBenchmarkAutoRun.plan == "coldScroll",
-            let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount
-        {
-            // Insert and select a brand-new thread AFTER window pinning so
-            // scrolling starts the instant the end screen appears, with zero
-            // warmup sleep (catches background-settle main-thread freezes).
-            let identity = "synthetic-benchmark-cold"
-            let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turns, identity: identity)
-            store.insertSyntheticBenchmarkThread(thread)
-            ChatBenchmarkAutoRun.isTranscriptWarm = false
-            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-            selectThread(identity)
-            let deadline = ContinuousClock.now + .seconds(30)
-            while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                ContinuousClock.now < deadline
-            {
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-            guard ChatBenchmarkAutoRun.isInitialAlignmentComplete else {
-                finish("invalid measurement: coldScroll initial alignment timed out")
-                return
-            }
-            _ = await benchmark.runScrollBenchmark(
-                pointsPerSecond: 3_000,
-                maximumSweepSeconds: 6,
-                label: "cold-scroll-3000pps"
-            )
-            _ = await benchmark.runScrollBenchmark(
-                pointsPerSecond: 8_000,
-                maximumSweepSeconds: 6,
-                label: "cold-fling-8000pps"
-            )
-            finish("CHAT_BENCHMARK_COMPLETE")
-            return
-        }
-        // Let the initial mount settle at the bottom anchor, then wait for
-        // the timeline's preparation task to finish priming every cache the
-        // sweep will touch.
-        try? await Task.sleep(for: .seconds(3))
-        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-
-        #if os(macOS)
-            if ChatBenchmarkAutoRun.plan == "resize", let window = ChatBenchmarkModel.appWindow() {
-                _ = await benchmark.runResizeBenchmark(
-                    in: window, minimumWidth: 600, seconds: 2, label: "live-resize-2s")
-                // How long the transcript takes to show the final width's
-                // layout once the resize stops.
-                let settleStarted = ContinuousClock.now
-                try? await Task.sleep(for: .milliseconds(50))
-                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
-                let settle = settleStarted.duration(to: .now).components
-                ChatBenchmarkAutoRun.trace(
-                    "resize settled ms=\(Double(settle.seconds) * 1000 + Double(settle.attoseconds) / 1e15)"
-                )
-                finish("CHAT_BENCHMARK_COMPLETE")
-                return
-            }
-            if ChatBenchmarkAutoRun.plan == "lifecycle" {
-                await benchmark.runNativeLifecycleBenchmark()
-                finish("CHAT_BENCHMARK_COMPLETE")
-                return
-            }
-        #endif
-
-        if ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil,
-            let plan = ChatBenchmarkAutoRun.plan, plan == "stream" || plan == "streamScroll"
-        {
-            // `-ChatBenchmarkStreamCharactersPerSecond <n>` (1000 by default).
-            let rate = UserDefaults.standard.double(forKey: "ChatBenchmarkStreamCharactersPerSecond")
-            let driver = ChatSyntheticStreamingBenchmark(
-                store: store,
-                includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"),
-                charactersPerSecond: rate > 0 ? rate : 1_000)
-            driver.prepare()
-            try? await Task.sleep(for: .milliseconds(500))
-            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-            let stream = Task { await driver.run() }
-            if plan == "streamScroll" {
-                _ = await benchmark.runScrollBenchmark(
-                    pointsPerSecond: 3_000, maximumSweepSeconds: 10,
-                    label: "production-stream-scroll-3000pps")
-            } else {
-                _ = await benchmark.runStreamingBenchmark(
-                    label: "production-stream-20000chars",
-                    maximumSeconds: 60, isDone: { driver.isFinished })
-            }
-            await stream.value
-            ChatBenchmarkAutoRun.trace(
-                "stream sourceMatches=\(driver.sourceMatches) completed=\(driver.isFinished)")
-            finish("CHAT_BENCHMARK_COMPLETE")
+            finish("invalid measurement: thread failed to load")
             return
         }
 
-        if ChatBenchmarkAutoRun.plan == "scrub" {
-            _ = await benchmark.runScrollBenchmark(
-                pointsPerSecond: 3_000,
-                maximumSweepSeconds: 10, label: "full-history-scrub")
-            finish("CHAT_BENCHMARK_COMPLETE")
-            return
+        switch plan {
+        case "stream":
+            await runStandaloneStream()
+        default:
+            await runSuite()
         }
-
-        _ = await benchmark.runScrollBenchmark(
-            pointsPerSecond: 1_200,
-            maximumSweepSeconds: 10,
-            label: "real-cruise-1200pps"
-        )
-        try? await Task.sleep(for: .seconds(1))
-        _ = await benchmark.runScrollBenchmark(
-            pointsPerSecond: 3_000,
-            maximumSweepSeconds: 12,
-            label: "real-scroll-3000pps"
-        )
-        try? await Task.sleep(for: .seconds(1))
-        // `-ChatBenchmarkFlingPointsPerSecond <n>` replaces the 8000 pt/s fling.
-        let fling = UserDefaults.standard.integer(forKey: "ChatBenchmarkFlingPointsPerSecond")
-        let flingSpeed = fling > 0 ? fling : 8_000
-        _ = await benchmark.runScrollBenchmark(
-            pointsPerSecond: CGFloat(flingSpeed),
-            maximumSweepSeconds: 8,
-            label: "real-fling-\(flingSpeed)pps"
-        )
         finish("CHAT_BENCHMARK_COMPLETE")
     }
 
-    #if os(macOS)
-        private func runSessionMemoryBenchmark() async {
-            guard let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount,
-                let window = ChatBenchmarkModel.appWindow()
-            else { return }
-            // Initial opening uses a fixed viewport; this plan explicitly
-            // exercises resizing after that setup has been verified.
-            if ChatBenchmarkAutoRun.plan == "sessionsResize" {
-                window.contentMinSize = NSSize(width: 600, height: 400)
-                window.contentMaxSize = NSSize(width: 2000, height: 2000)
-            }
-            // `sessionsRevisit`: the same visits without resizing, to time
-            // chats opened again.
-            let visits = ["sessionsResize", "sessionsRevisit"].contains(ChatBenchmarkAutoRun.plan ?? "")
-                ? [1, 2, 3, 4, 5, 1, 5, 2, 4, 3, 1] : [1, 2, 3, 4, 5]
-            for (checkpoint, index) in visits.enumerated() {
-                var buildMilliseconds: Double = 0
-                if checkpoint > 0 {
-                    let identity = index == 1
-                        ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
-                    if checkpoint < 5 {
-                        let buildStarted = ContinuousClock.now
-                        let thread = ChatSyntheticBenchmarkThread.thread(
-                            turnCount: turns, identity: identity)
-                        store.insertSyntheticBenchmarkThread(thread)
-                        let build = buildStarted.duration(to: .now).components
-                        buildMilliseconds = Double(build.seconds) * 1000 + Double(build.attoseconds) / 1e15
-                    }
-                    ChatBenchmarkAutoRun.isTranscriptWarm = false
-                    ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-                }
-                let started = ContinuousClock.now
-                if checkpoint > 0 {
-                    let identity = index == 1
-                        ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
-                    selectThread(identity)
-                }
-                // The end screen shows when the transcript lands on its end,
-                // before the rest of its history is prepared.
-                let visibleDeadline = ContinuousClock.now + .seconds(30)
-                while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                    ContinuousClock.now < visibleDeadline
-                {
-                    try? await Task.sleep(for: .milliseconds(2))
-                }
-                let visible = started.duration(to: .now).components
-                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-                let deadline = ContinuousClock.now + .seconds(30)
-                while !ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                    ContinuousClock.now < deadline
-                {
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-                if ChatBenchmarkAutoRun.plan == "sessionsResize" {
-                    for width in [1000.0, 800.0, 700.0, 1280.0] {
-                        ChatBenchmarkAutoRun.isTranscriptWarm = false
-                        window.setContentSize(NSSize(width: width, height: 900))
-                        try? await Task.sleep(for: .milliseconds(250))
-                        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-                        guard abs(window.contentRect(forFrameRect: window.frame).width - width) <= 1
-                        else {
-                            ChatBenchmarkAutoRun.trace(
-                                "invalid measurement: memory resize did not reach \(width) points")
-                            return
-                        }
-                        guard window.occlusionState.contains(.visible) else {
-                            ChatBenchmarkAutoRun.trace(
-                                "invalid measurement: memory resize window hidden")
-                            return
-                        }
-                    }
-                }
-                try? await Task.sleep(for: .milliseconds(500))
-                guard window.occlusionState.contains(.visible) else {
-                    ChatBenchmarkAutoRun.trace(
-                        "invalid measurement: memory checkpoint window hidden")
-                    return
-                }
-                let elapsed = started.duration(to: .now).components
-                let payload: [String: Any] = [
-                    "label": "sessions-\(checkpoint + 1)", "measurementKind": "sessionMemoryCheckpoint",
-                    "loadedChats": min(checkpoint + 1, 5), "selectedChat": index,
-                    "phase": checkpoint < 5 ? "open" : "revisit",
-                    "preparedAndSettledMilliseconds": Double(elapsed.seconds) * 1000 + Double(
-                        elapsed.attoseconds) / 1e15,
-                    "visibleMilliseconds": Double(visible.seconds) * 1000 + Double(
-                        visible.attoseconds) / 1e15,
-                    "threadBuildMilliseconds": buildMilliseconds,
-                    "selectedLayoutCount": store.selectedThreadTextLayoutStore?.cachedLayoutCount
-                        ?? 0,
-                    "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                    "visible": window.occlusionState.contains(.visible),
-                    "windowWidth": window.frame.width,
-                ]
-                if let data = try? JSONSerialization.data(
-                    withJSONObject: payload, options: [.sortedKeys]),
-                    let line = String(data: data, encoding: .utf8)
-                {
-                    print("CHAT_BENCHMARK_RESULT \(line)")
-                    ChatBenchmarkAutoRun.trace("session checkpoint \(checkpoint + 1)")
-                }
-                // Give the external runner time to sample this process after each chat.
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    #endif
+    /// Single-launch full benchmark covering every transcript hotspot:
+    /// 1. Cold opens across unique 1000-turn chats + memory checkpoints
+    /// 2. Cold→warm 3000 pps scroll + 8000 pps fling (0 ms warmup sleep)
+    /// 3. High-rate 4000 chars/s streaming + exact-source verification
+    /// 4. Stream-while-scrolling contention at 3000 pps
+    /// 5. Live 1280→600→1280 resize reflow (macOS)
+    /// 6. Final physical footprint / peak footprint / RSS checkpoint
+    private func runSuite() async {
+        let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount ?? 1_000
+        guard let activeThreadID = await runColdOpens(turnCount: turns) else { return }
 
-    private func waitForThread(
-        matching query: String
-    ) async -> ThreadSummary? {
-        let deadline = ContinuousClock.now + .seconds(60)
-        while ContinuousClock.now < deadline {
-            let threads = store.threads
-            if !threads.isEmpty {
-                if let match = threads.first(where: {
-                    $0.title.localizedCaseInsensitiveContains(query)
-                }) {
-                    return match
-                }
-                // The list is populated and no title matches; more waiting
-                // will not change that once the connection is synchronized.
-                if store.connectionState == .connected {
-                    return nil
-                }
+        // Let the freshly aligned end screen finish its first raster pass
+        // (all off-screen turns remain cold and unparsed), then scroll at once.
+        try? await Task.sleep(for: .milliseconds(32))
+        _ = await benchmark.runScrollBenchmark(
+            pointsPerSecond: 3_000, maximumSweepSeconds: 3, label: "cold-scroll-3000pps")
+        _ = await benchmark.runScrollBenchmark(
+            pointsPerSecond: 8_000, maximumSweepSeconds: 2, label: "cold-fling-8000pps")
+
+        await runStreamPhase(
+            threadID: activeThreadID, turnID: "suite-stream-turn", label: "stream-4000cps", scroll: false)
+        await runStreamPhase(
+            threadID: activeThreadID, turnID: "suite-stream-scroll-turn", label: "stream-scroll-3000pps", scroll: true)
+
+        #if os(macOS)
+            if let window = ChatBenchmarkModel.appWindow() {
+                _ = await benchmark.runResizeBenchmark(
+                    in: window, minimumWidth: 600, seconds: 2, label: "live-resize-2s")
+                try? await Task.sleep(for: .milliseconds(100))
+                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 30)
             }
-            try? await Task.sleep(for: .milliseconds(250))
+        #endif
+
+        emitMemoryCheckpoint(label: "memory-final")
+    }
+
+    /// Opens two fresh unique threads after the initial thread (3 resident
+    /// chats total), measuring cold open latency and memory footprint.
+    /// Returns the last selected thread ID, still cold and freshly aligned.
+    private func runColdOpens(turnCount: Int) async -> String? {
+        var lastID = ChatSyntheticBenchmarkThread.threadID
+        for step in 1...2 {
+            let identity = "synthetic-benchmark-\(step + 1)"
+            let buildStarted = ContinuousClock.now
+            let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turnCount, identity: identity)
+            store.insertSyntheticBenchmarkThread(thread)
+            let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
+
+            ChatBenchmarkAutoRun.isTranscriptWarm = false
+            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+            let started = ContinuousClock.now
+            selectThread(identity)
+
+            guard await waitUntilAligned(timeoutSeconds: 30) else {
+                ChatBenchmarkAutoRun.trace("invalid measurement: open-\(step) initial alignment timed out")
+                return nil
+            }
+            let visibleMs = Self.milliseconds(started.duration(to: .now))
+            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+            let settledMs = Self.milliseconds(started.duration(to: .now))
+            let memory = ChatBenchmarkModel.processMemoryMB()
+            emitJSON([
+                "label": "open-\(step)",
+                "measurementKind": "openCheckpoint",
+                "loadedChats": step + 1,
+                "visibleMilliseconds": visibleMs,
+                "settledMilliseconds": settledMs,
+                "threadBuildMilliseconds": buildMs,
+                "footprintMB": memory.footprint,
+                "peakFootprintMB": memory.peakFootprint,
+                "residentMB": memory.resident,
+                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+                "visible": isAppWindowVisible,
+            ])
+            lastID = identity
+        }
+        return lastID
+    }
+
+    private func runStreamPhase(threadID: String, turnID: String, label: String, scroll: Bool) async {
+        let configuredRate = UserDefaults.standard.double(forKey: "ChatBenchmarkStreamCharactersPerSecond")
+        let rate = configuredRate > 0 ? configuredRate : 4_000
+        let driver = ChatSyntheticStreamingBenchmark(
+            store: store, threadID: threadID,
+            includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"),
+            charactersPerSecond: rate, characterCount: 12_000, turnID: turnID)
+        driver.prepare()
+        try? await Task.sleep(for: .milliseconds(100))
+        let stream = Task { await driver.run() }
+        if scroll {
+            _ = await benchmark.runScrollBenchmark(
+                pointsPerSecond: 3_000, maximumSweepSeconds: 1.5, label: label)
+        } else {
+            _ = await benchmark.runStreamingBenchmark(
+                label: label, maximumSeconds: 30, isDone: { driver.isFinished })
+        }
+        await stream.value
+        ChatBenchmarkAutoRun.trace(
+            "stream \(label) sourceMatches=\(driver.sourceMatches) completed=\(driver.isFinished)")
+    }
+
+    /// Standalone stream plan used by `record-chat-stream.py` and stream-only runs.
+    private func runStandaloneStream() async {
+        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+        let configuredRate = UserDefaults.standard.double(forKey: "ChatBenchmarkStreamCharactersPerSecond")
+        let driver = ChatSyntheticStreamingBenchmark(
+            store: store,
+            includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"),
+            charactersPerSecond: configuredRate > 0 ? configuredRate : 1_000,
+            characterCount: UserDefaults.standard.integer(forKey: "ChatBenchmarkStreamCharacters") > 0
+                ? UserDefaults.standard.integer(forKey: "ChatBenchmarkStreamCharacters") : 20_000)
+        driver.prepare()
+        try? await Task.sleep(for: .milliseconds(200))
+        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+        let stream = Task { await driver.run() }
+        _ = await benchmark.runStreamingBenchmark(
+            label: "stream-standalone", maximumSeconds: 60, isDone: { driver.isFinished })
+        await stream.value
+        ChatBenchmarkAutoRun.trace(
+            "stream sourceMatches=\(driver.sourceMatches) completed=\(driver.isFinished)")
+    }
+
+    private func emitMemoryCheckpoint(label: String) {
+        let memory = ChatBenchmarkModel.processMemoryMB()
+        emitJSON([
+            "label": label,
+            "measurementKind": "memoryCheckpoint",
+            "footprintMB": memory.footprint,
+            "peakFootprintMB": memory.peakFootprint,
+            "residentMB": memory.resident,
+            "visible": isAppWindowVisible,
+        ])
+    }
+
+    private func emitJSON(_ payload: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let line = String(data: data, encoding: .utf8)
+        else { return }
+        print("CHAT_BENCHMARK_RESULT \(line)")
+        ChatBenchmarkAutoRun.trace("CHAT_BENCHMARK_RESULT \(line)")
+    }
+
+    private var isAppWindowVisible: Bool {
+        #if os(macOS)
+            ChatBenchmarkModel.appWindow()?.occlusionState.contains(.visible) ?? false
+        #else
+            ChatBenchmarkModel.appWindow().map { !$0.isHidden } ?? false
+        #endif
+    }
+
+    private func waitUntilAligned(timeoutSeconds: TimeInterval) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(timeoutSeconds)
+        while !ChatBenchmarkAutoRun.isInitialAlignmentComplete, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return ChatBenchmarkAutoRun.isInitialAlignmentComplete
+    }
+
+    private func waitForThread(matching query: String) async -> ThreadSummary? {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while ContinuousClock.now < deadline {
+            if let match = store.threads.first(where: { $0.title.localizedCaseInsensitiveContains(query) }) {
+                return match
+            }
+            if !store.threads.isEmpty, store.connectionState == .connected { return nil }
+            try? await Task.sleep(for: .milliseconds(50))
         }
         return nil
     }
 
     private func waitForSelectedThreadLoaded() async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(120)
+        let deadline = ContinuousClock.now + .seconds(60)
         while ContinuousClock.now < deadline {
-            if store.selectedThreadLoadErrorMessage != nil {
-                return false
-            }
-            if let thread = store.selectedThread,
-                !thread.turns.isEmpty,
-                store.selectedThreadMarkdownSegmentCache != nil
-            {
-                return true
-            }
-            try? await Task.sleep(for: .milliseconds(250))
+            if store.selectedThreadLoadErrorMessage != nil { return false }
+            if let thread = store.selectedThread, !thread.turns.isEmpty { return true }
+            try? await Task.sleep(for: .milliseconds(25))
         }
         return false
     }
@@ -365,24 +273,52 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         }
     }
 
-    /// A deterministic window keeps runs comparable across launches.
+    private static func milliseconds(_ duration: Duration) -> Double {
+        let parts = duration.components
+        return Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1e15
+    }
+
+    /// Pins a deterministic 1280×900 window. In background mode it prefers a
+    /// secondary display if attached and orders behind active windows without
+    /// stealing focus.
     private func pinWindowForDeterministicRuns() async -> Bool {
         #if os(macOS)
-            NSApplication.shared.activate()
+            let background = ChatBenchmarkAutoRun.runsInBackground
+            if !background { NSApplication.shared.activate() }
             guard let window = ChatBenchmarkModel.appWindow() else { return false }
             let target = NSSize(width: 1_280, height: 900)
-            window.contentMinSize = target
-            window.contentMaxSize = target
-            window.setContentSize(target)
-            window.center()
-            window.makeKeyAndOrderFront(nil)
-            // Window restoration can race the first SwiftUI task. AppKit can
-            // report the requested frame before WindowServer presents it, so
-            // verify both sides before a recorder consumes the ready marker.
-            // A cold full-history transcript can occupy the main actor during its
-            // first mount. Keep setup separate from measured scrolling and
-            // allow it to settle before applying the same viewport checks.
-            let deadline = ContinuousClock.now + .seconds(15)
+            let screen =
+                (background ? NSScreen.screens.first { $0 != NSScreen.main } : nil)
+                ?? window.screen ?? NSScreen.main ?? NSScreen.screens.first
+            func placeWindow() {
+                window.styleMask.remove(.resizable)
+                window.standardWindowButton(.zoomButton)?.isEnabled = false
+                window.setAccessibilitySubrole(.dialog)
+                window.contentMinSize = target
+                window.contentMaxSize = target
+                window.setContentSize(target)
+                if let screen {
+                    let visible = screen.visibleFrame
+                    let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: target)).size
+                    let origin =
+                        background
+                        ? NSPoint(x: screen.frame.minX, y: screen.frame.minY)
+                        : NSPoint(
+                            x: (visible.midX - frameSize.width / 2).rounded(),
+                            y: (visible.midY - frameSize.height / 2).rounded())
+                    window.setFrameOrigin(origin)
+                } else {
+                    window.center()
+                }
+                if background {
+                    window.collectionBehavior.insert(.canJoinAllSpaces)
+                    window.orderBack(nil)
+                } else {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            placeWindow()
+            let deadline = ContinuousClock.now + .seconds(10)
             var stableSince = ContinuousClock.now
             while ContinuousClock.now < deadline {
                 let actual = window.contentRect(forFrameRect: window.frame).size
@@ -399,20 +335,21 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                     abs(actual.height - target.height) <= 1, onScreen, presentationMatches,
                     !window.styleMask.contains(.fullScreen)
                 {
-                    if stableSince.duration(to: .now) >= .milliseconds(750) {
+                    if stableSince.duration(to: .now) >= .milliseconds(250) {
                         ChatBenchmarkAutoRun.trace(
-                            "benchmark viewport verified windowNumber=\(window.windowNumber) content=\(actual) frame=\(window.frame)")
+                            "benchmark viewport verified windowNumber=\(window.windowNumber) background=\(background) content=\(actual) frame=\(window.frame)")
                         return true
                     }
                 } else {
                     stableSince = .now
-                    window.setContentSize(target)
-                    window.center()
+                    placeWindow()
                 }
                 try? await Task.sleep(for: .milliseconds(25))
             }
+            let occlusionNote = window.occlusionState.contains(.visible)
+                ? "" : " (window completely covered; leave a strip visible, use a second display, or pass --foreground)"
             ChatBenchmarkAutoRun.trace(
-                "invalid measurement: actual window frame=\(window.frame) content=\(window.contentRect(forFrameRect: window.frame).size) screen=\(String(describing: window.screen?.frame))")
+                "invalid measurement: actual window frame=\(window.frame) visible=\(window.occlusionState.contains(.visible))\(occlusionNote)")
             return false
         #else
             for scene in UIApplication.shared.connectedScenes {
@@ -426,4 +363,29 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         #endif
     }
 }
+
+#if os(macOS)
+    /// Configures the benchmark window before WindowServer/tiling WMs
+    /// (AeroSpace, yabai) inspect it so it is classified as a floating dialog
+    /// rather than tiled into the user's workspace, while still allowing
+    /// programmatic `setContentSize` during `live-resize-2s`.
+    private struct BenchmarkWindowConfigurator: NSViewRepresentable {
+        func makeNSView(context: Context) -> ConfigView { ConfigView() }
+        func updateNSView(_ nsView: ConfigView, context: Context) {}
+
+        final class ConfigView: NSView {
+            override func viewWillMove(toWindow newWindow: NSWindow?) {
+                super.viewWillMove(toWindow: newWindow)
+                guard let window = newWindow else { return }
+                window.styleMask.remove(.resizable)
+                window.standardWindowButton(.zoomButton)?.isEnabled = false
+                window.setAccessibilitySubrole(.dialog)
+                if ChatBenchmarkAutoRun.runsInBackground {
+                    window.collectionBehavior.insert(.canJoinAllSpaces)
+                    window.orderBack(nil)
+                }
+            }
+        }
+    }
+#endif
 #endif

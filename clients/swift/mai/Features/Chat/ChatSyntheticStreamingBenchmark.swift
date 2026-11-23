@@ -9,10 +9,10 @@
         nonisolated deinit {}
 
         private let store: ThreadStore
+        private let threadID: String
         private let turnID: String
         /// How fast the reply arrives: 16-character chunks, one per
-        /// `1000 / (charactersPerSecond / 16)` ms. The benchmark streams
-        /// 1000/s (~250 tokens/s); chat apps stream ~200-400/s.
+        /// `1000 / (charactersPerSecond / 16)` ms.
         private let charactersPerSecond: Double
         private let messageID = "synthetic-stream-assistant"
         private let characters: [Character]
@@ -32,17 +32,18 @@
         private(set) var isFinished = false
 
         init(
-            store: ThreadStore, includesActivity: Bool = false, charactersPerSecond: Double = 1_000,
-            turnID: String = "synthetic-stream-turn"
+            store: ThreadStore, threadID: String = ChatSyntheticBenchmarkThread.threadID,
+            includesActivity: Bool = false, charactersPerSecond: Double = 4_000,
+            characterCount: Int? = nil, turnID: String = "synthetic-stream-turn"
         ) {
             self.store = store
+            self.threadID = threadID
             self.includesActivity = includesActivity
             self.charactersPerSecond = max(16, charactersPerSecond)
             self.turnID = turnID
-            // `-ChatBenchmarkStreamCharacters <n>`: a longer reply, the
-            // fixtures repeated.
+            // `-ChatBenchmarkStreamCharacters <n>`: override reply length.
             let requested = UserDefaults.standard.integer(forKey: "ChatBenchmarkStreamCharacters")
-            let length = requested > 0 ? requested : 20_000
+            let length = characterCount ?? (requested > 0 ? requested : 12_000)
             let source = ChatMarkdownFixtures.codeHeavy + "\n\n" + ChatMarkdownFixtures.longMarkdown
             characters = Array(
                 String(repeating: source + "\n\n", count: length / source.count + 1).prefix(length))
@@ -107,7 +108,7 @@
             sendTurn(.completed)
             if includesActivity { traceActivity("turn-completed") }
             // Include the settled renderer's transition in the measured interval.
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: .milliseconds(300))
             isFinished = true
         }
 
@@ -168,19 +169,18 @@
             view.entries = []
             view.state = state.rawValue
             view.settledAt = state == .running ? nil : .now
-            apply(ThreadFixtures.event(.turn, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, turn: view))
+            apply(ThreadFixtures.event(.turn, thread: threadID, seq: nextSeq, turn: view))
         }
 
         private func sendEntry(_ entry: EntryView) {
             var view = turnView
             view.entries = []
-            apply(ThreadFixtures.event(
-                .entry, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, turn: view, entry: entry))
+            apply(ThreadFixtures.event(.entry, thread: threadID, seq: nextSeq, turn: view, entry: entry))
         }
 
         private func sendText(_ ref: String, _ text: String) {
             let append = TextAppend(entry: ref, stream: MaidStreamKind.assistant.rawValue, text: text, turn: turnID)
-            apply(ThreadFixtures.event(.text, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, text: append))
+            apply(ThreadFixtures.event(.text, thread: threadID, seq: nextSeq, text: append))
         }
 
         private func apply(_ event: ThreadEvent) {

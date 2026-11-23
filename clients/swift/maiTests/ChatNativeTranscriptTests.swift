@@ -4,6 +4,15 @@
     import Observation
     @testable import mai
 
+    private extension ChatNativeTranscript.VirtualDocument {
+        func rect(ofRow index: Int) -> NSRect {
+            guard index >= 0, index < numberOfRows else { return .zero }
+            return NSRect(
+                x: 0, y: offsets[index], width: bounds.width,
+                height: offsets[index + 1] - offsets[index])
+        }
+    }
+
     @MainActor @Observable private final class ExpandingRowState {
         var height: CGFloat = 60
     }

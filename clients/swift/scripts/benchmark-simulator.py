@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the installed Debug app's production iOS chat without a UI driver.
+"""Exercise the installed Debug app's production iOS chat in a single launch.
 
 Use an isolated, booted simulator. This never builds or changes project settings.
 Simulator callback pacing is not evidence of physical-device 60/120 Hz performance.
@@ -22,11 +22,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("device", help="UUID of the isolated, booted simulator")
     parser.add_argument("output", type=Path)
-    parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll"], required=True)
-    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--plan", choices=["suite", "stream"], default="suite")
+    parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--turns", type=int, default=300)
-    parser.add_argument("--timeout", type=float, default=300)
-    parser.add_argument("--paginated", action="store_true")
+    parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument("--engine", choices=["new", "legacy"], default="new")
     args = parser.parse_args()
     if min(args.runs, args.turns, args.timeout) <= 0:
         parser.error("Runs, turns and timeout must be positive.")
@@ -49,7 +49,7 @@ def main():
         "deviceName": matches[0][1]["name"], "deviceUUID": args.device,
         "codeImageSHA256": hashlib.sha256(code.read_bytes()).hexdigest(),
         "plan": args.plan, "runs": args.runs, "syntheticTurns": args.turns,
-        "paginated": args.paginated, "container": "iOS UIKit transcript",
+        "engine": args.engine, "container": "iOS UIKit transcript",
         "measurement": "simulator display-link callbacks, not physical-device or presented FPS",
     }
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -60,7 +60,8 @@ def main():
             f"--stderr={log.with_suffix('.stderr')}", args.device, bundle,
             "-ChatAutoBenchmark", args.plan,
             "-ChatBenchmarkSyntheticTurns", str(args.turns),
-            "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO")
+            "-ChatBenchmarkUniqueAnswers", "YES",
+            "-ChatTranscriptEngine", args.engine)
         (log.with_suffix(".launch.txt")).write_text(launch + "\n")
         deadline = time.monotonic() + args.timeout
         try:
@@ -71,19 +72,19 @@ def main():
                     diagnostics = text + (stderr.read_text(errors="replace") if stderr.exists() else "")
                     reports = [json.loads(line.split(" ", 1)[1]) for line in text.splitlines()
                                if line.startswith("CHAT_BENCHMARK_RESULT ")]
-                    expected = 3 if args.plan == "scroll" else 1
+                    expected = 7 if args.plan == "suite" else 1
                     invalid = [marker for marker in (
                         "invalid measurement:", "visible=false", "sourceMatches=false",
                         "transcript warm timed out", "benchmark skipped:",
                         "malloc: ***", "Fatal error:") if marker in diagnostics]
                     if len(reports) != expected or invalid:
                         raise RuntimeError(f"Invalid run ({len(reports)} reports, {invalid}): {log}")
-                    if args.plan != "scroll" and "sourceMatches=true completed=true" not in text:
+                    if "sourceMatches=true completed=true" not in text:
                         raise RuntimeError(f"Missing exact-source/completion verification: {log}")
                     log.with_suffix(".json").write_text(json.dumps(reports, indent=2) + "\n")
                     print(f"Completed {log}", flush=True)
                     break
-                time.sleep(0.5)
+                time.sleep(0.25)
             else:
                 raise TimeoutError(f"Benchmark did not complete: {log}")
         finally:

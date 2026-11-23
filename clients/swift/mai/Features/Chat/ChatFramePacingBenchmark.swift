@@ -1,4 +1,5 @@
 #if DEBUG
+import Darwin.Mach
 import OSLog
 import QuartzCore
 import SwiftUI
@@ -338,38 +339,13 @@ final class ChatBenchmarkModel {
             Self.note("benchmark skipped: no transcript scroll view")
             return nil
         }
-        #if os(macOS)
-            window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate()
-        #endif
+        Self.prepareWindow(window)
         noteStart(label)
         isRunning = true
         defer { isRunning = false }
 
-        let document = Self.transcriptDocument(of: scrollView)
-        let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
-        if anchorRow > 0 {
-            let horizontalOrigin = Self.contentOffsetX(of: scrollView)
-            document?.scrollToBenchmarkRow(anchorRow)
-            try? await Task.sleep(for: .milliseconds(250))
-            guard abs(Self.contentOffsetX(of: scrollView) - horizontalOrigin) < 0.5 else {
-                Self.note("invalid measurement: benchmark anchor changed horizontal alignment")
-                return nil
-            }
-            Self.note(
-                "anchor row=\(anchorRow) x=\(horizontalOrigin) preservedX=true offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
-            )
-        }
-        // The anchor jump lands somewhere unseen on purpose; only the sweep
-        // after it counts toward rows drawn on screen instead of ahead.
-        fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
-        syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
-        arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
-        misplacedRowsAtStart = TranscriptDebugCounters.misplacedRows
         let monitor = ChatFramePacingMonitor()
         var scrollsUpward = true
-        let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
-        var scrubStarted: CFTimeInterval?
         var offsetY = Self.contentOffsetY(of: scrollView)
         var lastTimestamp: CFTimeInterval?
         var phaseStartTimestamp: CFTimeInterval?
@@ -380,7 +356,7 @@ final class ChatBenchmarkModel {
             monitor.start(
                 in: window, maximumWallSeconds: maximumSweepSeconds * 2 + 15,
                 onFailure: { reason in
-                guard !finished else { return }
+                    guard !finished else { return }
                     finished = true
                     Self.note("invalid measurement: \(reason)")
                     continuation.resume()
@@ -401,25 +377,17 @@ final class ChatBenchmarkModel {
                     )
                 }
                 let (minY, maxY) = Self.scrollableRange(of: scrollView)
-                if scrubPeriod > 0 {
-                    scrubStarted = scrubStarted ?? timestamp
-                    let phase = ((timestamp - (scrubStarted ?? timestamp)) / scrubPeriod)
-                        .truncatingRemainder(dividingBy: 2)
-                    let fraction = phase <= 1 ? 1 - phase : phase - 1
-                    offsetY = minY + (maxY - minY) * fraction
-                } else {
-                    // Follow controller anchor shifts when rows above change
-                    // height during cold scrolling, rather than fighting them.
-                    let actualY = Self.contentOffsetY(of: scrollView)
-                    if abs(actualY - offsetY) > 1 { offsetY = actualY }
-                    offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
-                    offsetY = min(max(offsetY, minY), maxY)
-                }
+                // Follow controller anchor shifts when rows above change
+                // height during cold scrolling, rather than fighting them.
+                let actualY = Self.contentOffsetY(of: scrollView)
+                if abs(actualY - offsetY) > 1 { offsetY = actualY }
+                offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
+                offsetY = min(max(offsetY, minY), maxY)
                 Self.setContentOffsetY(offsetY, on: scrollView)
 
                 let phaseElapsed = timestamp - (phaseStartTimestamp ?? timestamp)
                 let reachedEnd = scrollsUpward ? offsetY <= minY : offsetY >= maxY
-                if (scrubPeriod <= 0 && reachedEnd) || phaseElapsed >= maximumSweepSeconds {
+                if reachedEnd || phaseElapsed >= maximumSweepSeconds {
                     if scrollsUpward {
                         scrollsUpward = false
                         phaseStartTimestamp = timestamp
@@ -431,38 +399,8 @@ final class ChatBenchmarkModel {
             }
         }
         if encounteredOcclusion { Self.note("invalid measurement: visible=false during sweep") }
-        if let document {
-            Self.note(document.benchmarkStatistics)
-        }
-        let measuredLabel =
-            scrubPeriod > 0
-            ? "full-history-scrub-\(scrubPeriod)s-\(maximumSweepSeconds * 2)s" : label
-        return finish(monitor, label: measuredLabel)
+        return finish(monitor, label: label)
     }
-
-    #if os(macOS)
-        func reportOpenBenchmark(started: ContinuousClock.Instant) {
-            let elapsed = started.duration(to: .now).components
-            let window = Self.appWindow()
-            let scroll = window.flatMap { Self.transcriptScrollView(in: $0) }
-            let rows = (scroll?.documentView as? any ChatBenchmarkRowGeometry)?.numberOfRows ?? 0
-            let report: [String: Any] = [
-                "label": "prepared-aligned-transcript",
-                "measurementKind": "preparedAlignedViewport",
-                "readyMilliseconds": Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds)
-                    / 1e15,
-                "loadedRows": rows,
-                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                "visible": window.map(Self.isWindowVisible) ?? false,
-            ]
-            if let data = try? JSONSerialization.data(
-                withJSONObject: report, options: [.sortedKeys]),
-                let json = String(data: data, encoding: .utf8)
-            {
-                print("CHAT_BENCHMARK_RESULT \(json)")
-            }
-        }
-    #endif
 
     #if os(macOS)
         /// Narrows the window from its pinned width to `minimumWidth` and back
@@ -475,8 +413,7 @@ final class ChatBenchmarkModel {
             in window: NSWindow, minimumWidth: CGFloat, seconds: TimeInterval, label: String
         ) async -> ChatFramePacingReport? {
             guard !isRunning else { return nil }
-            window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate()
+            Self.prepareWindow(window)
             noteStart(label)
             isRunning = true
             defer { isRunning = false }
@@ -567,10 +504,7 @@ final class ChatBenchmarkModel {
             )
             return nil
         }
-        #if os(macOS)
-            window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate()
-        #endif
+        Self.prepareWindow(window)
         noteStart(label)
         isRunning = true
         defer { isRunning = false }
@@ -584,7 +518,7 @@ final class ChatBenchmarkModel {
             monitor.start(
                 in: window, maximumWallSeconds: maximumSeconds + 15,
                 onFailure: { reason in
-                guard !finished else { return }
+                    guard !finished else { return }
                     finished = true
                     Self.note("invalid measurement: \(reason)")
                     continuation.resume()
@@ -602,6 +536,39 @@ final class ChatBenchmarkModel {
         }
         if encounteredOcclusion { Self.note("invalid measurement: visible=false during stream") }
         return finish(monitor, label: label)
+    }
+
+    /// Physical footprint, peak physical footprint, and resident size in MiB
+    /// directly from Mach `task_vm_info` (matches `vmmap -summary` without
+    /// spawning external tools).
+    static func processMemoryMB() -> (footprint: Double, peakFootprint: Double, resident: Double) {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return (0, 0, 0) }
+        let mib = 1_048_576.0
+        return (
+            Double(info.phys_footprint) / mib,
+            Double(max(0, info.ledger_phys_footprint_peak)) / mib,
+            Double(info.resident_size) / mib
+        )
+    }
+
+    /// Orders the benchmark window without stealing focus when running in
+    /// background mode (`-ChatBenchmarkBackground YES`).
+    static func prepareWindow(_ window: ChatBenchmarkWindow) {
+        #if os(macOS)
+            if ChatBenchmarkAutoRun.runsInBackground {
+                window.orderBack(nil)
+            } else {
+                window.makeKeyAndOrderFront(nil)
+                NSApplication.shared.activate()
+            }
+        #endif
     }
 
     private func finish(
@@ -685,26 +652,6 @@ final class ChatBenchmarkModel {
                 }
             }
             return best
-        #endif
-    }
-
-    private static func transcriptDocument(
-        of scrollView: ChatBenchmarkScrollView
-    ) -> (any ChatBenchmarkAnchoredDocument)? {
-        #if os(macOS)
-            scrollView.documentView as? any ChatBenchmarkAnchoredDocument
-        #else
-            scrollView as? any ChatBenchmarkAnchoredDocument
-        #endif
-    }
-
-    private static func contentOffsetX(
-        of scrollView: ChatBenchmarkScrollView
-    ) -> CGFloat {
-        #if os(macOS)
-            scrollView.contentView.bounds.origin.x
-        #else
-            scrollView.contentOffset.x
         #endif
     }
 
@@ -869,28 +816,11 @@ nonisolated enum ChatBenchmarkAutoRun {
         }
         return UserDefaults.standard.bool(forKey: "ChatBenchmarkTranscriptOnly")
     }
-}
 
-@MainActor protocol ChatBenchmarkAnchoredDocument {
-    func scrollToBenchmarkRow(_ index: Int)
-    var benchmarkStatistics: String { get }
-}
-
-extension ChatNativeTranscript.VirtualDocument: ChatBenchmarkAnchoredDocument {
-    func scrollToBenchmarkRow(_ index: Int) {
-        #if os(macOS)
-            guard index >= 0, index < offsets.count - 1, let scroll = enclosingScrollView
-            else { return }
-            ChatBenchmarkModel.setContentOffsetY(offsets[index], on: scroll)
-        #else
-            guard index >= 0, index < numberOfRows else { return }
-            ChatBenchmarkModel.setContentOffsetY(
-                offsets[index] - adjustedContentInset.top, on: self)
-        #endif
-    }
-
-    var benchmarkStatistics: String {
-        "nativeMounts=\(nativeMounts) hostingMounts=\(hostingMounts) created=\(createdRows) resident=\(hosts.count) pooled=\(reusableNative.count + reusableHosting.count)"
+    /// `-ChatBenchmarkBackground YES` keeps the benchmark window ordered behind
+    /// other apps (or on a secondary display) without stealing focus.
+    static var runsInBackground: Bool {
+        UserDefaults.standard.bool(forKey: "ChatBenchmarkBackground")
     }
 }
 #endif
