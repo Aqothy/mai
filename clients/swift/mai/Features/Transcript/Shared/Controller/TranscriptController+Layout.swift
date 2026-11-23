@@ -14,8 +14,8 @@ extension TranscriptController {
     }
 
     /// Builds a layout request for `row`, passing the previous layout when the
-    /// text size still matches so code blocks (plain or highlighted) and tables
-    /// reuse their laid-out text across resizes.
+    /// text size still matches so code blocks and tables reuse their laid-out
+    /// text across resizes.
     func request(_ row: TranscriptRow) -> RowLayoutRequest {
         let key = currentKey(row)
         var request = RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)
@@ -24,19 +24,7 @@ extension TranscriptController {
         {
             request.previous = (row.kind, current)
         }
-        if case .markdownBlock(.code(_, let code), _) = row.kind, let palette,
-            let colors = codeColors(forRowID: row.id, code: code, isDark: palette.isDark)
-        {
-            request.codeColors = colors
-        }
         return request
-    }
-
-    /// The colors a code row's layout has, if made for `code` in this theme.
-    func codeColors(forRowID id: String, code: String, isDark: Bool) -> CodeColors? {
-        guard let colors = layouts[id]?.content.codeLayout?.colors, colors.matches(code: code, isDark: isDark)
-        else { return nil }
-        return colors
     }
 
     // MARK: For the host
@@ -105,9 +93,6 @@ extension TranscriptController {
         let themeChanged = self.palette?.isDark != palette.isDark
         self.palette = palette
         guard themeChanged else { return }
-        // Other colors resolve when drawn; syntax colors are per theme, so
-        // code shows the old theme's until highlighted again.
-        scheduleWork()
         host?.setNeedsRowPlacement()
     }
 
@@ -140,12 +125,6 @@ extension TranscriptController {
             return
         }
         columnWidth = width
-        guard configuration.laysOutRows else { return }
-        scheduleWork()
-    }
-
-    func rowsDidChange() {
-        guard configuration.laysOutRows else { return }
         scheduleWork()
     }
 
@@ -249,13 +228,6 @@ extension TranscriptController {
                 }
                 heights[layout.rowID] = layout.height
                 heightDeltaSum += abs(layout.height - geometry.height(at: index))
-                // A plain layout finishing after the colored one for the same
-                // key would take the colors away again.
-                if let current = layouts[layout.rowID], current.key == layout.key, current.content.isHighlighted,
-                    !layout.content.isHighlighted, current.content.colorsAreDark == palette?.isDark
-                {
-                    continue
-                }
                 let frame = geometry.frame(at: index)
                 if keep.map({ frame.minY < $0.upperBound && frame.minY + frame.height > $0.lowerBound }) ?? true {
                     layouts[layout.rowID] = layout
@@ -269,12 +241,10 @@ extension TranscriptController {
         if !newlyParsed.isEmpty {
             applyParsedMessages(newlyParsed)
         }
-        host?.setNeedsRowPlacement()
-        alignInitialEndIfPossible()
         // If large height shrinkage pulled unscheduled rows onto the initial
         // screen, schedule them immediately instead of waiting for the 1s
         // timeout (gated on delta so normal open drains don't re-queue in-flight jobs).
-        if isAwaitingInitialEnd, let viewport = host?.viewport ?? lastViewport,
+        if isAwaitingInitialEnd, newlyParsed.isEmpty, let viewport = host?.viewport ?? lastViewport,
             heightDeltaSum >= viewport.visibleHeight / 4
         {
             scheduleWork()
@@ -313,15 +283,17 @@ extension TranscriptController {
         let width = columnWidth > 0 ? columnWidth : 600
         var replacementRows: [TranscriptRow] = []
         var replacementHeights: [String: CGFloat] = [:]
-        var readyLayouts: [RowLayout] = []
         replacementRows.reserveCapacity((lastIndex - firstIndex + 1) + byIndex.count * 4)
+        // Populate ready layouts before `replaceRows` so its `scheduleWork()`
+        // and `alignInitialEndIfPossible()` see them immediately (zero redundant
+        // layout jobs, and `dropLayouts` trims any out-of-window blocks).
         for index in firstIndex...lastIndex {
             if let replacement = byIndex[index] {
                 for (offset, blockRow) in replacement.rows.enumerated() {
                     if let prebuilt = replacement.layouts, offset < prebuilt.count {
                         let layout = prebuilt[offset]
                         replacementHeights[blockRow.id] = layout.height
-                        readyLayouts.append(layout)
+                        layouts[layout.rowID] = layout
                     } else {
                         replacementHeights[blockRow.id] = HeightEstimator.estimate(blockRow.kind, width: width, style: style)
                     }
@@ -330,12 +302,6 @@ extension TranscriptController {
             } else {
                 replacementRows.append(rows[index])
             }
-        }
-        // Populate ready layouts before `replaceRows` so its `scheduleWork()`
-        // and `alignInitialEndIfPossible()` see them immediately (zero redundant
-        // layout jobs, and `dropLayouts` trims any out-of-window blocks).
-        for layout in readyLayouts {
-            layouts[layout.rowID] = layout
         }
         replaceRows(firstIndex..<(lastIndex + 1), with: replacementRows, heights: replacementHeights, marksArrived: false)
     }

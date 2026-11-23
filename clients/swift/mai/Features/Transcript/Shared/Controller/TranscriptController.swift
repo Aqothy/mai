@@ -242,7 +242,7 @@ final class TranscriptController {
                 ids: versioned.map(\.id), sources: versioned.map(\.sourceID), measured: measuredHeights
             ) { HeightEstimator.estimate(versioned[$0].kind, width: width, style: style) }
         }
-        rowsDidChange()
+        scheduleWork()
     }
 
     /// Measured heights by row ID (rule 4).

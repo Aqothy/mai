@@ -60,7 +60,6 @@ nonisolated struct TranscriptGeometry {
         _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat]
     ) {
         let start = range.lowerBound
-        let oldEnd = range.upperBound
         let delta = newIDs.count - range.count
         // Forget only the removed rows instead of tearing down and rehashing
         // every unchanged entry in the tail.
@@ -80,63 +79,48 @@ nonisolated struct TranscriptGeometry {
         sources.replaceSubrange(range, with: newSources)
         heights.replaceSubrange(range, with: newHeights.map(Self.clamped))
         let newEnd = start + newIDs.count
+        @inline(__always)
+        func writeMinimum(_ table: inout [String: Int], key: String, index: Int) {
+            if let existing = table[key] {
+                if existing > index { table[key] = index }
+            } else {
+                table[key] = index
+            }
+        }
+        @inline(__always)
+        func writeShiftedUp(_ table: inout [String: Int], key: String, index: Int) {
+            if let existing = table[key] {
+                if existing == index - delta || existing > index { table[key] = index }
+            } else {
+                table[key] = index
+            }
+        }
         // Shift/repair surviving tail entries into post-replacement coordinates
         // first so writing `start..<newEnd` cannot collide with unshifted tail
-        // indices. Reverse order for `delta > 0` prevents cascading overwrites.
+        // indices. Reverse order for `delta > 0` prevents cascading overwrites;
+        // for `delta <= 0`, every unshifted tail entry has `existing > index`.
         if delta > 0 {
             for index in (newEnd..<ids.count).reversed() {
-                let id = ids[index]
-                if let existing = indices[id] {
-                    if (existing == index - delta && existing >= oldEnd) || existing > index { indices[id] = index }
-                } else {
-                    indices[id] = index
-                }
+                writeShiftedUp(&indices, key: ids[index], index: index)
                 if index == newEnd || sources[index] != sources[index - 1] {
-                    let source = sources[index]
-                    if let existing = sourceStarts[source] {
-                        if (existing == index - delta && existing >= oldEnd) || existing > index {
-                            sourceStarts[source] = index
-                        }
-                    } else {
-                        sourceStarts[source] = index
-                    }
+                    writeShiftedUp(&sourceStarts, key: sources[index], index: index)
                 }
             }
         } else if delta < 0 || clearedID || clearedSource {
             for index in newEnd..<ids.count {
                 if delta < 0 || clearedID {
-                    let id = ids[index]
-                    if let existing = indices[id] {
-                        if delta < 0, existing == index - delta, existing >= oldEnd { indices[id] = index }
-                    } else {
-                        indices[id] = index
-                    }
+                    writeMinimum(&indices, key: ids[index], index: index)
                 }
                 if delta < 0 || clearedSource, index == newEnd || sources[index] != sources[index - 1] {
-                    let source = sources[index]
-                    if let existing = sourceStarts[source] {
-                        if delta < 0, existing == index - delta, existing >= oldEnd { sourceStarts[source] = index }
-                    } else {
-                        sourceStarts[source] = index
-                    }
+                    writeMinimum(&sourceStarts, key: sources[index], index: index)
                 }
             }
         }
         // Prefix entries are `< start` and tail entries are now `>= newEnd`, so
         // forward writes in `start..<newEnd` keep the smallest index per key.
         for index in start..<newEnd {
-            let id = ids[index]
-            if let existing = indices[id] {
-                if existing > index { indices[id] = index }
-            } else {
-                indices[id] = index
-            }
-            let source = sources[index]
-            if let existing = sourceStarts[source] {
-                if existing > index { sourceStarts[source] = index }
-            } else {
-                sourceStarts[source] = index
-            }
+            writeMinimum(&indices, key: ids[index], index: index)
+            writeMinimum(&sourceStarts, key: sources[index], index: index)
         }
         // Nodes before the change cover only rows before it and stay valid.
         tree.removeSubrange((start + 1)...)

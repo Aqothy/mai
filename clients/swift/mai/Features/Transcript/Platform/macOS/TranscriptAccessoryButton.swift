@@ -5,22 +5,34 @@
     /// document: copy buttons show "Copied" for a moment, as the chat's other
     /// copy buttons do; the fork button opens the turn's fork menu.
     final class TranscriptAccessoryButton: NSButton {
+        private enum Icon {
+            case copy, copied, fork
+
+            private static let copyImage = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: nil)
+            private static let copiedImage = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+            private static let forkImage = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+
+            var image: NSImage? {
+                switch self {
+                case .copy: Self.copyImage
+                case .copied: Self.copiedImage
+                case .fork: Self.forkImage
+                }
+            }
+        }
+
         private(set) var accessory: RowAccessory.Action?
         /// Opens turn `turnID`'s fork menu from this button.
         var onFork: ((String, NSButton) -> Void)?
         private var resetTask: Task<Void, Never>?
-        /// The symbol and label shown: a streamed code block's copy text
-        /// changes every frame, its symbol does not.
-        private var shown: (symbol: String, label: String)?
-
-        private static let copyImage = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: nil)
-        private static let copiedImage = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
-        private static let forkImage = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+        /// The icon and label shown: a streamed code block's copy text
+        /// changes every frame, its icon does not.
+        private var shown: (icon: Icon, label: String)?
 
         func matchesKind(of action: RowAccessory.Action) -> Bool {
             switch action {
-            case .copy: shown?.symbol == "square.on.square"
-            case .fork: shown?.symbol == "arrow.triangle.branch"
+            case .copy: shown?.icon == .copy
+            case .fork: shown?.icon == .fork
             }
         }
 
@@ -75,23 +87,15 @@
         }
 
         private func showCopied(_ copied: Bool) {
-            let (symbol, label): (String, String) =
+            let (icon, label): (Icon, String) =
                 switch accessory {
-                case .copy(_, let label): copied ? ("checkmark", "Copied") : ("square.on.square", label)
-                case .fork: ("arrow.triangle.branch", "Fork from this turn")
-                case nil: ("square.on.square", "")
+                case .copy(_, let label): copied ? (.copied, "Copied") : (.copy, label)
+                case .fork: (.fork, "Fork from this turn")
+                case nil: (.copy, "")
                 }
-            guard shown?.symbol != symbol || shown?.label != label else { return }
-            if shown?.symbol != symbol {
-                image =
-                    switch symbol {
-                    case "square.on.square": Self.copyImage
-                    case "checkmark": Self.copiedImage
-                    case "arrow.triangle.branch": Self.forkImage
-                    default: NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-                    }
-            }
-            shown = (symbol, label)
+            guard shown?.icon != icon || shown?.label != label else { return }
+            if shown?.icon != icon { image = icon.image }
+            shown = (icon, label)
             toolTip = label
             setAccessibilityLabel(label)
         }

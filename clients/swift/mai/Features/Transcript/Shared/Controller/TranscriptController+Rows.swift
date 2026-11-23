@@ -82,7 +82,6 @@ extension TranscriptController {
         guard prefix < rows.count || prefix < newRows.count else { return }
         replaceRows(
             prefix..<(rows.count - suffix), with: Array(newRows[prefix..<(newRows.count - suffix)]), heights: [:])
-        rowsDidChange()
     }
 
     private func blocks(forMessage messageID: String, source: String) -> [MarkdownBlock]? {
@@ -167,20 +166,13 @@ extension TranscriptController {
             guard stream.isFinishing || stream.releasedLength > shown else { continue }
             stream.isInFlight = true
             streams[messageID] = stream
-            // A closed block laid out again (a new width) keeps its colors.
-            var codeColors: [String: CodeColors] = [:]
-            for (index, block) in stream.blocks.enumerated() {
-                guard case .code = block, let colors = layouts["\(messageID)#\(index)"]?.content.codeLayout?.colors
-                else { continue }
-                codeColors["\(messageID)#\(index)"] = colors
-            }
             let drawing = palette.map { palette in
                 TranscriptStreamWorker.Drawing(
                     palette: palette, scale: host?.scale ?? 2, colorSpace: host?.colorSpace ?? RowLayer.colorSpace)
             }
             let update = TranscriptStreamWorker.Update(
                 messageID: messageID, text: released, isFinished: stream.isFinishing, width: columnWidth, style: style,
-                codeColors: codeColors, isDark: palette?.isDark, drawing: drawing)
+                codeColors: [:], isDark: palette?.isDark, drawing: drawing)
             let worker = streamWorker
             Task { [weak self] in
                 let result = await worker.run(update)
