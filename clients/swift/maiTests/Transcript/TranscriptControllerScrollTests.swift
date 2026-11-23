@@ -681,6 +681,36 @@ struct TranscriptControllerScrollTests {
         #expect(controller.rows.contains { $0.id == "m1#1" })
     }
 
+    @Test func removingAndReaddingRowWithSameIDDropsStaleCachedLayout() {
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 400, height: 300)
+        host.controller = controller
+        controller.attach(host)
+
+        let user = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(source: "Hi"), messageID: "u0", role: .user)
+        let working1 = TranscriptRow(id: "working", kind: .working(phrase: "Pondering…"))
+        controller.setRows([user, working1])
+        let firstLayout = controller.layout(forRowAt: 1, synchronously: true)
+        #expect(firstLayout != nil)
+        #expect(controller.layouts["working"] != nil)
+
+        // Turn ends: `"working"` is removed. Its cached layout must be dropped.
+        controller.replaceRows(1..<2, with: [], heights: [:])
+        #expect(controller.layouts["working"] == nil)
+
+        // Next turn starts with a new phrase under the same `"working"` ID.
+        let working2 = TranscriptRow(id: "working", kind: .working(phrase: "Tinkering with a much longer phrase…"))
+        controller.replaceRows(1..<1, with: [working2], heights: [:])
+        #expect(controller.layouts["working"] == nil)
+        let secondLayout = controller.layout(forRowAt: 1, synchronously: true)
+        if case .text(let textLayout, _) = secondLayout?.content {
+            #expect(textLayout.string.contains("Tinkering"))
+        } else {
+            Issue.record("expected text layout for working row")
+        }
+    }
+
     #if os(iOS)
         private final class StubTouch: UITouch {
             private let targetView: UIView

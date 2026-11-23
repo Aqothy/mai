@@ -36,8 +36,10 @@ nonisolated enum HeightEstimator {
             height = 8 + scanLines(text, perLine: charactersPerLine).lines * lineHeight
         case .notice(_, let text):
             height = 36 + (1 + scanLines(text ?? "", perLine: charactersPerLine).lines) * lineHeight
-        case .activity, .working:
-            height = 8 + lineHeight
+        case .activity:
+            height = 8 + style.font(.callout).lineHeight
+        case .working:
+            height = 16 + style.font(.callout).lineHeight
         case .turnHeader:
             height = 17 + style.font(.callout).lineHeight
         case .turnActions:

@@ -279,6 +279,12 @@ final class TranscriptController {
             // one placement both arrive.
             arrivedRowIDs.formUnion(versioned.lazy.map(\.id).filter { old[$0] == nil })
         }
+        // Drop cached layouts for rows leaving the transcript so a reused ID
+        // (such as `"working"` on the next turn) cannot collide at contentVersion 0.
+        if !old.isEmpty {
+            let kept = Set(versioned.lazy.map(\.id))
+            for id in old.keys where !kept.contains(id) { layouts[id] = nil }
+        }
         changeGeometry {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
