@@ -186,7 +186,9 @@ def main():
                 for marker in ("invalid measurement:", "sourceMatches=false",
                                "visible=false", "transcript warm timed out"):
                     if marker in text:
-                        raise RuntimeError(f"Invalid benchmark ({marker}): {log}")
+                        reason = next(line for line in text.splitlines() if marker in line)
+                        raise RuntimeError(
+                            f"Invalid benchmark: {reason.removeprefix('CHAT_BENCHMARK_TRACE ')} ({log})")
                 if "\nCHAT_BENCHMARK_COMPLETE" in text:
                     reports = [
                         json.loads(line.removeprefix("CHAT_BENCHMARK_RESULT "))
