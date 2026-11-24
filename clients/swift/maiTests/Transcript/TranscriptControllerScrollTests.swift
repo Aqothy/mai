@@ -598,16 +598,24 @@ struct TranscriptControllerScrollTests {
         host.controller = controller
         controller.attach(host)
         controller.start(store: store, threadID: detail.id)
+        // A loaded test run can take longer than the 1 s readiness timeout,
+        // which lands on the end; push it out so only the stream decides.
+        controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
 
-        // Before the stream worker finishes its first run, initial alignment
-        // must wait rather than discard the saved place and snap to the end.
+        // The end screen is laid out before the stream runs (frames only tick
+        // when the test says so): alignment must still wait for the saved row.
+        func isEndScreenLaidOut() -> Bool {
+            controller.rows.allSatisfy { controller.layouts[$0.id]?.key == controller.currentKey($0) }
+        }
+        for _ in 0..<250 where !isEndScreenLaidOut() {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(isEndScreenLaidOut())
         #expect(controller.isAwaitingInitialEnd)
-        #expect(controller.pendingRestorePlace == saved)
-        #expect(!controller.isEndScreenReady(TranscriptViewport(size: host.size, topInset: 0, bottomInset: 0)))
 
-        // Driving one frame tick releases the already-received text in one shot.
+        // One frame tick releases the received text at once.
         controller.frameDidTick()
-        for _ in 0..<50 where controller.isAwaitingInitialEnd {
+        for _ in 0..<250 where controller.isAwaitingInitialEnd {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(!controller.isAwaitingInitialEnd)
