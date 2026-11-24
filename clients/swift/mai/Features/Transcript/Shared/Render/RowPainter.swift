@@ -12,7 +12,7 @@ nonisolated enum RowPainter {
         switch content {
         case .text(let layout, let origin):
             TextRenderer.draw(layout, at: origin, clip: clip, palette: palette, in: context)
-        case .bubble(let layout, _, let textOrigin):
+        case .bubble(let layout, _, let textOrigin, _):
             TextRenderer.draw(layout, at: textOrigin, clip: clip, palette: palette, in: context)
         case .notice(let layout, let frame, let textOrigin):
             TextRenderer.draw(
@@ -23,8 +23,10 @@ nonisolated enum RowPainter {
             context.setFillColor(palette.separator)
             context.fill(CGRect(x: 0, y: dividerY, width: clip.maxX, height: 1))
         case .code(let layout, let frame):
-            let labelOrigin = CGPoint(x: frame.minX + layout.bodyOrigin.x, y: frame.minY + layout.labelTop)
-            TextRenderer.draw(layout.label, at: labelOrigin, clip: clip, palette: palette, in: context)
+            if layout.headerHeight > 0 {
+                let labelOrigin = CGPoint(x: frame.minX + layout.bodyOrigin.x, y: frame.minY + layout.labelTop)
+                TextRenderer.draw(layout.label, at: labelOrigin, clip: clip, palette: palette, in: context)
+            }
             if drawsWideBody {
                 context.saveGState()
                 context.clip(to: CGRect(x: frame.minX, y: frame.minY + layout.headerHeight, width: frame.width, height: frame.height - layout.headerHeight))
@@ -68,7 +70,9 @@ nonisolated enum RowPainter {
         }
         for cell in layout.cells {
             let cellOrigin = CGPoint(x: origin.x + cell.origin.x, y: gridTop + cell.origin.y)
-            guard cellOrigin.y < clip.maxY, cellOrigin.y + cell.layout.size.height > clip.minY else { continue }
+            guard cellOrigin.y < clip.maxY, cellOrigin.y + cell.layout.size.height > clip.minY,
+                cellOrigin.x < clip.maxX, cellOrigin.x + cell.layout.size.width > clip.minX
+            else { continue }
             TextRenderer.draw(cell.layout, at: cellOrigin, clip: clip, palette: palette, in: context)
         }
         context.restoreGState()

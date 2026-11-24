@@ -14,7 +14,9 @@ nonisolated struct ReadingPlace: Sendable {
     let source: String
     let offsetIntoSource: CGFloat
     /// The rows above the anchor when the place was taken, nearest last.
-    /// Slices of the geometry's own arrays, shared rather than copied.
-    let idsAbove: ArraySlice<String>
-    let sourcesAbove: ArraySlice<String>
+    /// Copied (or empty when the anchor cannot be removed) so holding a
+    /// `ReadingPlace` never shares `TranscriptGeometry`'s backing buffer and
+    /// triggers copy-on-write during `replaceRows`.
+    let idsAbove: [String]
+    let sourcesAbove: [String]
 }

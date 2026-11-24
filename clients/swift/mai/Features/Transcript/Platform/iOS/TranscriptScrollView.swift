@@ -315,7 +315,6 @@
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             defer { CATransaction.commit() }
-            if isContentVisible { controller.layOutVisibleRows(minY: visibleRect.minY, maxY: visibleRect.maxY) }
             UIView.performWithoutAnimation {
                 mounter.place(
                     controller, visible: visibleRect, documentWidth: bounds.width, palette: palette, scale: scale,
@@ -390,7 +389,12 @@
                 // A larger touch target around the small symbol.
                 let frame = accessory.frame.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -8, dy: -8)
                 if button.frame != frame { button.frame = frame }
-                button.show(accessory.action) { [weak self] turnID in self?.forkMenu?(turnID) }
+                button.show(
+                    accessory.action,
+                    resolveCopy: { [weak self] action in
+                        self?.controller.copyText(for: action) ?? ""
+                    },
+                    forkMenu: { [weak self] turnID in self?.forkMenu?(turnID) })
             }
             accessoryButtons[rowID] = buttons
         }

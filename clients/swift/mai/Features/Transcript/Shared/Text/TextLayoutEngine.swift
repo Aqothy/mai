@@ -20,12 +20,29 @@ nonisolated enum TextLayoutEngine {
         var quoteBarWidth: CGFloat = 3
     }
 
+    /// Hard lines longer than this (in UTF-16 code units) use a sliding
+    /// `CTTypesetter` window to avoid Core Text / ICU's O(N^2) line-break scan
+    /// from the start of each hard line.
+    static let slidingWindowThreshold = 4_096
+    static let slidingWindowSize = 2_048
+    static let slidingWindowLookahead = 64
+
     static func layout(_ text: StyledText, width: CGFloat, options: Options) -> TextLayout {
         let length = text.length
         guard length > 0 else { return .empty }
-        let typesetter = CTTypesetterCreateWithAttributedString(text.string)
         let nsString = text.string.mutableString
         var builder = Builder(text: text, nsString: nsString, options: options, availableWidth: width)
+        if options.wraps, length > slidingWindowThreshold {
+            let scan = scanForSlidingWindow(nsString, length: length, threshold: slidingWindowThreshold)
+            if scan.hasLongHardLine, !scan.hasBiDi {
+                layoutSliding(
+                    attributedString: text.string, nsString: nsString, length: length,
+                    paragraphs: text.paragraphs, width: width, forceContinuation: false,
+                    into: &builder)
+                return builder.finish()
+            }
+        }
+        let typesetter = CTTypesetterCreateWithAttributedString(text.string)
         var start = 0
         var paragraphIndex = 0
         while start < length {
@@ -68,7 +85,6 @@ nonisolated enum TextLayoutEngine {
         let suffixLength = suffix.string.length
         guard resumeUTF16 > 0, suffixLength > 0 else { return nil }
 
-        let typesetter = CTTypesetterCreateWithAttributedString(suffix.string)
         let suffixNS = suffix.string.string as NSString
         let paragraph = suffix.paragraphs.first
         let indent = paragraph?.headIndent ?? 0
@@ -91,6 +107,19 @@ nonisolated enum TextLayoutEngine {
             previousQuoteBars: paragraph?.quoteBars ?? [],
             utf16BaseOffset: resumeUTF16)
 
+        if options.wraps, suffixLength > slidingWindowThreshold {
+            let scan = scanForSlidingWindow(suffixNS, length: suffixLength, threshold: slidingWindowThreshold)
+            if scan.hasLongHardLine, !scan.hasBiDi {
+                layoutSliding(
+                    attributedString: suffix.string, nsString: suffixNS, length: suffixLength,
+                    paragraphs: paragraph.map { [$0] } ?? [], width: width, forceContinuation: true,
+                    into: &builder)
+                if builder.hasComplexBiDi { return nil }
+                return builder.finish(overrideString: fullString)
+            }
+        }
+
+        let typesetter = CTTypesetterCreateWithAttributedString(suffix.string)
         var localStart = 0
         while localStart < suffixLength {
             let count = nextLineLength(
@@ -105,6 +134,140 @@ nonisolated enum TextLayoutEngine {
         }
         if builder.hasComplexBiDi { return nil }
         return builder.finish(overrideString: fullString)
+    }
+
+    /// Single bulk UTF-16 scan detecting whether any hard line exceeds
+    /// `threshold` and whether any RTL/BiDi scalar is present (RTL reordering
+    /// spans wrapped lines, so BiDi paragraphs stay on the full typesetter).
+    private static func scanForSlidingWindow(
+        _ nsString: NSString, length: Int, threshold: Int
+    ) -> (hasLongHardLine: Bool, hasBiDi: Bool) {
+        var buffer = [unichar](repeating: 0, count: 4_096)
+        var hasLongHardLine = false
+        var currentLineLen = 0
+        var offset = 0
+        while offset < length {
+            let chunk = min(buffer.count, length - offset)
+            nsString.getCharacters(&buffer, range: NSRange(location: offset, length: chunk))
+            for i in 0..<chunk {
+                let u = buffer[i]
+                if u == 0x0A {
+                    currentLineLen = 0
+                    continue
+                }
+                currentLineLen &+= 1
+                if currentLineLen > threshold { hasLongHardLine = true }
+                if u >= 0x0590, isBiDiCodeUnit(u) {
+                    return (hasLongHardLine, true)
+                }
+            }
+            offset &+= chunk
+        }
+        return (hasLongHardLine, false)
+    }
+
+    /// Conservative UTF-16 check covering Hebrew, Arabic, Syriac, Thaana, NKo,
+    /// Samaritan, Mandaic, BiDi control marks, Arabic Presentation Forms, and
+    /// astral RTL script high surrogates (U+10800..U+10FFF, U+1E800..U+1EFFF).
+    private static func isBiDiCodeUnit(_ u: unichar) -> Bool {
+        if u <= 0x08FF { return true }
+        if u >= 0x200E && u <= 0x200F { return true }
+        if u >= 0x202A && u <= 0x202E { return true }
+        if u >= 0x2066 && u <= 0x2069 { return true }
+        if u >= 0xD802 && u <= 0xD803 { return true }
+        if u >= 0xD83A && u <= 0xD83B { return true }
+        if u >= 0xFB1D && u <= 0xFDFF { return true }
+        if u >= 0xFE70 && u <= 0xFEFF { return true }
+        return false
+    }
+
+    /// Breaks `attributedString` hard-line by hard-line, using a 2 KB sliding
+    /// `CTTypesetter` window on hard lines longer than `slidingWindowThreshold`.
+    private static func layoutSliding(
+        attributedString: NSAttributedString,
+        nsString: NSString,
+        length: Int,
+        paragraphs: [StyledParagraph],
+        width: CGFloat,
+        forceContinuation: Bool,
+        into builder: inout Builder
+    ) {
+        var hardStart = 0
+        var paragraphIndex = 0
+        var chunkBuffer = [unichar](repeating: 0, count: 4_096)
+
+        func nextHardLineEnd(from start: Int) -> Int {
+            var pos = start
+            while pos < length {
+                let n = min(chunkBuffer.count, length - pos)
+                nsString.getCharacters(&chunkBuffer, range: NSRange(location: pos, length: n))
+                for i in 0..<n where chunkBuffer[i] == 0x0A {
+                    return pos + i + 1
+                }
+                pos &+= n
+            }
+            return length
+        }
+
+        while hardStart < length {
+            let hardEnd = nextHardLineEnd(from: hardStart)
+            if !forceContinuation {
+                while paragraphIndex + 1 < paragraphs.count, paragraphs[paragraphIndex + 1].start <= hardStart {
+                    paragraphIndex += 1
+                }
+            }
+            let paragraph = paragraphs.isEmpty ? nil : paragraphs[paragraphIndex]
+            var windowStart = hardStart
+            var windowCap = (hardEnd - hardStart) <= slidingWindowThreshold ? (hardEnd - hardStart) : slidingWindowSize
+            while windowStart < hardEnd {
+                let rawEnd = min(hardEnd, windowStart + windowCap)
+                let windowEnd: Int
+                if rawEnd < hardEnd {
+                    let cluster = nsString.rangeOfComposedCharacterSequence(at: rawEnd - 1)
+                    windowEnd = min(hardEnd, NSMaxRange(cluster))
+                } else {
+                    windowEnd = hardEnd
+                }
+                let windowLen = windowEnd - windowStart
+                let windowAttr = attributedString.attributedSubstring(
+                    from: NSRange(location: windowStart, length: windowLen))
+                let windowNS = windowAttr.string as NSString
+                let typesetter = CTTypesetterCreateWithAttributedString(windowAttr)
+                let isFinalWindow = windowEnd == hardEnd
+                var localStart = 0
+                var emitted = 0
+                var needsLargerWindow = false
+                while localStart < windowLen {
+                    let globalStart = windowStart + localStart
+                    let isParagraphStart =
+                        !forceContinuation && (paragraph.map { $0.start == globalStart } ?? (globalStart == 0))
+                    let indent = (isParagraphStart ? paragraph?.firstLineIndent : paragraph?.headIndent) ?? 0
+                    let count = nextLineLength(
+                        typesetter: typesetter, nsString: windowNS, start: localStart, length: windowLen,
+                        availableWidth: max(1, width - indent), wraps: true)
+                    let localEnd = localStart + count
+                    if !isFinalWindow, localEnd >= windowLen || windowLen - localEnd < slidingWindowLookahead {
+                        if emitted == 0 { needsLargerWindow = true }
+                        break
+                    }
+                    let line = CTTypesetterCreateLine(typesetter, CFRange(location: localStart, length: count))
+                    builder.add(
+                        line, range: localStart..<localEnd, indent: indent, paragraph: paragraph,
+                        isParagraphStart: isParagraphStart,
+                        endsWithNewline: windowNS.character(at: localEnd - 1) == 0x0A,
+                        windowNSString: windowNS, windowOffset: windowStart)
+                    localStart = localEnd
+                    emitted += 1
+                }
+                if needsLargerWindow {
+                    windowCap = min(hardEnd - windowStart, windowCap * 2)
+                    continue
+                }
+                windowStart += localStart
+                windowCap = slidingWindowSize
+            }
+            hardStart = hardEnd
+        }
     }
 
     /// The UTF-16 length of the line starting at `start`: Core Text's break
@@ -163,8 +326,11 @@ nonisolated enum TextLayoutEngine {
 
         mutating func add(
             _ line: CTLine, range: Range<Int>, indent: CGFloat, paragraph: StyledParagraph?,
-            isParagraphStart: Bool, endsWithNewline: Bool
+            isParagraphStart: Bool, endsWithNewline: Bool,
+            windowNSString: NSString? = nil, windowOffset: Int = 0
         ) {
+            let activeString = windowNSString ?? nsString
+            let baseOffset = utf16BaseOffset + windowOffset
             let gapAbove: CGFloat
             if lines.isEmpty {
                 gapAbove = 0
@@ -181,12 +347,14 @@ nonisolated enum TextLayoutEngine {
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let firstRun = runs.count
             let firstDecoration = decorations.count
-            let carets = addRunsAndCarets(of: line, range: range, indent: indent, baseline: baseline, width: lineWidth)
+            let carets = addRunsAndCarets(
+                of: line, range: range, indent: indent, baseline: baseline, width: lineWidth,
+                activeString: activeString, baseOffset: baseOffset)
             if let paragraph {
                 addParagraphDecorations(
                     paragraph, lineHeight: height, gapAbove: gapAbove, isParagraphStart: isParagraphStart)
             }
-            let textRange = (range.lowerBound + utf16BaseOffset)..<(range.upperBound + utf16BaseOffset)
+            let textRange = (range.lowerBound + baseOffset)..<(range.upperBound + baseOffset)
             lines.append(
                 TextLine(
                     top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: textRange,
@@ -205,7 +373,8 @@ nonisolated enum TextLayoutEngine {
         /// Copies the line's runs and their decorations, and returns its
         /// carets, in one pass over Core Text's own glyph buffers.
         private mutating func addRunsAndCarets(
-            of line: CTLine, range: Range<Int>, indent: CGFloat, baseline: CGFloat, width: CGFloat
+            of line: CTLine, range: Range<Int>, indent: CGFloat, baseline: CGFloat, width: CGFloat,
+            activeString: NSString, baseOffset: Int
         ) -> [CGFloat] {
             let ctRuns = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
             let needsCoreTextCarets = ctRuns.contains(where: Self.needsCoreTextCarets)
@@ -240,7 +409,7 @@ nonisolated enum TextLayoutEngine {
                     if !needsCoreTextCarets {
                         Self.accumulateRunCarets(
                             run: run, count: count, positions: positions, stringRange: stringRange,
-                            rangeStart: rangeStart, nsString: nsString, indent: indent, into: &carets)
+                            rangeStart: rangeStart, nsString: activeString, indent: indent, into: &carets)
                     }
                     return positions.map { CGPoint(x: indent + $0.x, y: $0.y - baseline) }
                 }
@@ -248,15 +417,15 @@ nonisolated enum TextLayoutEngine {
                 runs.append(
                     TextGlyphRun(
                         font: font, glyphs: glyphs, positions: positions, color: style.color,
-                        range: (stringRange.location + utf16BaseOffset)..<(
-                            stringRange.location + utf16BaseOffset + stringRange.length),
+                        range: (stringRange.location + baseOffset)..<(
+                            stringRange.location + baseOffset + stringRange.length),
                         linkIndex: style.linkIndex))
                 addRunDecorations(run, style: style, font: font, start: positions[0].x, baseline: baseline)
             }
 
             if needsCoreTextCarets {
                 return TextLayoutEngine.enumeratedCaretOffsets(
-                    of: line, range: range, string: nsString, indent: indent, width: width)
+                    of: line, range: range, string: activeString, indent: indent, width: width)
             }
             return TextLayoutEngine.filled(carets, indent: indent, width: width)
         }
@@ -284,13 +453,6 @@ nonisolated enum TextLayoutEngine {
             }
             var buffer = [CFIndex](repeating: 0, count: count)
             CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &buffer)
-            return buffer.withUnsafeBufferPointer(body)
-        }
-
-        private static func withRunAdvances<R>(_ run: CTRun, count: Int, _ body: (UnsafeBufferPointer<CGSize>) -> R) -> R {
-            if let pointer = CTRunGetAdvancesPtr(run) { return body(UnsafeBufferPointer(start: pointer, count: count)) }
-            var buffer = [CGSize](repeating: .zero, count: count)
-            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &buffer)
             return buffer.withUnsafeBufferPointer(body)
         }
 
@@ -322,7 +484,14 @@ nonisolated enum TextLayoutEngine {
                                 }
                             }
                         }
-                        let width = isLigature ? withRunAdvances(run, count: count) { $0[glyph].width } : 0
+                        let width: CGFloat
+                        if isLigature {
+                            var advance = CGSize.zero
+                            CTRunGetAdvances(run, CFRange(location: glyph, length: 1), &advance)
+                            width = advance.width
+                        } else {
+                            width = 0
+                        }
                         let baseX = indent + positions[glyph].x
                         for index in first..<end {
                             let position = index - rangeStart

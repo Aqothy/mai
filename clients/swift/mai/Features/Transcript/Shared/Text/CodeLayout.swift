@@ -22,6 +22,9 @@ nonisolated struct CodeLayout: Sendable {
     /// The syntax colors drawn, kept so the same code laid out again (a new
     /// width or text size) keeps them; nil while plain.
     let colors: CodeColors?
+    /// Where this chunk sits inside a split oversized code block (`.single` for
+    /// normal code blocks).
+    let position: TranscriptBlockPosition
 
     var isHighlighted: Bool { colors != nil }
 
@@ -32,15 +35,21 @@ nonisolated struct CodeLayout: Sendable {
 
     static func make(
         code: String, language: String?, colors: CodeColors?, width: CGFloat, style: TextStyle,
-        previous: CodeLayout? = nil
+        position: TranscriptBlockPosition = .single, previous: CodeLayout? = nil
     ) -> CodeLayout {
         let colors = colors?.code == code ? colors : nil
-        let display = displayName(language)
-        let label =
-            previous.flatMap { $0.label.string == display ? $0.label : nil }
-            ?? TextLayoutEngine.layout(
-                AttributedTextBuilder.plain(display, role: .callout, color: .secondary, style: style),
-                width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
+        let hasHeader = !position.joinsAbove
+        let display = hasHeader ? displayName(language) : ""
+        let label: TextLayout
+        if hasHeader {
+            label =
+                previous.flatMap { !$0.position.joinsAbove && $0.label.string == display ? $0.label : nil }
+                ?? TextLayoutEngine.layout(
+                    AttributedTextBuilder.plain(display, role: .callout, color: .secondary, style: style),
+                    width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
+        } else {
+            label = .empty
+        }
         let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
         let body: TextLayout
         if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
@@ -72,19 +81,24 @@ nonisolated struct CodeLayout: Sendable {
             let text = buildStyledCode(code, colors: colors, style: style)
             body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
         }
-        let headerHeight = style.codeHeaderHeight
+        let headerHeight = hasHeader ? style.codeHeaderHeight : 0
         let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
-        let height = Self.height(for: code, style: style)
+        let height = Self.height(for: code, style: style, position: position)
         return CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
             bodyOrigin: CGPoint(x: style.codeHorizontalInset, y: headerHeight),
-            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors)
+            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors,
+            position: position)
     }
 
     /// Analytic height (independent of width and syntax colors).
-    static func height(for code: String, style: TextStyle) -> CGFloat {
+    static func height(
+        for code: String, style: TextStyle, position: TranscriptBlockPosition = .single
+    ) -> CGFloat {
         let lineCount = max(1, code.utf8.reduce(into: 1) { count, byte in if byte == 0x0A { count += 1 } })
-        return ceil(style.codeHeaderHeight + CGFloat(lineCount) * style.codeLineHeight + style.codeBottomInset)
+        let header = position.joinsAbove ? 0 : style.codeHeaderHeight
+        let bottom = position.joinsBelow ? 0 : style.codeBottomInset
+        return ceil(header + CGFloat(lineCount) * style.codeLineHeight + bottom)
     }
 
     /// The same block at another row width: code never wraps, so its text
@@ -93,7 +107,7 @@ nonisolated struct CodeLayout: Sendable {
         CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: labelTop,
             bodyOrigin: bodyOrigin, size: CGSize(width: width, height: size.height), contentWidth: contentWidth,
-            colors: colors)
+            colors: colors, position: position)
     }
 
     private static func buildStyledCode(_ code: String, colors: CodeColors?, style: TextStyle) -> StyledText {

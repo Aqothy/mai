@@ -5,14 +5,17 @@ import Foundation
 /// on its header line, a table's in its toolbar, a finished turn's copy-reply
 /// button and fork menu at the start of its action row.
 nonisolated extension RowContentLayout {
-    var accessories: [RowAccessory] {
+    func accessories(forRowID rowID: String) -> [RowAccessory] {
         let size = RowAccessory.size
         switch self {
         case .code(let code, let frame):
+            guard !code.position.joinsAbove else { return [] }
             let lineCenter = frame.minY + code.labelTop + code.label.size.height / 2
+            let action: RowAccessory.Action =
+                code.position.joinsBelow ? .copyChunkedCode(rowID: rowID) : .copy(text: code.code, label: "Copy code")
             return [
                 RowAccessory(
-                    action: .copy(text: code.code, label: "Copy code"),
+                    action: action,
                     frame: CGRect(
                         x: frame.maxX - code.bodyOrigin.x + 4 - size, y: (lineCenter - size / 2).rounded(),
                         width: size, height: size))
@@ -25,13 +28,13 @@ nonisolated extension RowContentLayout {
                         x: frame.maxX - size, y: frame.minY + ((table.toolbarHeight - size) / 2).rounded(),
                         width: size, height: size))
             ]
-        case .actions(let turnID, let replyMarkdown, let origin):
+        case .actions(let turnID, let hasReply, let origin):
             var accessories: [RowAccessory] = []
             var x = origin.x
-            if !replyMarkdown.isEmpty {
+            if hasReply {
                 accessories.append(
                     RowAccessory(
-                        action: .copy(text: replyMarkdown, label: "Copy reply"),
+                        action: .copyReply(turnID: turnID),
                         frame: CGRect(x: x, y: origin.y, width: size, height: size)))
                 x += size + 4
             }

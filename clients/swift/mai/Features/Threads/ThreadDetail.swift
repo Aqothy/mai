@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A subscribed thread: the daemon's snapshot and the events after it.
 ///
@@ -7,11 +8,20 @@ import Foundation
 /// (`sessionsByID[id]?.detail?.apply(event)`): a temporary copy would give
 /// `turns` a second reference and copy every entry on each streamed chunk.
 nonisolated struct ThreadDetail {
+    private static let snapshotCounter = Atomic<Int>(0)
+
+    /// Unique per snapshot instance so incremental observers never mistake a
+    /// reloaded snapshot's turn revisions for the previous snapshot's.
+    let snapshotID: Int
     var seq: Int
     var summary: ThreadSummary
     var participants: [ParticipantView]
     /// Oldest first; `older` pages the turns before them.
     var turns: [TurnView]
+    /// Monotonic revision per turn (parallel to `turns`), bumped on every
+    /// mutation so the transcript rebuilds only changed turns.
+    private(set) var turnRevisions: [Int]
+    private var nextTurnRevision = 1
     var older: String?
     /// Deliveries not yet delivered, in queue order.
     var queue: [DeliveryView]
@@ -20,10 +30,12 @@ nonisolated struct ThreadDetail {
     var plan: [PlanEntry]
 
     init(_ snapshot: ThreadSnapshot) {
+        snapshotID = Self.snapshotCounter.wrappingAdd(1, ordering: .relaxed).newValue
         seq = snapshot.seq
         summary = snapshot.thread
         participants = snapshot.participants
         turns = snapshot.turns
+        turnRevisions = Array(repeating: 0, count: snapshot.turns.count)
         older = snapshot.older
         queue = snapshot.queue.sorted(by: Self.queueOrder)
         requests = snapshot.requests
@@ -61,6 +73,7 @@ nonisolated struct ThreadDetail {
             } else {
                 turns[index].entries.append(entry)
             }
+            bumpTurnRevision(at: index)
             return .turns(from: index)
         case .text:
             guard let text = event.text,
@@ -68,10 +81,13 @@ nonisolated struct ThreadDetail {
                 let at = turns[index].entries.lastIndex(where: { $0.ref == text.entry })
             else { return .none }
             turns[index].entries[at].text = (turns[index].entries[at].text ?? "") + text.text
+            bumpTurnRevision(at: index)
             return .text(turnID: text.turn, entryRef: text.entry, delta: text.text)
         case .turn:
             guard let turn = event.turn else { return .none }
-            return .turns(from: turnIndex(for: turn))
+            let index = turnIndex(for: turn)
+            bumpTurnRevision(at: index)
+            return .turns(from: index)
         case .delivery:
             guard let delivery = event.delivery else { return .none }
             queue.removeAll { $0.id == delivery.id }
@@ -127,8 +143,15 @@ nonisolated struct ThreadDetail {
     /// Prepends the page of turns before the oldest loaded one.
     mutating func prepend(_ page: ThreadTurnsResult) {
         let loaded = Set(turns.map(\.id))
-        turns.insert(contentsOf: page.turns.filter { !loaded.contains($0.id) }, at: 0)
+        let added = page.turns.filter { !loaded.contains($0.id) }
+        turns.insert(contentsOf: added, at: 0)
+        turnRevisions.insert(contentsOf: repeatElement(0, count: added.count), at: 0)
         older = page.older
+    }
+
+    private mutating func bumpTurnRevision(at index: Int) {
+        nextTurnRevision &+= 1
+        turnRevisions[index] = nextTurnRevision
     }
 
     /// The index of the event's turn with its new state, appending the turn
@@ -143,6 +166,7 @@ nonisolated struct ThreadDetail {
         var added = turn
         added.entries = []
         turns.append(added)
+        turnRevisions.append(0)
         return turns.count - 1
     }
 

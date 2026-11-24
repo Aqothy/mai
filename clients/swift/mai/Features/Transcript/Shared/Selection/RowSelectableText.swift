@@ -13,7 +13,8 @@ nonisolated enum RowSelectableText {
             return TableLayout.tabSeparatedText(table)
         case .markdownBlock(let block, _):
             return AttributedTextBuilder.build([block], style: style).string.string
-        case .userMessage(let source):
+        case .userMessage(let source, let position):
+            if position.joinsAbove || position.joinsBelow { return source }
             return AttributedTextBuilder.build(MarkdownPlanner.blocks(from: source), style: style).string.string
         case .pendingMessage(let source):
             return source

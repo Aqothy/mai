@@ -12,19 +12,28 @@ nonisolated struct TranscriptRow: Equatable, Sendable {
     var kind: TranscriptRowKind
     var messageID: String?
     var role: TranscriptRole?
+    /// The turn this row belongs to, so incremental store updates rebuild only
+    /// changed turns without rescanning history.
+    var turnID: String?
+    /// True for continuation chunks split mid-line (no newline consumed at the
+    /// split boundary) so copying across chunks restores exact original text.
+    var joinsPreviousWithoutNewline: Bool
     /// Changes whenever the row's content does: a layout for another version
     /// is stale.
     var contentVersion: Int
 
     init(
         id: String, sourceID: String? = nil, kind: TranscriptRowKind,
-        messageID: String? = nil, role: TranscriptRole? = nil, contentVersion: Int = 0
+        messageID: String? = nil, role: TranscriptRole? = nil, turnID: String? = nil,
+        joinsPreviousWithoutNewline: Bool = false, contentVersion: Int = 0
     ) {
         self.id = id
         self.sourceID = sourceID ?? id
         self.kind = kind
         self.messageID = messageID
         self.role = role
+        self.turnID = turnID
+        self.joinsPreviousWithoutNewline = joinsPreviousWithoutNewline
         self.contentVersion = contentVersion
     }
 }

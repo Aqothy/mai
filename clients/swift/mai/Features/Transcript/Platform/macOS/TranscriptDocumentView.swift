@@ -258,18 +258,14 @@
             placeRows()
         }
 
-        /// A visible row without a layout gets one now (PLAN D3); the mounter
-        /// does the rest.
+        /// Places rows using cached layouts only (pure async + blanking:
+        /// layout and raster never run synchronously on the main thread).
         private func placeRows() {
             guard let clip, let palette, controller.columnWidth > 0 else { return }
             attachRowsLayer()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             defer { CATransaction.commit() }
-            if isContentVisible {
-                let visible = clip.documentVisibleRect
-                controller.layOutVisibleRows(minY: visible.minY, maxY: visible.maxY)
-            }
             mounter.place(
                 controller, visible: clip.documentVisibleRect, documentWidth: bounds.width, palette: palette,
                 scale: scale, colorSpace: colorSpace, showsContent: isContentVisible)
@@ -326,6 +322,9 @@
                 let frame = accessory.frame.offsetBy(dx: origin.x, dy: origin.y)
                 if button.frame != frame { button.frame = frame }
                 button.show(accessory.action)
+                button.onResolveCopy = { [weak self] action in
+                    self?.controller.copyText(for: action) ?? ""
+                }
                 button.onFork = { [weak self] turnID, button in
                     guard let menu = self?.forkMenu?(turnID) else { return }
                     NSMenu(menu).popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 2), in: button)

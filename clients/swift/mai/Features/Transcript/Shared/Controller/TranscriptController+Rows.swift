@@ -26,7 +26,9 @@ extension TranscriptController {
     }
 
     /// Re-armed after every change: the store publishes structural changes
-    /// (entries, turns), not each streamed chunk.
+    /// (entries, turns), not each streamed chunk. Unchanged prefix turns keep
+    /// their copied `TranscriptTurn`s and built rows so live tool updates stay
+    /// O(changed tail) regardless of chat size.
     private func observeStore() {
         guard let store, let threadID else { return }
         let thread = withObservationTracking {
@@ -35,12 +37,45 @@ extension TranscriptController {
             Task { @MainActor [weak self] in self?.observeStore() }
         }
         guard let thread, thread.id == threadID else { return }
-        // Copied out so the store's turns are not shared past this call.
-        turns = thread.turns.map(TranscriptTurn.init)
         hasOlderTurns = thread.older != nil
-        updateWorkingPhrase()
-        updateStreams()
-        rebuildRows()
+
+        let canDiffPrefix =
+            lastSnapshotID == thread.snapshotID
+            && thread.turnRevisions.count == thread.turns.count
+            && turnRevisions.count == turns.count
+            && turns.count <= thread.turns.count
+
+        if canDiffPrefix {
+            var firstChanged = 0
+            while firstChanged < turns.count,
+                turns[firstChanged].id == thread.turns[firstChanged].id,
+                turnRevisions[firstChanged] == thread.turnRevisions[firstChanged]
+            {
+                firstChanged += 1
+            }
+            if firstChanged == thread.turns.count && turns.count == thread.turns.count {
+                loadOlderTurnsIfNearTop()
+                return
+            }
+            if firstChanged < turns.count {
+                turns.removeSubrange(firstChanged...)
+            }
+            for index in firstChanged..<thread.turns.count {
+                turns.append(TranscriptTurn(thread.turns[index]))
+            }
+            turnRevisions = thread.turnRevisions
+            updateWorkingPhrase()
+            updateStreams()
+            rebuildRows(fromTurnIndex: firstChanged)
+        } else {
+            // Copied out so the store's turns are not shared past this call.
+            lastSnapshotID = thread.snapshotID
+            turns = thread.turns.map(TranscriptTurn.init)
+            turnRevisions = thread.turnRevisions
+            updateWorkingPhrase()
+            updateStreams()
+            rebuildRows()
+        }
         loadOlderTurnsIfNearTop()
     }
 
@@ -60,28 +95,42 @@ extension TranscriptController {
     }
 
     /// Builds the rows from the turns and what is parsed or streaming, and
-    /// replaces only the range that changed: a new entry, a turn ending or a
-    /// parsed message touches a few rows of thousands.
-    func rebuildRows() {
+    /// replaces only the range that changed. When `firstChangedTurn > 0`,
+    /// skips unchanged older turns so live tail updates never scan history.
+    func rebuildRows(fromTurnIndex firstChangedTurn: Int = 0) {
         let builder = TranscriptBuilder(
             blocks: { [self] messageID, source in blocks(forMessage: messageID, source: source) },
+            isStreaming: { [self] messageID in streams[messageID] != nil },
             expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase)
-        let newRows = builder.rows(for: turns)
         guard !rows.isEmpty else {
-            setRows(newRows)
+            setRows(builder.rows(for: turns))
             return
         }
-        func same(_ old: Int, _ new: Int) -> Bool {
-            rows[old].id == newRows[new].id && rows[old].kind == newRows[new].kind
+        let startRow: Int
+        let replacement: [TranscriptRow]
+        if firstChangedTurn > 0, firstChangedTurn <= turns.count,
+            let lastPrevRow = rows.lastIndex(where: { $0.turnID == turns[firstChangedTurn - 1].id })
+        {
+            startRow = lastPrevRow + 1
+            replacement = builder.rows(
+                for: turns[firstChangedTurn...], hasRunningTurn: turns.contains(where: \.isRunning))
+        } else {
+            startRow = 0
+            replacement = builder.rows(for: turns)
         }
-        let shorter = min(rows.count, newRows.count)
+        let oldCount = rows.count - startRow
+        let shorter = min(oldCount, replacement.count)
+        func same(_ old: Int, _ new: Int) -> Bool {
+            rows[old].id == replacement[new].id && rows[old].kind == replacement[new].kind
+        }
         var prefix = 0
-        while prefix < shorter, same(prefix, prefix) { prefix += 1 }
+        while prefix < shorter, same(startRow + prefix, prefix) { prefix += 1 }
         var suffix = 0
-        while suffix < shorter - prefix, same(rows.count - 1 - suffix, newRows.count - 1 - suffix) { suffix += 1 }
-        guard prefix < rows.count || prefix < newRows.count else { return }
+        while suffix < shorter - prefix, same(rows.count - 1 - suffix, replacement.count - 1 - suffix) { suffix += 1 }
+        guard prefix < oldCount || prefix < replacement.count else { return }
         replaceRows(
-            prefix..<(rows.count - suffix), with: Array(newRows[prefix..<(newRows.count - suffix)]), heights: [:])
+            (startRow + prefix)..<(rows.count - suffix),
+            with: Array(replacement[prefix..<(replacement.count - suffix)]), heights: [:])
     }
 
     private func blocks(forMessage messageID: String, source: String) -> [MarkdownBlock]? {
@@ -190,7 +239,7 @@ extension TranscriptController {
         stream.isInFlight = false
         if result.isFinished {
             streams[result.messageID] = nil
-            parsedMessages[result.messageID] = (stream.entryText, result.blocks)
+            cacheParsedMessage(id: result.messageID, source: stream.entryText, blocks: result.blocks)
             updateFrameUpdates()
         } else {
             guard result.textLength >= stream.shownLength else {
@@ -209,13 +258,6 @@ extension TranscriptController {
     /// when blocks were added.
     private func applyStreamRows(_ result: TranscriptStreamWorker.Result) {
         let messageID = result.messageID
-        let newRows = result.blocks.enumerated().map { index, block in
-            TranscriptRow(
-                id: "\(messageID)#\(index)", sourceID: messageID,
-                kind: .markdownBlock(
-                    block, .of(index, in: result.blocks)),
-                messageID: messageID, role: .assistant)
-        }
         // The message's rows are contiguous from its first block.
         var existing: [Int] = []
         if let first = geometry.index(for: "\(messageID)#0") {
@@ -223,6 +265,18 @@ extension TranscriptController {
             while index < rows.count, rows[index].sourceID == messageID, rows[index].role == .assistant {
                 existing.append(index)
                 index += 1
+            }
+        }
+        let turnID = existing.first.flatMap { rows[$0].turnID } ?? messageID.split(separator: "|", maxSplits: 1).first.map(String.init)
+        let newRows: [TranscriptRow]
+        if result.isFinished {
+            newRows = TranscriptRowChunker.assistantRows(messageID: messageID, turnID: turnID, blocks: result.blocks)
+        } else {
+            newRows = result.blocks.enumerated().map { index, block in
+                TranscriptRow(
+                    id: "\(messageID)#\(index)", sourceID: messageID,
+                    kind: .markdownBlock(block, .of(index, in: result.blocks)),
+                    messageID: messageID, role: .assistant, turnID: turnID)
             }
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
@@ -254,7 +308,7 @@ extension TranscriptController {
             guard let rowIndex = geometry.index(for: id), rows[rowIndex].kind == row.kind else { continue }
             let key = currentKey(rows[rowIndex])
             let layout = RowLayout(rowID: id, key: key, height: row.layout.height, content: row.layout.content)
-            layouts[id] = layout
+            storeLayout(layout)
             if let drawn = row.drawn { streamedBands[id] = (layout, drawn) }
         }
         if isAwaitingInitialEnd { alignInitialEndIfPossible() }

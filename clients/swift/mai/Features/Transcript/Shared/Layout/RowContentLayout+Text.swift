@@ -11,7 +11,7 @@ nonisolated extension RowContentLayout {
         switch self {
         case .text(let layout, let origin):
             return [TextSegment(layout: layout, origin: origin, start: 0, hitRect: nil)]
-        case .bubble(let layout, _, let textOrigin):
+        case .bubble(let layout, _, let textOrigin, _):
             return [TextSegment(layout: layout, origin: textOrigin, start: 0, hitRect: nil)]
         case .notice(let layout, let frame, let textOrigin):
             return [

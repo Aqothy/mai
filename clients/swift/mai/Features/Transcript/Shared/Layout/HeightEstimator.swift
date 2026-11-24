@@ -12,10 +12,12 @@ nonisolated enum HeightEstimator {
         let height: CGFloat
         switch kind {
         case .markdownBlock(let block, let position):
-            let spacing = position.spacingAbove(style) + position.spacingBelow(style)
+            let isCode: Bool
+            if case .code = block { isCode = true } else { isCode = false }
+            let spacing = position.spacingAbove(style, forCode: isCode) + position.spacingBelow(style)
             switch block {
             case .code(_, let code):
-                height = spacing + CodeLayout.height(for: code, style: style)
+                height = spacing + CodeLayout.height(for: code, style: style, position: position)
             case .table(let table):
                 let rows = CGFloat(table.rows.count + 1)
                 height =
@@ -24,11 +26,13 @@ nonisolated enum HeightEstimator {
             default:
                 height = spacing + lines(of: block, perLine: charactersPerLine) * lineHeight
             }
-        case .userMessage(let source):
+        case .userMessage(let source, let position):
             let inner = max(12, (width - 2 * style.bubbleHorizontalPadding) / (body.pointSize * 0.52))
-            height =
-                2 * (style.messageVerticalInset + style.bubbleVerticalPadding)
-                + scanLines(source, perLine: inner).lines * lineHeight
+            let topInset = position.joinsAbove ? 0 : style.messageVerticalInset
+            let bottomInset = position.joinsBelow ? 0 : style.messageVerticalInset
+            let topPad = position.joinsAbove ? style.lineSpacing : style.bubbleVerticalPadding
+            let bottomPad = position.joinsBelow ? 0 : style.bubbleVerticalPadding
+            height = topInset + bottomInset + topPad + bottomPad + scanLines(source, perLine: inner).lines * lineHeight
         case .pendingMessage(let source):
             let scan = scanLines(source, perLine: charactersPerLine)
             height = 2 * style.messageVerticalInset + scan.lines * lineHeight + scan.blocks * style.blockSpacing

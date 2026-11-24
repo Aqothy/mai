@@ -15,6 +15,10 @@
     /// fixture, chunk size and mode.
     enum ChatMarkdownReplayBenchmark {
         @MainActor static func run() async {
+            if UserDefaults.standard.bool(forKey: "ChatMarkdownReplayEngine") {
+                await runExtremeEngineBenchmarks()
+                return
+            }
             // `-ChatMarkdownReplayExtreme YES`: replies far past normal, to
             // find where the per-update cost stops being acceptable.
             let isExtreme = UserDefaults.standard.bool(forKey: "ChatMarkdownReplayExtreme")
@@ -121,6 +125,151 @@
         private static func result(_ fields: [String: Any]) -> String {
             let data = (try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])) ?? Data()
             return "CHAT_BENCHMARK_RESULT " + String(decoding: data, as: UTF8.self)
+        }
+
+        /// `-ChatAutoBenchmark markdown -ChatMarkdownReplayEngine YES`:
+        /// optimized `-O` measurements of every Part 1 extreme workload.
+        @MainActor private static func runExtremeEngineBenchmarks() async {
+            let style = TextStyle.current()
+            #if os(macOS)
+                let palette = TextPalette.resolve(for: NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing())
+            #else
+                let palette = TextPalette.resolve(for: UITraitCollection(userInterfaceStyle: .dark))
+            #endif
+
+            func emit(_ name: String, ms: Double, extra: [String: Any] = [:]) {
+                var fields: [String: Any] = [
+                    "fixture": name, "mode": "one-shot parse", "totalMilliseconds": ms,
+                    "mebibytesPerSecond": 0.0,
+                ]
+                for (k, v) in extra { fields[k] = v }
+                print(result(fields))
+            }
+
+            // 1. 256 KB & 1 MB single unbroken paragraph (normal spaces + zero spaces).
+            for (label, bytes, spaced) in [
+                ("para-256kb-spaced", 256 * 1024, true),
+                ("para-256kb-unspaced", 256 * 1024, false),
+                ("para-1mb-spaced", 1024 * 1024, true),
+            ] {
+                let unit = spaced ? "performance " : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+                let text = String(repeating: unit, count: bytes / unit.utf8.count)
+                let start = ContinuousClock.now
+                let layout = RowLayoutBuilder.prose([.paragraph([MarkdownInline(text: text)])], width: 728, style: style)
+                let ms = milliseconds(start.duration(to: .now))
+                emit(label, ms: ms, extra: ["lines": layout.lines.count, "bytes": text.utf8.count])
+            }
+
+            // 2. 100 KB single code line: layout + single 768x512 tile raster @ 2x.
+            do {
+                let unit = #"{"id":12345,"name":"transcript-engine","ok":true},"#
+                let longLine = "[" + String(repeating: unit, count: 100_000 / unit.utf8.count) + "]"
+                let key = RowLayoutKey(contentVersion: 0, width: 700, styleVersion: style.version)
+                let layoutStart = ContinuousClock.now
+                let layout = RowLayoutBuilder.layout(
+                    RowLayoutRequest(
+                        rowID: "wide", kind: .markdownBlock(.code(language: "json", code: longLine), .single),
+                        key: key, style: style))
+                let layoutMs = milliseconds(layoutStart.duration(to: .now))
+                let tileStart = ContinuousClock.now
+                var tileBytes = 0
+                if let wide = layout.content.wideBody {
+                    let tile = CGRect(x: 50_000, y: 0, width: RowLayer.bandWidth, height: wide.frame.height)
+                    let bmp = BandRasterizer.bitmap(
+                        BandRaster(
+                            content: wide.content, palette: palette, drawsWideBody: true, rect: tile, scale: 2,
+                            colorSpace: RowLayer.colorSpace))
+                    tileBytes = bmp?.surface.allocationSize ?? 0
+                }
+                let tileMs = milliseconds(tileStart.duration(to: .now))
+                emit("code-100kb-line-layout", ms: layoutMs)
+                emit("code-100kb-line-tile-raster", ms: tileMs, extra: ["surfaceBytes": tileBytes])
+            }
+
+            // 3. 20,000-line code block chunking + single visible chunk layout.
+            do {
+                let code = (0..<20_000).map { "let line\($0) = \($0) * 2" }.joined(separator: "\n")
+                let start = ContinuousClock.now
+                let rows = TranscriptRowChunker.assistantRows(
+                    messageID: "c", turnID: "t", blocks: [.code(language: "swift", code: code)])
+                let key = RowLayoutKey(contentVersion: 0, width: 700, styleVersion: style.version)
+                _ = RowLayoutBuilder.layout(RowLayoutRequest(rowID: rows[0].id, kind: rows[0].kind, key: key, style: style))
+                let ms = milliseconds(start.duration(to: .now))
+                emit("code-20k-chunk-and-first-row", ms: ms, extra: ["chunks": rows.count])
+            }
+
+            // 4. 500 KB user message chunking + accessibility query.
+            do {
+                let line = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
+                let big = String(repeating: line, count: 500_000 / line.utf8.count)
+                let start = ContinuousClock.now
+                let rows = TranscriptRowChunker.userRows(messageID: "u", turnID: "t", source: big)
+                let controller = TranscriptController(configuration: .testing)
+                controller.setRows(rows)
+                let accessible = controller.accessibleRows(minY: 0, maxY: 900, columnX: 0)
+                let ms = milliseconds(start.duration(to: .now))
+                emit("user-500kb-chunk-and-a11y", ms: ms, extra: ["chunks": rows.count, "a11yRows": accessible.count])
+            }
+
+            // 5. 5 MB 40-turn chat + 200 live tool events.
+            do {
+                let base = Date(timeIntervalSince1970: 1_800_000_000)
+                let summary = ThreadFixtures.summary(
+                    id: "bench-5mb", title: "5 MB", cwd: "/tmp", agent: ("a", "A"), status: .running,
+                    createdAt: base, updatedAt: base)
+                let payload = String(repeating: "Detailed analysis of the subsystem state and logs.\n", count: 2_500)
+                var turns = (0..<40).map { t in
+                    ThreadFixtures.turn(
+                        id: "turn-\(t)", participant: summary.participants[0].id, state: .completed,
+                        startedAt: base.addingTimeInterval(Double(t) * 60),
+                        settledAt: base.addingTimeInterval(Double(t) * 60 + 10),
+                        entries: [
+                            ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Prompt \(t)"),
+                            ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: payload + "turn-\(t)"),
+                        ])
+                }
+                let liveTurn = ThreadFixtures.turn(
+                    id: "turn-live", participant: summary.participants[0].id, state: .running,
+                    startedAt: base.addingTimeInterval(3_000), settledAt: nil,
+                    entries: [ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Run")])
+                turns.append(liveTurn)
+                var detail = ThreadFixtures.detail(summary: summary, turns: turns)
+                let store = ThreadStore(previewThreads: [summary], selectedThread: detail)
+                let controller = TranscriptController(configuration: .testing)
+                controller.start(store: store, threadID: detail.id)
+                let start = ContinuousClock.now
+                for step in 0..<200 {
+                    let event = ThreadEvent(
+                        delivery: nil,
+                        entry: ThreadFixtures.entry(ref: "tool-\(step)", kind: .toolCall, title: "Read \(step)"),
+                        kind: MaidThreadEventKind.entry.rawValue,
+                        participant: nil, plan: nil, request: nil, resolved: nil,
+                        seq: detail.seq + 1, summary: nil, text: nil, thread: detail.id, turn: liveTurn)
+                    _ = detail.apply(event)
+                    let tailIndex = detail.turns.count - 1
+                    controller.turns[tailIndex] = TranscriptTurn(detail.turns[tailIndex])
+                    controller.turnRevisions = detail.turnRevisions
+                    controller.rebuildRows(fromTurnIndex: tailIndex)
+                }
+                let ms = milliseconds(start.duration(to: .now))
+                emit("chat-5mb-200-live-events", ms: ms, extra: ["msPerEvent": ms / 200.0])
+            }
+
+            // 6. 50 replaceRows splices on 10,000 rows (ReadingPlace COW check).
+            do {
+                var geometry = TranscriptGeometry()
+                let ids = (0..<10_000).map { "r-\($0)" }
+                geometry.replace(ids: ids, sources: ids) { _ in 40 }
+                let start = ContinuousClock.now
+                for i in 0..<50 {
+                    let range = 9_900..<9_901
+                    let place = geometry.readingPlace(atViewportTop: 20_000, replacingRange: range)
+                    geometry.replaceRows(range, ids: ["s-\(i)"], sources: ["s-\(i)"], heights: [42])
+                    _ = place.flatMap(geometry.offset(for:))
+                }
+                let ms = milliseconds(start.duration(to: .now))
+                emit("geometry-10k-50-splices", ms: ms)
+            }
         }
     }
 #endif

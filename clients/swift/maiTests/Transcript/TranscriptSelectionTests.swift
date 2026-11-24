@@ -38,7 +38,7 @@ struct TranscriptSelectionTests {
                     id: "t|a#\(index)", sourceID: "t|a", kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
                     messageID: "t|a", role: .assistant))
         }
-        rows.append(TranscriptRow(id: "actions|t", kind: .turnActions(turnID: "t", replyMarkdown: "")))
+        rows.append(TranscriptRow(id: "actions|t", kind: .turnActions(turnID: "t", hasReply: false)))
         return rows
     }
 

@@ -22,6 +22,8 @@
         }
 
         private(set) var accessory: RowAccessory.Action?
+        /// Resolves lazy copy payloads (reply Markdown, multi-chunk code) on click.
+        var onResolveCopy: ((RowAccessory.Action) -> String)?
         /// Opens turn `turnID`'s fork menu from this button.
         var onFork: ((String, NSButton) -> Void)?
         private var resetTask: Task<Void, Never>?
@@ -31,7 +33,7 @@
 
         func matchesKind(of action: RowAccessory.Action) -> Bool {
             switch action {
-            case .copy: shown?.icon == .copy
+            case .copy, .copyReply, .copyChunkedCode: shown?.icon == .copy
             case .fork: shown?.icon == .fork
             }
         }
@@ -63,26 +65,34 @@
             accessory = nil
             resetTask?.cancel()
             resetTask = nil
+            onResolveCopy = nil
             onFork = nil
         }
 
         @objc private func press() {
+            guard let accessory else { return }
             switch accessory {
             case .copy(let text, _):
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-                showCopied(true)
-                resetTask?.cancel()
-                resetTask = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(1.5))
-                    guard !Task.isCancelled else { return }
-                    self?.resetTask = nil
-                    self?.showCopied(false)
+                copyToPasteboard(text)
+            case .copyReply, .copyChunkedCode:
+                if let text = onResolveCopy?(accessory), !text.isEmpty {
+                    copyToPasteboard(text)
                 }
             case .fork(let turnID):
                 onFork?(turnID, self)
-            case nil:
-                break
+            }
+        }
+
+        private func copyToPasteboard(_ text: String) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            showCopied(true)
+            resetTask?.cancel()
+            resetTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
+                self?.resetTask = nil
+                self?.showCopied(false)
             }
         }
 
@@ -90,6 +100,8 @@
             let (icon, label): (Icon, String) =
                 switch accessory {
                 case .copy(_, let label): copied ? (.copied, "Copied") : (.copy, label)
+                case .copyReply: copied ? (.copied, "Copied") : (.copy, "Copy reply")
+                case .copyChunkedCode: copied ? (.copied, "Copied") : (.copy, "Copy code")
                 case .fork: (.fork, "Fork from this turn")
                 case nil: (.copy, "")
                 }

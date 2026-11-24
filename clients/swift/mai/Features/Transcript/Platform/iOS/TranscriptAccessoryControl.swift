@@ -23,6 +23,7 @@
         }
 
         private(set) var accessory: RowAccessory.Action?
+        private var resolveCopy: ((RowAccessory.Action) -> String)?
         private var resetTask: Task<Void, Never>?
         /// The icon and label shown: a streamed code block's copy text
         /// changes every frame, its icon does not.
@@ -32,7 +33,7 @@
         /// avoiding a `UIButton.Configuration` rebuild on reuse.
         func matchesKind(of action: RowAccessory.Action) -> Bool {
             switch action {
-            case .copy: shown?.icon == .copy
+            case .copy, .copyReply, .copyChunkedCode: shown?.icon == .copy
             case .fork: shown?.icon == .fork
             }
         }
@@ -53,15 +54,19 @@
 
         /// Shows `accessory`; `forkMenu` gives a fork button its menu when
         /// opened, so the menu reflects the chat as it is then.
-        func show(_ accessory: RowAccessory.Action, forkMenu: @escaping (String) -> TranscriptMenu?) {
+        func show(
+            _ accessory: RowAccessory.Action,
+            resolveCopy: @escaping (RowAccessory.Action) -> String,
+            forkMenu: @escaping (String) -> TranscriptMenu?
+        ) {
+            self.resolveCopy = resolveCopy
             guard accessory != self.accessory else { return }
             // A copy button whose text changed keeps its (empty) menu.
-            var wasCopy = false
-            if case .copy = self.accessory { wasCopy = true }
+            let wasCopy = Self.isCopyAction(self.accessory)
             self.accessory = accessory
             // Still "Copied" for the same block whose text grew.
             if resetTask == nil { showCopied(false) }
-            if case .copy = accessory, wasCopy { return }
+            if Self.isCopyAction(accessory), wasCopy { return }
             if case .fork(let turnID) = accessory {
                 menu = UIMenu(children: [
                     UIDeferredMenuElement.uncached { completion in
@@ -75,15 +80,30 @@
             }
         }
 
+        private static func isCopyAction(_ action: RowAccessory.Action?) -> Bool {
+            switch action {
+            case .copy, .copyReply, .copyChunkedCode: true
+            case .fork, nil: false
+            }
+        }
+
         func resetForReuse() {
             accessory = nil
+            resolveCopy = nil
             resetTask?.cancel()
             resetTask = nil
             menu = nil
         }
 
         private func press() {
-            guard case .copy(let text, _) = accessory else { return }
+            guard let accessory, Self.isCopyAction(accessory) else { return }
+            let text: String
+            switch accessory {
+            case .copy(let value, _): text = value
+            case .copyReply, .copyChunkedCode: text = resolveCopy?(accessory) ?? ""
+            case .fork: return
+            }
+            guard !text.isEmpty else { return }
             UIPasteboard.general.string = text
             showCopied(true)
             resetTask?.cancel()
@@ -99,6 +119,8 @@
             let (icon, label): (Icon, String) =
                 switch accessory {
                 case .copy(_, let label): copied ? (.copied, "Copied") : (.copy, label)
+                case .copyReply: copied ? (.copied, "Copied") : (.copy, "Copy reply")
+                case .copyChunkedCode: copied ? (.copied, "Copied") : (.copy, "Copy code")
                 case .fork: (.fork, "Fork from this turn")
                 case nil: (.copy, "")
                 }

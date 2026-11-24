@@ -4,8 +4,8 @@ import Foundation
 /// A row's laid-out content, in row coordinates (the column's top left).
 nonisolated enum RowContentLayout: Sendable {
     case text(TextLayout, origin: CGPoint)
-    /// A user message: its bubble and the text inside it.
-    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint)
+    /// A user message: its bubble (or chunk slice) and the text inside it.
+    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint, position: TranscriptBlockPosition = .single)
     case code(CodeLayout, frame: CGRect)
     /// A wide code block's lines alone, in its horizontal scroller.
     case codeBody(CodeLayout)
@@ -16,12 +16,26 @@ nonisolated enum RowContentLayout: Sendable {
     case header(TextLayout, origin: CGPoint, dividerY: CGFloat)
     case notice(TextLayout, frame: CGRect, textOrigin: CGPoint)
     /// The actions under a finished turn, from `origin`: copy the reply's
-    /// Markdown (empty when it has none) and the fork menu.
-    case actions(turnID: String, replyMarkdown: String, origin: CGPoint)
+    /// Markdown (resolved lazily on click when `hasReply` is true) and fork.
+    case actions(turnID: String, hasReply: Bool, origin: CGPoint)
     case empty
 }
 
 nonisolated extension RowContentLayout {
+    /// Total laid-out text lines held by this row, used for memory-budget
+    /// eviction of off-screen layouts.
+    var lineCount: Int {
+        switch self {
+        case .text(let layout, _), .bubble(let layout, _, _, _), .header(let layout, _, _), .notice(let layout, _, _):
+            layout.lines.count
+        case .code(let code, _), .codeBody(let code):
+            code.body.lines.count + code.label.lines.count
+        case .table(let table, _), .tableBody(let table):
+            table.cells.reduce(0) { $0 + $1.layout.lines.count }
+        case .actions, .empty:
+            0
+        }
+    }
     /// Whether a code block carries its syntax colors.
     var isHighlighted: Bool {
         switch self {
@@ -56,7 +70,7 @@ nonisolated extension RowContentLayout {
         case .table where !drawsWideBody:
             0
         case .code(let code, let frame) where !drawsWideBody:
-            min(rowHeight, ceil(frame.minY + code.headerHeight))
+            code.headerHeight > 0 ? min(rowHeight, ceil(frame.minY + code.headerHeight)) : 0
         default:
             rowHeight
         }

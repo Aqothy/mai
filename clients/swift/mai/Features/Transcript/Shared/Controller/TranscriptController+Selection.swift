@@ -45,7 +45,7 @@ extension TranscriptController {
     private func position(
         inRowAt index: Int, point: CGPoint, columnX: CGFloat, scrollX: (String) -> CGFloat
     ) -> TextPosition? {
-        guard let layout = layout(forRowAt: index, synchronously: true) else { return nil }
+        guard let layout = layouts[rows[index].id] else { return nil }
         var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
         if let body = layout.content.wideBody, local.y >= body.frame.minY { local.x += scrollX(rows[index].id) }
         guard let offset = layout.content.textOffset(closestTo: local) else { return nil }
@@ -121,11 +121,13 @@ extension TranscriptController {
             ? text(from: selection.anchor, to: selection.focus) : text(from: selection.focus, to: selection.anchor)
     }
 
-    /// The text from `start` to `end` (in order), rows joined by newlines.
+    /// The text from `start` to `end` (in order), rows joined by newlines
+    /// (mid-line continuation chunks join directly with no extra newline).
     func text(from start: TextPosition, to end: TextPosition) -> String {
         guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
         else { return "" }
-        var parts: [String] = []
+        var result = ""
+        var hasPart = false
         for index in first...last {
             guard let text = selectableText(ofRowAt: index) else { continue }
             let utf16 = text.utf16
@@ -134,9 +136,11 @@ extension TranscriptController {
             guard from <= to else { continue }
             let lower = utf16.index(utf16.startIndex, offsetBy: from)
             let upper = utf16.index(utf16.startIndex, offsetBy: to)
-            parts.append(String(text[lower..<upper]))
+            if hasPart, !rows[index].joinsPreviousWithoutNewline { result += "\n" }
+            result += text[lower..<upper]
+            hasPart = true
         }
-        return parts.joined(separator: "\n")
+        return result
     }
 
     // MARK: Positions as one text
@@ -161,14 +165,16 @@ extension TranscriptController {
         while true {
             guard let length = selectableLength(ofRowAt: index) else { return nil }
             if offset < 0 {
+                let sep = rows[index].joinsPreviousWithoutNewline ? 0 : 1
                 guard let previous = rows[..<index].lastIndex(where: \.kind.isSelectable),
                     let previousLength = selectableLength(ofRowAt: previous)
                 else { return nil }
-                offset += previousLength + 1
+                offset += previousLength + sep
                 index = previous
             } else if offset > length {
                 guard let next = rows[(index + 1)...].firstIndex(where: \.kind.isSelectable) else { return nil }
-                offset -= length + 1
+                let sep = rows[next].joinsPreviousWithoutNewline ? 0 : 1
+                offset -= length + sep
                 index = next
             } else {
                 return TextPosition(rowID: rows[index].id, offset: offset)
@@ -183,9 +189,11 @@ extension TranscriptController {
         if second < first { return -offset(from: b, to: a) }
         var count = (selectableLength(ofRowAt: first) ?? 0) - a.offset
         for index in (first + 1)..<second where rows[index].kind.isSelectable {
-            count += 1 + (selectableLength(ofRowAt: index) ?? 0)
+            let sep = rows[index].joinsPreviousWithoutNewline ? 0 : 1
+            count += sep + (selectableLength(ofRowAt: index) ?? 0)
         }
-        return count + 1 + b.offset
+        let finalSep = rows[second].joinsPreviousWithoutNewline ? 0 : 1
+        return count + finalSep + b.offset
     }
 
     /// Highlight rects from `start` to `end` (document coordinates) for rows

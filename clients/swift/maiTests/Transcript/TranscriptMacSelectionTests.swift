@@ -46,6 +46,12 @@
                     messageID: "m", role: .assistant)
             }
             controller.setRows(rows, measuredHeights: ["m#0": 60, "m#1": 60])
+            for row in controller.rows {
+                let layout = RowLayoutBuilder.layout(controller.request(row))
+                controller.storeLayout(layout)
+            }
+            controller.setHeights(Dictionary(uniqueKeysWithValues: controller.layouts.map { ($0.key, $0.value.height) }))
+            controller.alignInitialEndIfPossible()
             document.layoutSubtreeIfNeeded()
             return Fixture(window: window, document: document, controller: controller)
         }
@@ -54,7 +60,7 @@
         /// window coordinates.
         private func point(_ fixture: Fixture, row index: Int, fraction: CGFloat) -> NSPoint {
             let controller = fixture.controller
-            guard let layout = controller.layout(forRowAt: index, synchronously: true),
+            guard let layout = controller.layout(forRowAt: index),
                 let segment = layout.content.textSegments.first, let line = segment.layout.lines.first
             else { return .zero }
             let columnX = max(0, ((fixture.document.bounds.width - controller.columnWidth) / 2).rounded(.down))
@@ -117,7 +123,7 @@
                 fixture, down: event(.leftMouseDown, fixture.window, at: word, clicks: 2),
                 then: [event(.leftMouseUp, fixture.window, at: word, clicks: 2)])
             #expect(fixture.controller.selection != nil)
-            guard let layout = fixture.controller.layout(forRowAt: 0, synchronously: true),
+            guard let layout = fixture.controller.layout(forRowAt: 0),
                 let line = layout.content.textSegments.first?.layout.lines.first
             else { return }
             // Across the midpoint between two characters' carets.
@@ -139,7 +145,6 @@
                 let rows = fixture.document.subviews.compactMap { $0 as? TranscriptRowsView }.first
                 return rows?.rowsLayer.sublayers?.compactMap { $0 as? RowLayer } ?? []
             }
-            fixture.controller.layOutVisibleRows(minY: 0, maxY: 400)
             fixture.document.needsLayout = true
             fixture.document.layoutSubtreeIfNeeded()
             #expect(!rowLayers().isEmpty)

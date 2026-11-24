@@ -25,10 +25,10 @@ protocol TranscriptRowMounterDelegate: AnyObject {
 }
 
 /// Keeps a layer per row near the viewport, for both platforms' documents
-/// (PLAN 4.3, 4.4). Visible rows always have a layout (laid out now when
-/// missing, D3); rows up to 1.5 screens ahead and half a screen behind are
-/// drawn ahead of the scroll; drawn rows within one more screen are kept,
-/// the rest go back to the pool.
+/// (PLAN 4.3, 4.4). Layouts and band bitmaps run strictly off the main thread
+/// (pure async + blanking); rows up to 1.5 screens ahead and half a screen
+/// behind are drawn ahead of the scroll; drawn rows within one more screen are
+/// kept, the rest go back to the pool.
 ///
 /// Rows sit in document coordinates, so scrolling alone moves nothing here:
 /// placement runs only when the controller changed rows, heights or
@@ -112,8 +112,7 @@ final class TranscriptRowMounter {
 
     /// Mounts, positions and draws the rows for `visible` (document
     /// coordinates) in a column of `documentWidth`. `showsContent` is false
-    /// while the transcript waits for its first rows (PLAN 3.9 rule 9): no
-    /// synchronous layouts then.
+    /// while the transcript waits for its first rows (PLAN 3.9 rule 9).
     func place(
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
         scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool
@@ -123,7 +122,12 @@ final class TranscriptRowMounter {
         isStale = false
         let geometry = controller.geometry
         let screen = max(1, visible.height)
-        let downward = visible.minY >= lastTop
+        let downward: Bool
+        if abs(visible.minY - lastTop) > 4 {
+            downward = visible.minY > lastTop
+        } else {
+            downward = controller.isScrollingDown
+        }
         lastTop = visible.minY
         placedTop = visible.minY
         var drawn = CGRect(
@@ -149,14 +153,15 @@ final class TranscriptRowMounter {
             for index in range {
                 let (minY, height) = geometry.frame(at: index)
                 let frame = CGRect(x: 0, y: minY, width: documentWidth, height: height)
-                guard let layout = controller.layout(forRowAt: index, synchronously: false) else {
+                guard let layout = controller.layout(forRowAt: index) else {
                     missingLayouts.append(index)
                     if frame.maxY <= visible.minY {
                         spanTop = max(spanTop, frame.maxY)
                     } else if frame.minY >= visible.maxY {
                         spanBottom = min(spanBottom, frame.minY)
                     } else {
-                        // A visible row without a layout: only while hidden.
+                        // A visible row without a layout yet (pure async +
+                        // blanking): keep placement armed until it lands.
                         spanTop = visible.midY
                         spanBottom = visible.midY
                     }
@@ -197,7 +202,8 @@ final class TranscriptRowMounter {
                         let origin = layer.placedFrame.origin
                         if layer.hasAccessories, let layout = controller.layouts[id] {
                             layer.accessoriesOrigin = origin
-                            delegate?.showAccessories(rowID: id, accessories: layout.content.accessories, origin: origin)
+                            delegate?.showAccessories(
+                                rowID: id, accessories: layout.content.accessories(forRowID: id), origin: origin)
                         }
                         if layer.hasWideBlock, let layout = controller.layouts[id],
                             let wideBody = layout.content.wideBody
@@ -212,8 +218,6 @@ final class TranscriptRowMounter {
             }
             unmount(id, layer)
         }
-        // Arrived rows are mounted now; later mounts are misses again.
-        controller.arrivedRowIDs.removeAll()
         controller.streamedBands.removeAll()
     }
 
@@ -265,29 +269,15 @@ final class TranscriptRowMounter {
         layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
-        let drawnNow = layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
+        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
-        #if DEBUG
-            // Bands drawn on the main thread because they reached the screen
-            // with nothing to show: rows streamed in arrive that way; others
-            // were not drawn ahead (PLAN D3).
-            if drawnNow > 0, showsContent, drawsOffMain {
-                if controller.arrivedRowIDs.contains(row.id) {
-                    TranscriptDebugCounters.arrivalDraws += drawnNow
-                } else {
-                    TranscriptDebugCounters.syncFallbackDraws += drawnNow
-                }
-            }
-        #else
-            _ = drawnNow
-        #endif
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.
         let origin = CGPoint(x: x, y: frame.minY)
         if layer.accessoriesKey != layout.key || layer.accessoriesOrigin != origin {
             layer.accessoriesKey = layout.key
             layer.accessoriesOrigin = origin
-            let accessories = layout.content.accessories
+            let accessories = layout.content.accessories(forRowID: row.id)
             if !accessories.isEmpty {
                 layer.hasAccessories = true
                 delegate?.showAccessories(rowID: row.id, accessories: accessories, origin: origin)

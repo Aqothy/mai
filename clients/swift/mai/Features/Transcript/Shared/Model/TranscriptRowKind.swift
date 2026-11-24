@@ -4,9 +4,10 @@ import Foundation
 /// What a row shows. Each case carries everything its layout needs, as
 /// values, so a row can be laid out on any thread.
 nonisolated enum TranscriptRowKind: Hashable, Sendable {
-    /// A user prompt: one bubble, its Markdown laid out inside.
-    case userMessage(source: String)
-    /// One top-level Markdown block of an assistant message.
+    /// A user prompt: one bubble (or a vertical slice of a chunked bubble),
+    /// its Markdown laid out inside.
+    case userMessage(source: String, position: TranscriptBlockPosition = .single)
+    /// One top-level Markdown block (or bounded chunk) of an assistant message.
     case markdownBlock(MarkdownBlock, TranscriptBlockPosition)
     /// An assistant message not parsed yet; shown by estimate until its
     /// blocks replace it. Only rows far from the viewport stay like this.
@@ -14,9 +15,9 @@ nonisolated enum TranscriptRowKind: Hashable, Sendable {
     case thought(String)
     case activity(summary: String)
     case turnHeader(TranscriptTurnHeader)
-    /// The actions under a finished turn: copying its reply (the Markdown of
-    /// its assistant messages, in order) and forking from it.
-    case turnActions(turnID: String, replyMarkdown: String)
+    /// The actions under a finished turn: copying its reply (resolved lazily
+    /// from the controller's turns on click) and forking from it.
+    case turnActions(turnID: String, hasReply: Bool)
     /// The agent is working: the last row while a turn runs, a sparkle and
     /// a whimsical verb (the turn's header already says "Working").
     case working(phrase: String)

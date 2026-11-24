@@ -15,10 +15,19 @@ nonisolated enum TextRenderer {
         context.translateBy(x: origin.x, y: origin.y)
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
         drawDecorations(layout, behindText: true, clip: local, palette: palette, in: context)
+        let horizontallyClipped = !layout.hasComplexBiDi && (local.minX > 0 || local.maxX < layout.size.width)
         for line in layout.lines(overlapping: local.minY, local.maxY) {
             for index in line.runs {
                 let run = layout.runs[index]
-                guard let color = palette.color(run.color) else { continue }
+                guard let color = palette.color(run.color), !run.glyphs.isEmpty else { continue }
+                let slice: Range<Int>
+                if horizontallyClipped, run.positions.count > 64 {
+                    let margin = max(64, CTFontGetSize(run.font.font) * 4)
+                    slice = visibleGlyphRange(in: run.positions, minX: local.minX - margin, maxX: local.maxX + margin)
+                    if slice.isEmpty { continue }
+                } else {
+                    slice = 0..<run.glyphs.count
+                }
                 context.setFillColor(color)
                 // Core Text maps glyph positions through the text matrix
                 // (checked: with the flip and unchanged positions nothing
@@ -26,13 +35,39 @@ nonisolated enum TextRenderer {
                 run.glyphs.withUnsafeBufferPointer { glyphs in
                     run.positions.withUnsafeBufferPointer { positions in
                         guard let glyphs = glyphs.baseAddress, let positions = positions.baseAddress else { return }
-                        CTFontDrawGlyphs(run.font.font, glyphs, positions, run.glyphs.count, context)
+                        CTFontDrawGlyphs(
+                            run.font.font, glyphs + slice.lowerBound, positions + slice.lowerBound,
+                            slice.count, context)
                     }
                 }
             }
         }
         drawDecorations(layout, behindText: false, clip: local, palette: palette, in: context)
         context.restoreGState()
+    }
+
+    /// Binary-searches a monotonic LTR run's positions for glyphs intersecting
+    /// `minX...maxX`, so horizontally tiled wide code lines draw O(tile glyphs)
+    /// instead of submitting 100k+ glyphs per tile.
+    private static func visibleGlyphRange(
+        in positions: [CGPoint], minX: CGFloat, maxX: CGFloat
+    ) -> Range<Int> {
+        let count = positions.count
+        var low = 0
+        var high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if positions[mid].x < minX { low = mid + 1 } else { high = mid }
+        }
+        let start = low
+        guard start < count else { return count..<count }
+        low = start
+        high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if positions[mid].x <= maxX { low = mid + 1 } else { high = mid }
+        }
+        return start..<low
     }
 
     private static func drawDecorations(

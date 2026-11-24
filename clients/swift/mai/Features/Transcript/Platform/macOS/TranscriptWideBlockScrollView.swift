@@ -29,6 +29,17 @@
             horizontalScrollElasticity = .automatic
             verticalScrollElasticity = .none
             documentView = body
+            contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(horizontalClipDidScroll),
+                name: NSView.boundsDidChangeNotification, object: contentView)
+        }
+
+        @objc private func horizontalClipDidScroll() {
+            let bounds = contentView.bounds
+            let minX = max(0, bounds.minX)
+            let maxX = max(minX, minX + bounds.width)
+            body.updateHorizontalViewport(minX...maxX)
         }
 
         @available(*, unavailable)
@@ -45,9 +56,12 @@
             let target = NSRect(x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
             let resized = body.frame != target
             if resized { body.frame = target }
+            let visMinX = max(0, contentView.bounds.minX)
+            let visWidth = max(frame.width, contentView.bounds.width)
             body.show(
                 rowID: rowID, body: wide, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: drawsOffMain, drawn: drawn, visible: visible, streamed: streamed)
+                drawsOffMain: drawsOffMain, drawn: drawn, visible: visible,
+                horizontalVisible: visMinX...(visMinX + visWidth), streamed: streamed)
             if resized { reflectScrolledClipView(contentView) }
         }
 

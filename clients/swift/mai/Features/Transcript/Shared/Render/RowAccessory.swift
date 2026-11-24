@@ -9,6 +9,12 @@ nonisolated struct RowAccessory: Hashable, Sendable {
     enum Action: Hashable, Sendable {
         /// Copies `text`; `label` names it for accessibility ("Copy code").
         case copy(text: String, label: String)
+        /// Lazily copies the Markdown of finished turn `turnID`'s assistant
+        /// messages on click (avoids duplicating reply strings on every row
+        /// rebuild).
+        case copyReply(turnID: String)
+        /// Lazily joins and copies a multi-chunk code block starting at `rowID`.
+        case copyChunkedCode(rowID: String)
         /// The fork menu of finished turn `turnID`.
         case fork(turnID: String)
     }

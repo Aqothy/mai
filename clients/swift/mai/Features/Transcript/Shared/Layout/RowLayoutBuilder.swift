@@ -1,9 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// Lays one row out: the function every layout task runs, and the
-/// synchronous fallback runs on the main thread for a row about to show
-/// without a layout (PLAN D3). Pure and thread-safe.
+/// Lays one row out on a background worker (`LayoutQueue` or
+/// `TranscriptStreamWorker`). Pure and thread-safe.
 nonisolated enum RowLayoutBuilder {
     static func layout(_ request: RowLayoutRequest) -> RowLayout {
         let style = request.style
@@ -20,21 +19,24 @@ nonisolated enum RowLayoutBuilder {
         let sameStyle = previous?.layout.key.styleVersion == style.version
         switch kind {
         case .markdownBlock(let block, let position):
-            let top = position.spacingAbove(style)
+            let isCode: Bool
+            if case .code = block { isCode = true } else { isCode = false }
+            let top = position.spacingAbove(style, forCode: isCode)
             let bottom = position.spacingBelow(style)
             switch block {
             case .code(let language, let code):
                 let prevCode = sameStyle ? previous?.layout.content.codeLayout : nil
-                let display = CodeLayout.displayName(language)
+                let display = position.joinsAbove ? "" : CodeLayout.displayName(language)
                 let layout: CodeLayout
-                if let prevCode, prevCode.code == code, prevCode.label.string == display,
+                if let prevCode, prevCode.code == code, prevCode.position == position,
+                    prevCode.label.string == display,
                     prevCode.colors?.code == codeColors?.code, prevCode.colorsAreDark == codeColors?.isDark
                 {
                     layout = prevCode.resized(toWidth: width)
                 } else {
                     layout = CodeLayout.make(
                         code: code, language: language, colors: codeColors, width: width, style: style,
-                        previous: prevCode)
+                        position: position, previous: prevCode)
                 }
                 return (
                     top + layout.size.height + bottom,
@@ -98,27 +100,34 @@ nonisolated enum RowLayoutBuilder {
                 let layout = prose([block], width: width, style: style)
                 return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
             }
-        case .userMessage(let source):
+        case .userMessage(let source, let position):
             let inner = max(1, width - 2 * style.bubbleHorizontalPadding)
-            let layout = prose(MarkdownPlanner.blocks(from: source), width: inner, style: style)
-            let bubbleWidth = min(width, ceil(layout.size.width) + 2 * style.bubbleHorizontalPadding)
+            let isChunked = position.joinsAbove || position.joinsBelow
+            let layout =
+                isChunked
+                ? plain(source, role: .body, color: .primary, width: inner, style: style)
+                : prose(MarkdownPlanner.blocks(from: source), width: inner, style: style)
+            let bubbleWidth =
+                isChunked ? width : min(width, ceil(layout.size.width) + 2 * style.bubbleHorizontalPadding)
+            let topInset = position.joinsAbove ? 0 : style.messageVerticalInset
+            let bottomInset = position.joinsBelow ? 0 : style.messageVerticalInset
+            let topPad = position.joinsAbove ? style.lineSpacing : style.bubbleVerticalPadding
+            let bottomPad = position.joinsBelow ? 0 : style.bubbleVerticalPadding
+            let textHeight = isChunked && source.isEmpty ? style.font(.body).lineHeight : layout.size.height
             let bubble = CGRect(
-                x: width - bubbleWidth, y: style.messageVerticalInset, width: bubbleWidth,
-                height: layout.size.height + 2 * style.bubbleVerticalPadding)
+                x: width - bubbleWidth, y: topInset, width: bubbleWidth,
+                height: textHeight + topPad + bottomPad)
             return (
-                bubble.height + 2 * style.messageVerticalInset,
+                topInset + bubble.height + bottomInset,
                 .bubble(
                     layout, frame: bubble,
-                    textOrigin: CGPoint(
-                        x: bubble.minX + style.bubbleHorizontalPadding, y: bubble.minY + style.bubbleVerticalPadding))
+                    textOrigin: CGPoint(x: bubble.minX + style.bubbleHorizontalPadding, y: bubble.minY + topPad),
+                    position: position)
             )
-        case .pendingMessage(let source):
-            // Only a row the controller could not parse in time gets here;
-            // it shows as written until its blocks replace it.
-            let layout = prose(
-                [.paragraph([MarkdownInline(text: source)])], width: width, style: style)
-            let top = style.messageVerticalInset
-            return (top + layout.size.height + top, .text(layout, origin: CGPoint(x: 0, y: top)))
+        case .pendingMessage:
+            // Pending messages are parsed off-main and spliced into their
+            // Markdown block rows; never lay out raw Markdown text.
+            return (HeightEstimator.estimate(kind, width: width, style: style), .empty)
         case .thought(let text):
             let layout = plain(text, role: .body, color: .secondary, width: width, style: style)
             return (layout.size.height + 8, .text(layout, origin: CGPoint(x: 0, y: 4)))
@@ -130,10 +139,10 @@ nonisolated enum RowLayoutBuilder {
             let layout = plain(header.title + chevron, role: .callout, color: .secondary, width: width, style: style)
             let dividerY = 6 + layout.size.height + 8
             return (dividerY + 1 + 2, .header(layout, origin: CGPoint(x: 0, y: 6), dividerY: dividerY))
-        case .turnActions(let turnID, let replyMarkdown):
+        case .turnActions(let turnID, let hasReply):
             return (
                 RowAccessory.size + 6,
-                .actions(turnID: turnID, replyMarkdown: replyMarkdown, origin: CGPoint(x: -4, y: 2))
+                .actions(turnID: turnID, hasReply: hasReply, origin: CGPoint(x: -4, y: 2))
             )
         case .working(let phrase):
             let layout = plain("✦  " + phrase, role: .callout, color: .secondary, width: width, style: style)

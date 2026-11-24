@@ -26,11 +26,38 @@ nonisolated extension TextLayout {
         if point.y < 0 { return 0 }
         if point.y >= size.height, index == lines.count - 1 { return length }
         let line = lines[index]
-        var best = 0
-        var distance = CGFloat.infinity
-        for (position, x) in line.caretOffsets.enumerated() where abs(x - point.x) < distance {
-            distance = abs(x - point.x)
-            best = position
+        let best: Int
+        if !hasComplexBiDi, !line.caretOffsets.isEmpty {
+            let carets = line.caretOffsets
+            var low = 0
+            var high = carets.count
+            while low < high {
+                let mid = (low + high) / 2
+                if carets[mid] < point.x { low = mid + 1 } else { high = mid }
+            }
+            if low == 0 {
+                best = 0
+            } else if low >= carets.count {
+                // Keep the earliest index sharing the final caret position
+                // (e.g. inside a trailing cluster/emoji).
+                var idx = carets.count - 1
+                while idx > 0, carets[idx - 1] == carets[idx] { idx -= 1 }
+                best = idx
+            } else {
+                let rightDist = abs(carets[low] - point.x)
+                let leftDist = abs(carets[low - 1] - point.x)
+                var idx = leftDist <= rightDist ? low - 1 : low
+                while idx > 0, carets[idx - 1] == carets[idx] { idx -= 1 }
+                best = idx
+            }
+        } else {
+            var chosen = 0
+            var distance = CGFloat.infinity
+            for (position, x) in line.caretOffsets.enumerated() where abs(x - point.x) < distance {
+                distance = abs(x - point.x)
+                chosen = position
+            }
+            best = chosen
         }
         let offset = line.range.lowerBound + best
         // Past a hard break's end the caret stays before the newline; after
@@ -43,10 +70,18 @@ nonisolated extension TextLayout {
     /// coordinates). A line's rect reaches down to the next line's top when
     /// only line spacing separates them, so a highlight reads as one block.
     func selectionRects(for range: Range<Int>) -> [CGRect] {
-        guard !range.isEmpty else { return [] }
+        guard !range.isEmpty, !lines.isEmpty else { return [] }
+        // Binary search for the first line overlapping `range.lowerBound`.
+        var low = 0
+        var high = lines.count
+        while low < high {
+            let mid = (low + high) / 2
+            if lines[mid].range.upperBound <= range.lowerBound { low = mid + 1 } else { high = mid }
+        }
         var rects: [CGRect] = []
-        for (index, line) in lines.enumerated() {
-            guard line.range.lowerBound < range.upperBound, line.range.upperBound > range.lowerBound else { continue }
+        for index in low..<lines.count {
+            let line = lines[index]
+            if line.range.lowerBound >= range.upperBound { break }
             let from = max(range.lowerBound, line.range.lowerBound) - line.range.lowerBound
             let to = min(range.upperBound, line.range.upperBound) - line.range.lowerBound
             var minX = min(line.caretOffsets[from], line.caretOffsets[to])

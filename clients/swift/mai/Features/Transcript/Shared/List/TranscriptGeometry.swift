@@ -197,16 +197,44 @@ nonisolated struct TranscriptGeometry {
 
     // MARK: Reading place
 
-    /// The place of a reader whose viewport top is at `top`.
-    func readingPlace(atViewportTop top: CGFloat) -> ReadingPlace? {
+    /// The place of a reader whose viewport top is at `top`. Pass
+    /// `includeFallbacks: false` when row IDs cannot be removed (height-only
+    /// updates) or `replacingRange` when replacing a known subrange so normal
+    /// splices allocate nothing and never trigger COW on `ids`/`sources`.
+    func readingPlace(
+        atViewportTop top: CGFloat, includeFallbacks: Bool = true, replacingRange: Range<Int>? = nil
+    ) -> ReadingPlace? {
         guard let index = index(at: max(0, top)) else { return nil }
         let rowTop = prefix(index)
         let source = sources[index]
         let sourceStart = sourceStarts[source] ?? index
+        let idsAbove: [String]
+        let sourcesAbove: [String]
+        if let range = replacingRange {
+            // Rows before `range.lowerBound` are untouched by `replaceRows`.
+            // If the anchor itself is outside `range`, it is guaranteed to
+            // survive; if inside `range`, only rows in `range.lowerBound..<index`
+            // plus the single surviving row right before `range` can ever be
+            // needed as fallbacks.
+            if range.contains(index) {
+                let fallbackStart = max(0, range.lowerBound - 1)
+                idsAbove = Array(ids[fallbackStart..<index])
+                sourcesAbove = Array(sources[fallbackStart..<index])
+            } else {
+                idsAbove = []
+                sourcesAbove = []
+            }
+        } else if includeFallbacks {
+            idsAbove = Array(ids[..<index])
+            sourcesAbove = Array(sources[..<index])
+        } else {
+            idsAbove = []
+            sourcesAbove = []
+        }
         return ReadingPlace(
             anchorID: ids[index], offsetIntoRow: top - rowTop, source: source,
             offsetIntoSource: rowTop - prefix(sourceStart) + top - rowTop,
-            idsAbove: ids[..<index], sourcesAbove: sources[..<index])
+            idsAbove: idsAbove, sourcesAbove: sourcesAbove)
     }
 
     /// Where a place taken before the rows changed is now. While its row

@@ -25,9 +25,17 @@
             fatalError("init(coder:) has not been implemented")
         }
 
+        private var lastDrawnY: CGRect = .null
+        private var lastVisibleY: CGRect = .null
+        private var lastContentWidth: CGFloat = 0
+        private var lastDrawsOffMain = true
+        private var lastHorizontalDrawnX: CGFloat = .nan
+        private var lastHorizontalDrawnSpan: ClosedRange<CGFloat>?
+
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
+            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect,
+            horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?
         ) {
             let height = body.frame.height
             let layout = RowLayout(rowID: rowID, key: key, height: height, content: body.content)
@@ -36,14 +44,50 @@
             row.show(
                 rowID: rowID, layout: layout, palette: palette, drawsWideBody: true, scale: scale,
                 colorSpace: colorSpace, drawn: streamed)
-            // Clip vertically to the transcript's drawn/visible region so tall
-            // wide blocks never rasterize or hold all bands at once.
-            let drawRect = CGRect(x: 0, y: drawn.minY, width: body.contentWidth, height: drawn.height)
+            lastDrawnY = drawn
+            lastVisibleY = visible
+            lastContentWidth = body.contentWidth
+            lastDrawsOffMain = drawsOffMain
+            updateTiles(horizontalVisible: horizontalVisible)
+        }
+
+        /// Rasterizes newly exposed horizontal tiles and releases far ones as
+        /// the user scrolls a wide code block or table sideways.
+        func updateHorizontalViewport(_ horizontalVisible: ClosedRange<CGFloat>) {
+            guard lastContentWidth > 0, !lastDrawnY.isNull else { return }
+            let needsUpdate: Bool
+            if let span = lastHorizontalDrawnSpan {
+                needsUpdate =
+                    horizontalVisible.lowerBound < span.lowerBound
+                    || horizontalVisible.upperBound > span.upperBound
+                    || abs(horizontalVisible.lowerBound - lastHorizontalDrawnX) > RowLayer.bandWidth / 4
+            } else {
+                needsUpdate = true
+            }
+            guard needsUpdate else { return }
+            updateTiles(horizontalVisible: horizontalVisible)
+        }
+
+        private func updateTiles(horizontalVisible: ClosedRange<CGFloat>) {
+            let overscan = RowLayer.bandWidth
+            let drawMinX = max(0, horizontalVisible.lowerBound - overscan)
+            let drawMaxX = min(lastContentWidth, horizontalVisible.upperBound + overscan)
+            let drawWidth = max(0, drawMaxX - drawMinX)
+            lastHorizontalDrawnX = horizontalVisible.lowerBound
+            lastHorizontalDrawnSpan = drawMinX...drawMaxX
+            // Clip both horizontally and vertically so wide/tall blocks only
+            // rasterize and retain tiles near the viewport.
+            let drawRect = CGRect(x: drawMinX, y: lastDrawnY.minY, width: drawWidth, height: lastDrawnY.height)
             let visibleRect =
-                visible.isNull ? .null : CGRect(x: 0, y: visible.minY, width: body.contentWidth, height: visible.height)
-            row.drawBands(in: drawRect, visible: visibleRect, offMain: drawsOffMain)
-            let releaseMargin = visible.isNull ? 512 : max(512, visible.height)
-            row.releaseBands(outside: drawRect.insetBy(dx: 0, dy: -releaseMargin))
+                lastVisibleY.isNull
+                ? .null
+                : CGRect(
+                    x: horizontalVisible.lowerBound, y: lastVisibleY.minY,
+                    width: max(0, horizontalVisible.upperBound - horizontalVisible.lowerBound),
+                    height: lastVisibleY.height)
+            row.drawBands(in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain)
+            let releaseMarginY = lastVisibleY.isNull ? 512 : max(512, lastVisibleY.height)
+            row.releaseBands(outside: drawRect.insetBy(dx: -RowLayer.bandWidth, dy: -releaseMarginY))
         }
 
         /// Clicks select text in the transcript, whose document is the
@@ -63,6 +107,11 @@
         }
 
         func resetForReuse() {
+            lastDrawnY = .null
+            lastVisibleY = .null
+            lastContentWidth = 0
+            lastHorizontalDrawnX = .nan
+            lastHorizontalDrawnSpan = nil
             row.resetForReuse()
         }
     }

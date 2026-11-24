@@ -60,10 +60,6 @@ final class TranscriptController {
     /// An animated jump to the end (rule 7, iOS): when it started and how
     /// far from the end the viewport was.
     @ObservationIgnored private(set) var endJump: (start: ContinuousClock.Instant, distance: CGFloat)?
-    /// Rows added by the latest change to a message's rows (a block streamed
-    /// in): drawn as they arrive, which the benchmark counts apart from
-    /// failures to draw ahead. Cleared once placed.
-    @ObservationIgnored var arrivedRowIDs: Set<String> = []
     /// Bands the stream worker drew with a streamed row's new layout, for
     /// the row's next placement; cleared by it.
     @ObservationIgnored var streamedBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
@@ -76,12 +72,13 @@ final class TranscriptController {
     @ObservationIgnored var palette: TextPalette?
     @ObservationIgnored var columnWidth: CGFloat = 0
     /// Layouts of rows in and near the viewport (state: being shown or about
-    /// to be). Others are dropped.
+    /// to be). Others are dropped by row count and total cached line budget.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
-    @ObservationIgnored var synchronousHeights: [String: CGFloat] = [:]
+    @ObservationIgnored var cachedLayoutLineCount = 0
     @ObservationIgnored let layoutInbox = LayoutInbox()
     @ObservationIgnored var urgentGeneration = 0
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
+    @ObservationIgnored var isScrollingDown = true
     @ObservationIgnored var openStarted = ContinuousClock.now
     @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) {
         [weak self, inbox = layoutInbox] result in
@@ -104,13 +101,18 @@ final class TranscriptController {
     @ObservationIgnored var store: ThreadStore?
     @ObservationIgnored var threadID: String?
     @ObservationIgnored var turns: [TranscriptTurn] = []
+    @ObservationIgnored var lastSnapshotID: Int?
+    @ObservationIgnored var turnRevisions: [Int] = []
     @ObservationIgnored var expandedTurnIDs: Set<String> = []
     /// The working row's verb and the latest entry it was picked for: it
     /// changes only when the agent starts something new.
     @ObservationIgnored var workingPhrase = ChatWorkingPhrases.next(after: nil)
     @ObservationIgnored var workingActivityKey: String?
-    /// Parsed assistant messages: rows are state (PLAN 3.1 rule 9).
+    /// Parsed assistant messages: rows are state (PLAN 3.1 rule 9). Bounded by
+    /// `maxParsedMessageBytes` so multi-tens-of-MB sessions stay within budget.
     @ObservationIgnored var parsedMessages: [String: (source: String, blocks: [MarkdownBlock])] = [:]
+    @ObservationIgnored var parsedMessageOrder: [String] = []
+    @ObservationIgnored var parsedMessageBytes = 0
     @ObservationIgnored var streams: [String: TranscriptStream] = [:]
     /// The daemon has turns before the first loaded one.
     @ObservationIgnored var hasOlderTurns = false
@@ -199,6 +201,7 @@ final class TranscriptController {
         let from = baselineTop
         guard abs(top - from) > ScrollFollowPolicy.minimumMovement else { return }
         baselineTop = top
+        if abs(top - from) > 4 { isScrollingDown = top > from }
         if !isAwaitingInitialEnd, !geometry.isEmpty,
             let scroll = ScrollFollowPolicy.readerScroll(
                 from: from, to: top, endTop: endTop(viewport), isNearBottom: isNearEnd(top: top, viewport))
@@ -248,7 +251,7 @@ final class TranscriptController {
     /// Measured heights by row ID (rule 4).
     func setHeights(_ heights: [String: CGFloat]) {
         guard !heights.isEmpty else { return }
-        changeGeometry { geometry.setHeights(heights) }
+        changeGeometry(preservesRowIDs: true) { geometry.setHeights(heights) }
     }
 
     /// Replaces rows `range` with `replacement` as one geometry change that
@@ -256,7 +259,7 @@ final class TranscriptController {
     /// block or a parsed message expanding in place. A row that stays keeps its
     /// height unless `heights` has one.
     func replaceRows(
-        _ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat], marksArrived: Bool = true
+        _ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat]
     ) {
         var old: [String: (row: TranscriptRow, height: CGFloat)] = [:]
         for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index)) }
@@ -266,26 +269,22 @@ final class TranscriptController {
         newHeights.reserveCapacity(versioned.count)
         for index in versioned.indices {
             let id = versioned[index].id
-            if let previous = old[id] {
-                versioned[index].contentVersion =
-                    previous.row.kind == versioned[index].kind ? previous.row.contentVersion : previous.row.contentVersion + 1
+            let previous = old[id]
+            let sameKind = previous.map { $0.row.kind == versioned[index].kind } ?? false
+            if let previous {
+                versioned[index].contentVersion = sameKind ? previous.row.contentVersion : previous.row.contentVersion + 1
             }
             newHeights.append(
-                heights[id] ?? old[id]?.height
+                heights[id] ?? (sameKind ? previous?.height : nil)
                     ?? HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
-        }
-        if marksArrived {
-            // Accumulates until a placement reads it: two replacements before
-            // one placement both arrive.
-            arrivedRowIDs.formUnion(versioned.lazy.map(\.id).filter { old[$0] == nil })
         }
         // Drop cached layouts for rows leaving the transcript so a reused ID
         // (such as `"working"` on the next turn) cannot collide at contentVersion 0.
         if !old.isEmpty {
             let kept = Set(versioned.lazy.map(\.id))
-            for id in old.keys where !kept.contains(id) { layouts[id] = nil }
+            for id in old.keys where !kept.contains(id) { removeLayout(for: id) }
         }
-        changeGeometry {
+        changeGeometry(replacingRange: range) {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
                 range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
@@ -296,7 +295,7 @@ final class TranscriptController {
     /// Updates rows in place whose IDs stay, with their new heights: a
     /// streaming tail growing. O(changed × log n), no structural change.
     func updateRows(_ updates: [(index: Int, row: TranscriptRow)], heights: [String: CGFloat]) {
-        changeGeometry {
+        changeGeometry(preservesRowIDs: true) {
             for (index, row) in updates where rows.indices.contains(index) && rows[index].id == row.id {
                 var row = row
                 row.contentVersion = rows[index].kind == row.kind ? rows[index].contentVersion : rows[index].contentVersion + 1
@@ -321,10 +320,19 @@ final class TranscriptController {
     /// The only way geometry changes: capture the reading place, apply the
     /// change, then land on the end while following or restore the place
     /// (rule 4), and recompute end visibility in the same pass (rule 5).
-    func changeGeometry(_ change: () -> Void) {
+    func changeGeometry(
+        preservesRowIDs: Bool = false, replacingRange: Range<Int>? = nil, _ change: () -> Void
+    ) {
         let follows = isFollowingEnd
         let top = host?.viewportTop ?? detachedTop
-        let place = follows ? nil : geometry.readingPlace(atViewportTop: top)
+        let place: ReadingPlace?
+        if follows {
+            place = nil
+        } else if let replacingRange {
+            place = geometry.readingPlace(atViewportTop: top, replacingRange: replacingRange)
+        } else {
+            place = geometry.readingPlace(atViewportTop: top, includeFallbacks: !preservesRowIDs)
+        }
         change()
         guard let host else { return }
         adjusting { host.setDocumentHeight(geometry.totalHeight) }
@@ -421,6 +429,41 @@ final class TranscriptController {
         baselineTop = host.viewportTop
         lastViewport = host.viewport
         updateEndVisibility()
+    }
+
+    /// Resolves the clipboard text for a copy accessory action.
+    func copyText(for action: RowAccessory.Action) -> String {
+        switch action {
+        case .copy(let text, _): text
+        case .copyReply(let turnID): replyMarkdown(forTurnID: turnID)
+        case .copyChunkedCode(let rowID): fullCodeText(startingAtRowID: rowID)
+        case .fork: ""
+        }
+    }
+
+    /// Lazily joins the assistant reply Markdown for `turnID` only when the
+    /// user clicks Copy Reply (avoids duplicating strings on every rebuild).
+    func replyMarkdown(forTurnID turnID: String) -> String {
+        guard let turn = turns.first(where: { $0.id == turnID }) else { return "" }
+        return turn.entries
+            .filter { $0.kind == .assistantMessage && !$0.text.isEmpty }
+            .map(\.text)
+            .joined(separator: "\n\n")
+    }
+
+    /// Lazily joins all consecutive chunks of a split code block starting at
+    /// `rowID` only when the user clicks Copy Code.
+    func fullCodeText(startingAtRowID rowID: String) -> String {
+        guard let start = geometry.index(for: rowID) else { return "" }
+        var parts: [String] = []
+        var index = start
+        while index < rows.count {
+            guard case .markdownBlock(.code(_, let code), let position) = rows[index].kind else { break }
+            parts.append(code)
+            if !position.joinsBelow { break }
+            index += 1
+        }
+        return parts.joined(separator: "\n")
     }
 
     /// Rule 2: viewport moves the controller causes, including the

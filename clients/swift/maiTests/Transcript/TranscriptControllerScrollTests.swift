@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import QuartzCore
 import Synchronization
 import Testing
 #if os(iOS)
@@ -602,10 +603,11 @@ struct TranscriptControllerScrollTests {
         // which lands on the end; push it out so only the stream decides.
         controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
 
-        // With the end screen laid out before the stream runs (frames only
-        // tick when the test says so), alignment must still wait for the
-        // saved row.
-        controller.layOutVisibleRows(minY: 0, maxY: 10_000)
+        // Even once every non-streaming row has a layout (frames only tick when
+        // the test says so), alignment must still wait for the stream's saved row.
+        for row in controller.rows where row.sourceID != messageID {
+            controller.storeLayout(RowLayoutBuilder.layout(controller.request(row)))
+        }
         controller.alignInitialEndIfPossible()
         #expect(controller.isAwaitingInitialEnd)
 
@@ -648,7 +650,7 @@ struct TranscriptControllerScrollTests {
         #expect(keys == [newKey])
     }
 
-    @Test func syncLayoutOfUnscheduledPendingMessageQueuesParse() async throws {
+    @Test func unscheduledPendingMessageEnteringViewportParsesAsynchronouslyWithoutSyncLayout() async throws {
         let controller = TranscriptController(configuration: .launch)
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 400, height: 200)
@@ -675,7 +677,11 @@ struct TranscriptControllerScrollTests {
         #expect(controller.rows.contains { $0.id == "m1#pending" })
 
         // Now m1#pending sits in the visible viewport without any reader scroll.
-        controller.layOutVisibleRows(minY: 0, maxY: 200)
+        // Mounting sees no cached layout and prefetches the parse off-main.
+        let mounter = TranscriptRowMounter(container: CALayer())
+        mounter.place(
+            controller, visible: CGRect(x: 0, y: 0, width: 400, height: 200), documentWidth: 400,
+            palette: TextPalette.resolveForTests, scale: 2, showsContent: true)
 
         for _ in 0..<50 where controller.rows.contains(where: { $0.id == "m1#pending" }) {
             try await Task.sleep(for: .milliseconds(20))
@@ -695,8 +701,8 @@ struct TranscriptControllerScrollTests {
         let user = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(source: "Hi"), messageID: "u0", role: .user)
         let working1 = TranscriptRow(id: "working", kind: .working(phrase: "Pondering…"))
         controller.setRows([user, working1])
-        let firstLayout = controller.layout(forRowAt: 1, synchronously: true)
-        #expect(firstLayout != nil)
+        let firstLayout = RowLayoutBuilder.layout(controller.request(controller.rows[1]))
+        controller.storeLayout(firstLayout)
         #expect(controller.layouts["working"] != nil)
 
         // Turn ends: `"working"` is removed. Its cached layout must be dropped.
@@ -707,8 +713,9 @@ struct TranscriptControllerScrollTests {
         let working2 = TranscriptRow(id: "working", kind: .working(phrase: "Tinkering with a much longer phrase…"))
         controller.replaceRows(1..<1, with: [working2], heights: [:])
         #expect(controller.layouts["working"] == nil)
-        let secondLayout = controller.layout(forRowAt: 1, synchronously: true)
-        if case .text(let textLayout, _) = secondLayout?.content {
+        let secondLayout = RowLayoutBuilder.layout(controller.request(controller.rows[1]))
+        controller.storeLayout(secondLayout)
+        if case .text(let textLayout, _) = controller.layout(forRowAt: 1)?.content {
             #expect(textLayout.string.contains("Tinkering"))
         } else {
             Issue.record("expected text layout for working row")

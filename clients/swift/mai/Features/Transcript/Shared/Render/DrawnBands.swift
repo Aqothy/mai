@@ -20,6 +20,10 @@ nonisolated struct DrawnBands: Sendable {
     /// block changed (e.g. a table column widening), `RasterQueue` draws it
     /// off-main only if the reader scrolls back to it.
     private static let maxPreDrawnTailBands = 4
+    /// At most the leftmost 2 horizontal tiles (1,536 pt > 2x column width)
+    /// are pre-drawn inline for wide streaming blocks; tiles scrolled further
+    /// right rasterize lazily via `RasterQueue`.
+    private static let maxPreDrawnWideColumns = 2
 
     /// Draws the bands of `layout` that do not draw as they did in
     /// `previous`, the layout the row showed before.
@@ -46,21 +50,34 @@ nonisolated struct DrawnBands: Sendable {
             bands.append((frame, BandRasterizer.bitmap(raster)))
         }
         var wideBands: [(frame: CGRect, bitmap: BandBitmap?)] = []
-        if let wide = layout.content.wideBody {
+        if let wide = layout.content.wideBody, wide.frame.height > 0, wide.contentWidth > 0 {
             let previousWide = previous?.content.wideBody
             let wideUnchanged =
                 previousWide.map { RowContentDiff.unchangedHeight($0.content, wide.content) } ?? 0
-            let oldWideFrames =
-                previousWide.map { RowLayer.bandFrames(height: $0.frame.height, width: $0.contentWidth) } ?? []
-            let wideFrames = RowLayer.bandFrames(height: wide.frame.height, width: wide.contentWidth)
-            let firstWideTail = max(0, wideFrames.count - maxPreDrawnTailBands)
-            for index in firstWideTail..<wideFrames.count {
-                let frame = wideFrames[index]
-                if index < oldWideFrames.count, oldWideFrames[index] == frame, frame.maxY <= wideUnchanged { continue }
-                let raster = BandRaster(
-                    content: wide.content, palette: palette, drawsWideBody: true, rect: frame, scale: scale,
-                    colorSpace: colorSpace)
-                wideBands.append((frame, BandRasterizer.bitmap(raster)))
+            let rowCount = Int(ceil(wide.frame.height / RowLayer.bandHeight))
+            let colCount = Int(ceil(wide.contentWidth / RowLayer.bandWidth))
+            let firstRow = max(0, rowCount - maxPreDrawnTailBands)
+            let preDrawnCols = min(colCount, maxPreDrawnWideColumns)
+            for row in firstRow..<rowCount {
+                let top = CGFloat(row) * RowLayer.bandHeight
+                let h = min(RowLayer.bandHeight, wide.frame.height - top)
+                for col in 0..<preDrawnCols {
+                    let left = CGFloat(col) * RowLayer.bandWidth
+                    let frame = CGRect(x: left, y: top, width: min(RowLayer.bandWidth, wide.contentWidth - left), height: h)
+                    if let previousWide,
+                        top < previousWide.frame.height,
+                        left < previousWide.contentWidth,
+                        min(RowLayer.bandHeight, previousWide.frame.height - top) == frame.height,
+                        min(RowLayer.bandWidth, previousWide.contentWidth - left) == frame.width,
+                        frame.maxY <= wideUnchanged
+                    {
+                        continue
+                    }
+                    let raster = BandRaster(
+                        content: wide.content, palette: palette, drawsWideBody: true, rect: frame, scale: scale,
+                        colorSpace: colorSpace)
+                    wideBands.append((frame, BandRasterizer.bitmap(raster)))
+                }
             }
         }
         return DrawnBands(palette: palette, scale: scale, colorSpace: colorSpace, bands: bands, wideBands: wideBands)

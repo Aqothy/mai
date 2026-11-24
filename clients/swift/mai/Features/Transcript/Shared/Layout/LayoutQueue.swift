@@ -7,11 +7,17 @@ import Foundation
 /// Chrome `content-visibility: auto`, Texture, and Telegram). Results reach the
 /// controller as values; Core Text objects never leave the task that made them.
 actor LayoutQueue {
+    /// Messages at or below both limits are parsed and laid out in one worker
+    /// hop (zero extra main-actor round-trip). Larger messages parse only,
+    /// splice with estimated heights, and let the viewport window lay out only
+    /// visible and nearby rows.
+    static let eagerParseLayoutByteLimit = 16_384
+    static let eagerParseLayoutBlockLimit = 32
+
     enum Work: Sendable {
         case layout(RowLayoutRequest)
-        /// Parses a `.pendingMessage` entering the viewport window and lays out
-        /// its blocks in one worker task so the main thread gets exact heights
-        /// and ready layouts in a single round-trip.
+        /// Parses a `.pendingMessage` entering the viewport window and, for
+        /// small messages, lays out its blocks in one worker task.
         case parseAndLayout(messageID: String, source: String, width: CGFloat, style: TextStyle)
     }
 
@@ -85,13 +91,16 @@ actor LayoutQueue {
             return .layout(RowLayoutBuilder.layout(request))
         case .parseAndLayout(let messageID, let source, let width, let style):
             let blocks = MarkdownPlanner.blocks(from: source)
+            let chunkedRows = TranscriptRowChunker.assistantRows(messageID: messageID, blocks: blocks)
+            guard source.utf8.count <= eagerParseLayoutByteLimit,
+                chunkedRows.count <= eagerParseLayoutBlockLimit
+            else {
+                return .parsedAndLaidOut(messageID: messageID, source: source, blocks: blocks, layouts: [])
+            }
             let key = RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version)
-            let layouts = blocks.indices.map { index in
+            let layouts = chunkedRows.map { row in
                 RowLayoutBuilder.layout(
-                    RowLayoutRequest(
-                        rowID: "\(messageID)#\(index)",
-                        kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
-                        key: key, style: style))
+                    RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
             }
             return .parsedAndLaidOut(messageID: messageID, source: source, blocks: blocks, layouts: layouts)
         }

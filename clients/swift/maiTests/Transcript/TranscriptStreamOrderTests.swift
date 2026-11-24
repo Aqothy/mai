@@ -31,7 +31,7 @@ struct TranscriptStreamOrderTests {
         let layer = RowLayer()
         layer.frame = CGRect(x: 0, y: 0, width: layout.key.width, height: layout.height)
         layer.show(rowID: "row", layout: layout, palette: palette, drawsWideBody: true, scale: 2)
-        layer.drawBands(in: layer.bounds, visible: layer.bounds, offMain: true)
+        layer.drawBands(in: layer.bounds, visible: layer.bounds, offMain: false)
         return layer
     }
 
@@ -98,7 +98,7 @@ struct TranscriptStreamOrderTests {
         let palette = TextPalette.resolveForTests
         let key = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
         let actions = RowLayoutBuilder.layout(
-            RowLayoutRequest(rowID: "a", kind: .turnActions(turnID: "t", replyMarkdown: "hi"), key: key, style: style))
+            RowLayoutRequest(rowID: "a", kind: .turnActions(turnID: "t", hasReply: true), key: key, style: style))
         let actionsLayer = mounted(actions, palette: palette)
         let actionBands = actionsLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
         #expect(actionBands.isEmpty)
@@ -113,6 +113,7 @@ struct TranscriptStreamOrderTests {
         let codeLayer = RowLayer()
         codeLayer.frame = CGRect(x: 0, y: 0, width: 300, height: codeLayout.height)
         codeLayer.show(rowID: "c", layout: codeLayout, palette: palette, drawsWideBody: false, scale: 2)
+        codeLayer.drawBands(in: codeLayer.bounds, visible: codeLayer.bounds, offMain: false)
         let codeBands = codeLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
         #expect(codeBands.count == 1)
         #expect(codeBands.allSatisfy { $0.frame.maxY <= RowLayer.bandHeight })
@@ -228,9 +229,10 @@ struct TranscriptStreamOrderTests {
                     messageID: "m", role: .assistant),
                 TranscriptRow(id: "tail", kind: .notice(title: "tail", text: nil)),
             ], measuredHeights: ["spacer": 400, "tail": 3000])
-        _ = controller.layout(forRowAt: 0, synchronously: true)
-        let code = controller.layout(forRowAt: 1, synchronously: true)
-        controller.setHeights(["spacer": 400, "m#0": code?.height ?? 0, "tail": 3000])
+        controller.storeLayout(RowLayoutBuilder.layout(controller.request(controller.rows[0])))
+        let code = RowLayoutBuilder.layout(controller.request(controller.rows[1]))
+        controller.storeLayout(code)
+        controller.setHeights(["spacer": 400, "m#0": code.height, "tail": 3000])
         let mounter = TranscriptRowMounter(container: CALayer())
         let recorder = MountRecorder()
         mounter.delegate = recorder
