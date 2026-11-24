@@ -138,15 +138,7 @@ extension TranscriptController {
         let minY = top - (downward ? 1 : 2) * screen
         let maxY = top + screen + (downward ? 2 : 1) * screen
         var jobs: [LayoutQueue.Job] = []
-        let overlapping = geometry.indices(overlapping: max(0, minY), maxY)
-        if isAwaitingInitialEnd, let saved = pendingRestorePlace, geometry.index(for: saved.anchorID) == nil,
-            let pendingIndex = geometry.index(for: "\(saved.source)#pending"),
-            !(overlapping?.contains(pendingIndex) ?? false),
-            let pendingJob = job(for: pendingIndex, priority: 0)
-        {
-            jobs.append(pendingJob)
-        }
-        if let range = overlapping {
+        if let range = geometry.indices(overlapping: max(0, minY), maxY) {
             for index in range {
                 let distance = Int(abs(geometry.offset(at: index) - top))
                 if let job = job(for: index, priority: distance) { jobs.append(job) }
@@ -241,9 +233,10 @@ extension TranscriptController {
         if !newlyParsed.isEmpty {
             applyParsedMessages(newlyParsed)
         }
-        // If large height shrinkage pulled unscheduled rows onto the initial
-        // screen, schedule them immediately instead of waiting for the 1s
-        // timeout (gated on delta so normal open drains don't re-queue in-flight jobs).
+        // Large height changes can pull unscheduled rows onto the initial
+        // screen: schedule them now instead of waiting for the 1s timeout
+        // (gated on the total change so normal open drains don't re-queue
+        // in-flight jobs).
         if isAwaitingInitialEnd, newlyParsed.isEmpty, let viewport = host?.viewport ?? lastViewport,
             heightDeltaSum >= viewport.visibleHeight / 4
         {
@@ -280,13 +273,13 @@ extension TranscriptController {
             return
         }
         guard let firstIndex = byIndex.keys.min(), let lastIndex = byIndex.keys.max() else { return }
-        let width = columnWidth > 0 ? columnWidth : 600
         var replacementRows: [TranscriptRow] = []
         var replacementHeights: [String: CGFloat] = [:]
         replacementRows.reserveCapacity((lastIndex - firstIndex + 1) + byIndex.count * 4)
         // Populate ready layouts before `replaceRows` so its `scheduleWork()`
         // and `alignInitialEndIfPossible()` see them immediately (zero redundant
-        // layout jobs, and `dropLayouts` trims any out-of-window blocks).
+        // layout jobs, and `dropLayouts` trims any out-of-window blocks). Blocks
+        // without one take `replaceRows`'s estimate.
         for index in firstIndex...lastIndex {
             if let replacement = byIndex[index] {
                 for (offset, blockRow) in replacement.rows.enumerated() {
@@ -294,8 +287,6 @@ extension TranscriptController {
                         let layout = prebuilt[offset]
                         replacementHeights[blockRow.id] = layout.height
                         layouts[layout.rowID] = layout
-                    } else {
-                        replacementHeights[blockRow.id] = HeightEstimator.estimate(blockRow.kind, width: width, style: style)
                     }
                     replacementRows.append(blockRow)
                 }
@@ -321,11 +312,12 @@ extension TranscriptController {
         guard configuration.laysOutRows else { return true }
         guard columnWidth > 0 else { return false }
         if openStarted.duration(to: .now) > .seconds(1) { return true }
-        if let saved = pendingRestorePlace, geometry.index(for: saved.anchorID) == nil {
-            if geometry.index(for: "\(saved.source)#pending") != nil { return false }
-            if let stream = streams[saved.source], stream.shownLength < stream.currentText.utf8.count {
-                return false
-            }
+        // The saved row may be one its stream has not produced yet: wait for
+        // the stream to catch up rather than land on the end.
+        if let saved = pendingRestorePlace, geometry.index(for: saved.anchorID) == nil,
+            let stream = streams[saved.source], stream.shownLength < stream.currentText.utf8.count
+        {
+            return false
         }
         let target = initialTargetTop(viewport).top
         let top = max(0, target - viewport.topInset)

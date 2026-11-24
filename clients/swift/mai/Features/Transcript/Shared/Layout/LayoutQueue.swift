@@ -42,7 +42,7 @@ actor LayoutQueue {
     /// Queues work near the viewport. A monotonic `generation` ensures stale
     /// out-of-order tasks (whether `replacingUrgent` or `prefetch`) can never
     /// overwrite a newer layout window.
-    func submit(urgent jobs: [Job], generation: Int = 0, replacingUrgent: Bool) {
+    func submit(urgent jobs: [Job], generation: Int, replacingUrgent: Bool) {
         if generation < latestUrgentGeneration { return }
         if replacingUrgent {
             latestUrgentGeneration = max(latestUrgentGeneration, generation)

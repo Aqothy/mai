@@ -360,7 +360,6 @@ final class TranscriptController {
             move(to: endTop(viewport))
             scheduleWork()
             alignInitialEndIfPossible()
-            updateFrameUpdates()
             return
         }
         let distance = endTop(viewport) - host.viewportTop
@@ -490,12 +489,10 @@ final class TranscriptController {
             follow.note(.awayFromEnd)
         }
         pendingRestorePlace = nil
-        endJump = nil
         isAwaitingInitialEnd = false
         move(to: target.top)
         host.setContentVisible(true)
         host.setNeedsRowPlacement()
-        updateFrameUpdates()
         transcriptDidShow()
     }
 }
