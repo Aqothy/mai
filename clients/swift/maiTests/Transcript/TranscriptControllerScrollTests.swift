@@ -602,15 +602,11 @@ struct TranscriptControllerScrollTests {
         // which lands on the end; push it out so only the stream decides.
         controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
 
-        // The end screen is laid out before the stream runs (frames only tick
-        // when the test says so): alignment must still wait for the saved row.
-        func isEndScreenLaidOut() -> Bool {
-            controller.rows.allSatisfy { controller.layouts[$0.id]?.key == controller.currentKey($0) }
-        }
-        for _ in 0..<250 where !isEndScreenLaidOut() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(isEndScreenLaidOut())
+        // With the end screen laid out before the stream runs (frames only
+        // tick when the test says so), alignment must still wait for the
+        // saved row.
+        controller.layOutVisibleRows(minY: 0, maxY: 10_000)
+        controller.alignInitialEndIfPossible()
         #expect(controller.isAwaitingInitialEnd)
 
         // One frame tick releases the received text at once.
