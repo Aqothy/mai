@@ -3,7 +3,7 @@ import Foundation
 
 /// One Markdown block as plain values, final once parsed: streaming appends
 /// blocks, it never changes a finished one.
-nonisolated indirect enum MarkdownBlock: Hashable, Sendable {
+nonisolated enum MarkdownBlock: Hashable, Sendable {
     case paragraph([MarkdownInline])
     case heading(level: Int, [MarkdownInline])
     case list(MarkdownList)

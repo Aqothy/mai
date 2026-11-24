@@ -5,6 +5,11 @@ import Foundation
 /// lines sit. Hard line breaks inside it continue at `headIndent` with
 /// line spacing only.
 nonisolated struct StyledParagraph: Sendable {
+    struct TaskMarker: Sendable {
+        var x: CGFloat
+        var checked: Bool
+    }
+
     /// UTF-16 offset of its first character.
     var start: Int
     var firstLineIndent: CGFloat
@@ -15,4 +20,6 @@ nonisolated struct StyledParagraph: Sendable {
     var quoteBars: [CGFloat]
     /// A thematic break: a full-width line over clear text.
     var isRule = false
+    /// Optional GFM task-list checkbox drawn in the leading list gutter.
+    var taskMarker: TaskMarker?
 }

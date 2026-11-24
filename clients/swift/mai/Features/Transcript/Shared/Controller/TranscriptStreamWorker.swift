@@ -69,12 +69,12 @@ actor TranscriptStreamWorker {
         let committedCount: Int
         if update.isFinished {
             blocks = parser.finish(update.text)
-            committedCount = parser.parsesWholeDocument ? 0 : blocks.count
+            committedCount = blocks.count
             parsers[update.messageID] = nil
         } else {
             let snapshot = parser.update(update.text)
             blocks = snapshot.blocks
-            committedCount = parser.parsesWholeDocument ? 0 : snapshot.committed.count
+            committedCount = snapshot.committed.count
             parsers[update.messageID] = parser
         }
         let state = shown[update.messageID].flatMap {
@@ -82,9 +82,9 @@ actor TranscriptStreamWorker {
         }
         let previous = state?.rows ?? []
         // Committed blocks strictly before the last block of the previous
-        // update cannot change unless the parser reset or switched to whole-
-        // document parsing (e.g., on a reference definition).
-        let canSkipCommitted = state.map { $0.parserResetCount == parser.committedResetCount && !parser.parsesWholeDocument } ?? false
+        // update cannot change unless the parser reset them (a replaced
+        // message, or a reference definition resolving an earlier link).
+        let canSkipCommitted = state.map { $0.parserResetCount == parser.committedResetCount } ?? false
         let skipPrefix =
             canSkipCommitted
             ? min(state?.stableCount ?? 0, max(0, committedCount - 1), previous.count, max(0, blocks.count - 1))

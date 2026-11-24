@@ -17,6 +17,11 @@ struct StreamingMarkdownParserTests {
         ("html", "<!--\n\ncomment\n\n-->\n\ntext\n\n    indented\n\n    code\n\nend"),
     ]
 
+    private static func committedLength(of source: String) -> Int {
+        var copy = source
+        return copy.withUTF8 { MarkdownPlanner.parse(bytes: $0, incomplete: true).committedLength }
+    }
+
     @Test(arguments: [1, 7, 16, 97])
     func anyChunkingEndsInTheOneShotBlocks(chunk: Int) {
         for (name, source) in Self.fixtures {
@@ -53,9 +58,9 @@ struct StreamingMarkdownParserTests {
         #expect(links.update("See [the docs](https://exa").open == [.paragraph([MarkdownInline(text: "See the docs")])])
     }
 
-    /// A reference definition can change earlier text; from then on the
-    /// whole message parses each update.
-    @Test func aReferenceDefinitionParsesTheWholeMessage() {
+    /// A reference definition can resolve earlier references while keeping
+    /// final output equal to one-shot parsing.
+    @Test func aReferenceDefinitionResolvesEarlierBlocks() {
         let source = "Read [the guide][g].\n\nMore text.\n\n[g]: https://example.com\n"
         var parser = StreamingMarkdownParser()
         _ = parser.update(String(source.prefix(30)))
@@ -74,64 +79,127 @@ struct StreamingMarkdownParserTests {
     }
 
     /// CommonMark ends an HTML block at its closing tag in any letter case;
-    /// an uppercase closer used to keep everything after it uncommitted.
+    /// an uppercase closer commits at the following blank line.
     @Test func anUppercaseHTMLCloserEndsItsBlock() {
         let committed = "<PRE>\nhello\n</PRE>\n\n"
-        #expect(MarkdownCommitBoundary.committedLength(of: Array((committed + "After\n").utf8)) == committed.utf8.count)
+        #expect(Self.committedLength(of: committed + "After\n") == committed.utf8.count)
     }
 
     /// A paragraph right after indented code is not code: its blank line
     /// commits both, even when more indented code follows.
     @Test func aParagraphAfterIndentedCodeCommitsAtItsBlankLine() {
         let committed = "    code\npara\n\n"
-        #expect(
-            MarkdownCommitBoundary.committedLength(of: Array((committed + "    more\n").utf8)) == committed.utf8.count)
+        #expect(Self.committedLength(of: committed + "    more\n") == committed.utf8.count)
     }
 
     /// `[key]: value` is a link definition in prose but code inside a fence
-    /// (YAML, a TypeScript computed key): it must not switch the parser to
-    /// whole-message parsing and drop the committed blocks.
+    /// (YAML, a TypeScript computed key): it must not reset committed blocks.
     @Test func definitionSyntaxInsideAFenceKeepsTheCommittedBlocks() {
         let source = "First paragraph.\n\n```ts\n[key]: value\n```\n\nAfter.\n"
         var parser = StreamingMarkdownParser()
         #expect(parser.update("First paragraph.\n\n").committed.count == 1)
         #expect(parser.update(String(source.dropLast("After.\n".count))).committed.count == 2)
+        #expect(parser.committedResetCount == 0)
         #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
     }
 
-    /// The open tail heals as CommonMark will read it once closed: code spans
-    /// match runs of equal length (a backslash in code is literal), a code
-    /// span inside open emphasis still lets it close, `_` inside a word is
-    /// not emphasis, and an unclosed `***` at the end goes whole.
-    @Test func theOpenTailHealsByCommonMarkRules() {
+    /// Completion follows `@pierre/words`: code spans match runs of equal length
+    /// (backslashes inside code are literal), code spans inside open emphasis
+    /// still let it close, intra-word `_` is not emphasis, trailing `***` with
+    /// nothing open stays literal, and code blocks are never mutated.
+    @Test func theOpenTailCompletesByPierreRules() {
+        var p1 = StreamingMarkdownParser()
         #expect(
-            MarkdownTailHealer.blocks(forOpenTail: "Run **bold `code` more") == [
+            p1.update("Run **bold `code` more").open == [
                 .paragraph([
                     MarkdownInline(text: "Run "), MarkdownInline(text: "bold ", style: .strong),
                     MarkdownInline(text: "code", style: [.strong, .code]), MarkdownInline(text: " more", style: .strong),
                 ])
             ])
-        #expect(MarkdownTailHealer.healed("set max_tokens higher") == "set max_tokens higher")
-        #expect(MarkdownTailHealer.healed("``foo ` bar``") == "``foo ` bar``")
-        #expect(MarkdownTailHealer.healed("`\\`") == "`\\`")
-        #expect(MarkdownTailHealer.healed("hello ***") == "hello ")
+        var p2 = StreamingMarkdownParser()
+        #expect(p2.update("set max_tokens higher").open == [.paragraph([MarkdownInline(text: "set max_tokens higher")])])
+        var p3 = StreamingMarkdownParser()
+        #expect(
+            p3.update("``foo ` bar``").open == [.paragraph([MarkdownInline(text: "foo ` bar", style: .code)])])
+        var p4 = StreamingMarkdownParser()
+        #expect(p4.update("`\\`").open == [.paragraph([MarkdownInline(text: "\\", style: .code)])])
+        var p5 = StreamingMarkdownParser()
+        #expect(p5.update("hello ***").open == [.paragraph([MarkdownInline(text: "hello ***")])])
+        var p6 = StreamingMarkdownParser()
+        #expect(p6.update("**bold ").open == [.paragraph([MarkdownInline(text: "bold", style: .strong)])])
+        var p7 = StreamingMarkdownParser()
+        #expect(p7.update("    let x = **foo").open == [.code(language: nil, code: "let x = **foo")])
+        var p8 = StreamingMarkdownParser()
+        #expect(
+            p8.update("- item\n\n  ```swift\n  let x = **foo").open == [
+                .list(MarkdownList(startIndex: nil, items: [
+                    MarkdownList.Item(blocks: [
+                        .paragraph([MarkdownInline(text: "item")]),
+                        .code(language: "swift", code: "let x = **foo"),
+                    ]),
+                ]))
+            ])
     }
 
-    /// A started table's next row can begin like a delimiter row; it must not
-    /// be filled in as one, which showed a row of dashes for a frame.
-    @Test func aStartedTablesBodyRowIsNotHealedAsADelimiterRow() {
+    /// GFM 5.3 task list markers parse into `MarkdownList.Item.taskChecked`,
+    /// strip the marker from paragraph text, hide partial `[` / `[x` prefixes
+    /// while streaming, and match one-shot parsing across arbitrary chunking.
+    @Test func gfmTaskListMarkersParseAndStreamEquivalently() {
+        let source = "- [ ] Todo item\n- [x] Done **bold**\n- [X] Also done\n- [ ]no space\n- [ ] \n- Regular\n"
+        let blocks = MarkdownPlanner.blocks(from: source)
+        #expect(
+            blocks == [
+                .list(MarkdownList(startIndex: nil, items: [
+                    MarkdownList.Item(taskChecked: false, blocks: [.paragraph([MarkdownInline(text: "Todo item")])]),
+                    MarkdownList.Item(taskChecked: true, blocks: [
+                        .paragraph([MarkdownInline(text: "Done "), MarkdownInline(text: "bold", style: .strong)]),
+                    ]),
+                    MarkdownList.Item(taskChecked: true, blocks: [.paragraph([MarkdownInline(text: "Also done")])]),
+                    MarkdownList.Item(taskChecked: nil, blocks: [.paragraph([MarkdownInline(text: "[ ]no space")])]),
+                    MarkdownList.Item(taskChecked: nil, blocks: [.paragraph([MarkdownInline(text: "[ ]")])]),
+                    MarkdownList.Item(taskChecked: nil, blocks: [.paragraph([MarkdownInline(text: "Regular")])]),
+                ]))
+            ])
+        // Streaming partial markers hide `[`, `[x`, `[x]` until content follows.
+        var partial = StreamingMarkdownParser()
+        #expect(partial.update("- [x").open == [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [])]))])
+        // Streaming in 1-byte and 7-byte chunks matches one-shot.
+        for chunk in [1, 7] {
+            var parser = StreamingMarkdownParser()
+            let chars = Array(source)
+            var offset = 0
+            while offset < chars.count {
+                offset = min(chars.count, offset + chunk)
+                _ = parser.update(String(chars[..<offset]))
+            }
+            #expect(parser.finish(source) == blocks, "chunk \(chunk)")
+        }
+    }
+
+    /// Partial table delimiter rows wait until the delimiter row is valid
+    /// (pierre parity), and a started table's body row stays a body row.
+    @Test func partialTableDelimiterWaitsAndBodyRowsStayCells() {
+        var partial = StreamingMarkdownParser()
+        #expect(partial.update("| A | B |\n| -").open == [.paragraph([MarkdownInline(text: "| A | B |\n| -")])])
+        var started = StreamingMarkdownParser()
         let table = "| A | B |\n| --- | --- |\n| - |"
-        #expect(MarkdownTailHealer.healed(table) == table)
-        #expect(MarkdownTailHealer.healed("| A | B |\n| -") == "| A | B |\n| --- | --- |")
+        #expect(
+            started.update(table).open == [
+                .table(MarkdownTable(
+                    alignments: [.leading, .leading],
+                    header: [[MarkdownInline(text: "A")], [MarkdownInline(text: "B")]],
+                    rows: [[[MarkdownInline(text: "-")], []]]))
+            ])
     }
 
     /// Any agent may send CRLF (a Windows file quoted in a fence): a CRLF
     /// blank line commits, an open CRLF fence streams as code, a rule keeps
     /// its spelling, and streaming ends in the one-shot blocks.
     @Test func crlfStreamsLikeLF() {
-        #expect(MarkdownCommitBoundary.committedLength(of: Array("Para\r\n\r\nNext".utf8)) == 8)
+        #expect(Self.committedLength(of: "Para\r\n\r\nNext") == 8)
+        var crlfFence = StreamingMarkdownParser()
         #expect(
-            MarkdownTailHealer.blocks(forOpenTail: "```go\r\nlet a = 1\r\n") == [.code(language: "go", code: "let a = 1")])
+            crlfFence.update("```go\r\nlet a = 1\r\n").open == [.code(language: "go", code: "let a = 1")])
         #expect(MarkdownPlanner.blocks(from: "***\r\n") == [.rule(spelling: "***")])
         let source =
             "# Title\r\n\r\n```swift\r\nlet a = 1\r\n\t}\r\n```\r\n\r\n---\r\n\r\n| A | B |\r\n| --- | --- |\r\n| 1 | 2 |\r\n\r\nEnd\r\n"
@@ -167,5 +235,167 @@ struct StreamingMarkdownParserTests {
             }
             #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
         }
+    }
+
+    /// A link reference definition near the top of a document stays incremental
+    /// (zero committed resets) while resolving later reference links identically
+    /// to one-shot.
+    @Test func topLinkReferenceDefinitionStaysIncremental() {
+        var source = "[docs]: https://example.com/docs\n\n"
+        for index in 0..<40 {
+            source += "Paragraph \(index) references [the docs][docs] with **bold** and `code_\(index)`.\n\n"
+        }
+        let chars = Array(source)
+        var parser = StreamingMarkdownParser()
+        var offset = 0
+        var previousCommitted = 0
+        while offset < chars.count {
+            offset = min(chars.count, offset + 97)
+            let snap = parser.update(String(chars[..<offset]))
+            #expect(snap.committed.count >= previousCommitted)
+            previousCommitted = snap.committed.count
+        }
+        #expect(parser.committedResetCount == 0)
+        #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+    }
+
+    /// A plain-text single paragraph and a rich single paragraph with inline
+    /// syntax both match one-shot parsing across arbitrary chunk boundaries.
+    @Test(arguments: [1, 7, 31, 128])
+    func singleParagraphLiteralAndRichStreamMatchOneShot(chunk: Int) {
+        let plain = (0..<120).map { "word\($0)" }.joined(separator: " ")
+        let rich = (0..<60).map {
+            "Sentence \($0) has **bold**, `code_\($0)`, *em*, ~~del~~, and [site](https://example.com/\($0))."
+        }.joined(separator: " ")
+        for source in [plain, rich] {
+            let chars = Array(source)
+            var parser = StreamingMarkdownParser()
+            var offset = 0
+            while offset < chars.count {
+                offset = min(chars.count, offset + chunk)
+                _ = parser.update(String(chars[..<offset]))
+            }
+            #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+        }
+    }
+
+    /// Trailing `[label]:` in prose (not a real link reference definition) does
+    /// not drop committed blocks or disable incremental streaming.
+    @Test func proseColonAfterBracketsDoesNotTriggerDefinitionReset() {
+        let source = "Intro paragraph.\n\nSecond paragraph mentions\n[paragraph continuation text]:\n\nAfter.\n"
+        var parser = StreamingMarkdownParser()
+        let chars = Array(source)
+        for end in stride(from: 1, through: chars.count, by: 7) {
+            _ = parser.update(String(chars[..<end]))
+        }
+        #expect(parser.committedResetCount == 0)
+        #expect(parser.finish(source) == MarkdownPlanner.blocks(from: source))
+    }
+
+    /// Audit regressions: streaming equivalence across multi-word emphasis,
+    /// split links, raw HTML, bare CR fences/tables, earlier-definition
+    /// precedence, HTML block types 3-5, and trailing tabs.
+    @Test func auditStreamingEquivalenceRegressions() {
+        let cases: [(String, [String])] = [
+            ("multi-word emphasis", ["**hello world foo bar", "** done"]),
+            ("split link", ["See [foo bar]", "(https://example.com) ok"]),
+            ("literal angle html", ["Hello world <div class=foo ", "bar>"]),
+            ("bare CR fence close", ["```\nhello\n", "```\r**after**"]),
+            ("split CRLF fence opener", ["```\r", "\nlet x = 1\r\n```"]),
+            ("earlier def wins", ["[a]: https://first.example.com\n\n", "[a]: https://second.example.com\n\nSee [a]."]),
+            ("html type 3", ["<?php\n\necho 1;\n?>\n\nafter"]),
+            ("html type 4", ["<!DOCTYPE html\n\n>\n\nafter"]),
+            ("html type 5", ["<![CDATA[\n\nx\n]]>\n\nafter"]),
+            ("table bare CR", ["| A | B |\n| --- | --- |\n| 1 | 2 |\r", "| 3 | 4 |"]),
+            ("trailing tab", ["hello world\t", "*a*"]),
+        ]
+        for (name, chunks) in cases {
+            var parser = StreamingMarkdownParser()
+            var acc = ""
+            for chunk in chunks {
+                acc += chunk
+                _ = parser.update(acc)
+            }
+            #expect(parser.finish(acc) == MarkdownPlanner.blocks(from: acc), "\(name)")
+        }
+    }
+
+    /// Audit regressions: parser correctness for CR in fences, indented-code
+    /// trimming, link label normalization, 1-column tables, fence info entities,
+    /// XML entities, GFM extended autolinks, raw HTML comments, and strikethrough.
+    @Test func auditParserCorrectnessRegressions() {
+        #expect(MarkdownPlanner.blocks(from: "```\r\nfoo\r\n\t```\r\n```") == [.code(language: nil, code: "foo\n\t```")])
+        #expect(
+            MarkdownPlanner.blocks(from: "```\nfoo ` bar\r```\n**after**") == [
+                .code(language: nil, code: "foo ` bar"),
+                .paragraph([MarkdownInline(text: "after", style: .strong)]),
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: ">     code\n>\t  \n") == [
+                .quote([.code(language: nil, code: "code")])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "[\u{00A0}]: https://example.com\n\n[\u{00A0}]") == [
+                .paragraph([MarkdownInline(text: "\u{00A0}", link: URL(string: "https://example.com"))])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "[foo]\n\n[FOO]: https://example.com") == [
+                .paragraph([MarkdownInline(text: "foo", link: URL(string: "https://example.com"))])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "[ὈΔΥΣΣΕΎΣ]: https://example.com\n\n[ὀδυσσεύς]") == [
+                .paragraph([MarkdownInline(text: "ὀδυσσεύς", link: URL(string: "https://example.com"))])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "foo\n:---\nbar") == [
+                .table(MarkdownTable(
+                    alignments: [.leading],
+                    header: [[MarkdownInline(text: "foo")]],
+                    rows: [[[MarkdownInline(text: "bar")]]]))
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "```foo&#32;bar\ncode\n```") == [.code(language: "foo", code: "code")])
+        #expect(
+            MarkdownPlanner.blocks(from: "&AMP;&LT;&GT;&QUOT;") == [.paragraph([MarkdownInline(text: "&<>\"")])])
+        #expect(
+            MarkdownPlanner.blocks(from: "a <!--> b <!---> c") == [
+                .paragraph([
+                    MarkdownInline(text: "a "),
+                    MarkdownInline(text: "<!-->", style: .code),
+                    MarkdownInline(text: " b "),
+                    MarkdownInline(text: "<!--->", style: .code),
+                    MarkdownInline(text: " c"),
+                ])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "~~a ~5 b~~") == [
+                .paragraph([MarkdownInline(text: "~~a ~5 b~~")])
+            ])
+        // GFM extended autolinks.
+        #expect(
+            MarkdownPlanner.blocks(from: "www.google.com/search?q=commonmark&hl;") == [
+                .paragraph([
+                    MarkdownInline(
+                        text: "www.google.com/search?q=commonmark",
+                        link: URL(string: "http://www.google.com/search?q=commonmark")),
+                    MarkdownInline(text: "&hl;"),
+                ])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "http://localhost:8080") == [
+                .paragraph([MarkdownInline(text: "http://localhost:8080", link: URL(string: "http://localhost:8080"))])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "\"https://example.com\"") == [
+                .paragraph([
+                    MarkdownInline(text: "\""),
+                    MarkdownInline(text: "https://example.com", link: URL(string: "https://example.com")),
+                    MarkdownInline(text: "\""),
+                ])
+            ])
+        #expect(
+            MarkdownPlanner.blocks(from: "mailto:a@b.com") == [
+                .paragraph([MarkdownInline(text: "mailto:a@b.com", link: URL(string: "mailto:a@b.com"))])
+            ])
     }
 }

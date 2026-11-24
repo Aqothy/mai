@@ -19,6 +19,8 @@ nonisolated struct TextLine: Sendable {
     let caretOffsets: [CGFloat]
     /// The runs of `TextLayout.runs` on this line.
     let runs: Range<Int>
+    /// The decorations of `TextLayout.decorations` emitted for this line.
+    let decorations: Range<Int>
     /// The line ends at a hard break (its last character is a newline), so
     /// the caret after that character starts the next line.
     let endsWithNewline: Bool

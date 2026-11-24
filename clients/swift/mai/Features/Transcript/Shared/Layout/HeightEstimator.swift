@@ -88,7 +88,7 @@ nonisolated enum HeightEstimator {
             return totalLines + max(1, ceil(CGFloat(totalBytes) / perLine))
         case .list(let list):
             return list.items.reduce(0) { sum, item in
-                sum + item.reduce(0) { $0 + lines(of: $1, perLine: perLine) }
+                sum + item.blocks.reduce(0) { $0 + lines(of: $1, perLine: perLine) }
             }
         case .quote(let blocks):
             return blocks.reduce(0) { $0 + lines(of: $1, perLine: perLine) }

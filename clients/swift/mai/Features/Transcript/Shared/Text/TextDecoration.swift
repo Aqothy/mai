@@ -8,6 +8,8 @@ nonisolated struct TextDecoration: Sendable {
         case inlineCodeBackground
         case quoteBar
         case rule
+        case taskUnchecked
+        case taskChecked
         case underline
         case strikethrough
     }
@@ -18,7 +20,7 @@ nonisolated struct TextDecoration: Sendable {
 
     var isBehindText: Bool {
         switch kind {
-        case .inlineCodeBackground, .quoteBar, .rule: true
+        case .inlineCodeBackground, .quoteBar, .rule, .taskUnchecked, .taskChecked: true
         case .underline, .strikethrough: false
         }
     }

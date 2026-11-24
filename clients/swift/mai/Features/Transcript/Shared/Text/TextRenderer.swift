@@ -51,6 +51,32 @@ nonisolated enum TextRenderer {
             case .rule:
                 context.setFillColor(palette.separator)
                 context.fill(decoration.rect)
+            case .taskUnchecked:
+                let box = decoration.rect.insetBy(dx: 0.75, dy: 0.75)
+                context.setStrokeColor(palette.secondary)
+                context.setLineWidth(1.25)
+                context.addPath(CGPath(roundedRect: box, cornerWidth: 3, cornerHeight: 3, transform: nil))
+                context.strokePath()
+            case .taskChecked:
+                let box = decoration.rect.insetBy(dx: 0.75, dy: 0.75)
+                let boxPath = CGPath(roundedRect: box, cornerWidth: 3, cornerHeight: 3, transform: nil)
+                context.setFillColor(palette.inlineCodeBackground)
+                context.addPath(boxPath)
+                context.fillPath()
+                context.setStrokeColor(palette.primary)
+                context.setLineWidth(1.25)
+                context.addPath(boxPath)
+                context.strokePath()
+                context.setStrokeColor(palette.primary)
+                context.setLineWidth(1.6)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                let r = decoration.rect
+                context.beginPath()
+                context.move(to: CGPoint(x: r.minX + r.width * 0.25, y: r.minY + r.height * 0.52))
+                context.addLine(to: CGPoint(x: r.minX + r.width * 0.43, y: r.minY + r.height * 0.70))
+                context.addLine(to: CGPoint(x: r.minX + r.width * 0.75, y: r.minY + r.height * 0.30))
+                context.strokePath()
             case .underline, .strikethrough:
                 guard let color = palette.color(decoration.color) else { continue }
                 context.setFillColor(color)

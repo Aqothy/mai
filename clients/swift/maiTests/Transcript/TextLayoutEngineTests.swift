@@ -42,11 +42,21 @@ struct TextLayoutEngineTests {
     @Test func listItemsHangTheirTextAfterTheMarker() {
         let item = Array(repeating: "wrapping", count: 30).joined(separator: " ")
         let list = layout(
-            [.list(MarkdownList(startIndex: nil, items: [[.paragraph([MarkdownInline(text: item)])]]))], width: 300)
+            [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.paragraph([MarkdownInline(text: item)])])]))],
+            width: 300)
         #expect(list.lines.count > 1)
         #expect(list.lines[0].x == 0)
         #expect(list.lines.dropFirst().allSatisfy { $0.x == style.listIndent })
         #expect(list.string.hasPrefix("•  "))
+    }
+
+    @Test func taskListItemsEmitCheckboxDecorationsAndIndentFirstLine() {
+        let blocks = MarkdownPlanner.blocks(from: "- [ ] First task\n- [x] Second task\n")
+        let rendered = layout(blocks, width: 300)
+        #expect(rendered.decorations.map(\.kind) == [.taskUnchecked, .taskChecked])
+        #expect(rendered.lines.count == 2)
+        #expect(rendered.lines.allSatisfy { $0.x == style.listIndent })
+        #expect(rendered.string == "First task\nSecond task")
     }
 
     @Test func caretsRunLeftToRightAcrossEachLine() {
@@ -142,7 +152,8 @@ struct TextLayoutEngineTests {
     /// A list's bullet follows how deep in lists it is: two quotes indent as
     /// much as a list, and used to make a top-level list's bullet `◦`.
     @Test func aListInQuotesStartsAtTheFirstBullet() {
-        let list = MarkdownBlock.list(MarkdownList(startIndex: nil, items: [[.paragraph([MarkdownInline(text: "a")])]]))
+        let list = MarkdownBlock.list(
+            MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.paragraph([MarkdownInline(text: "a")])])]))
         let text = AttributedTextBuilder.build([.quote([.quote([list])])], style: style)
         #expect(text.string.string.hasPrefix("•"))
     }
@@ -150,11 +161,13 @@ struct TextLayoutEngineTests {
     /// An item that starts with code or a nested list still shows its marker.
     @Test func aListItemStartingWithABlockKeepsItsMarker() {
         let code = AttributedTextBuilder.build(
-            [.list(MarkdownList(startIndex: nil, items: [[.code(language: nil, code: "make")]]))], style: style)
+            [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.code(language: nil, code: "make")])]))],
+            style: style)
         #expect(code.string.string.hasPrefix("•"))
         #expect(code.string.string.hasSuffix("make"))
         let numbered = AttributedTextBuilder.build(
-            [.list(MarkdownList(startIndex: 3, items: [[.code(language: nil, code: "make")]]))], style: style)
+            [.list(MarkdownList(startIndex: 3, items: [MarkdownList.Item(blocks: [.code(language: nil, code: "make")])]))],
+            style: style)
         #expect(numbered.string.string.hasPrefix("3."))
     }
 
@@ -250,5 +263,44 @@ struct TextLayoutEngineTests {
         let tl2Full = TableLayout.make(t2, width: 500, style: style)
         #expect(tl2Inc.size == tl2Full.size)
         #expect(RowContentDiff.unchangedHeight(.tableBody(tl2Inc), .tableBody(tl2Full)) == .infinity)
+    }
+
+    /// Incremental suffix layout must not duplicate URLs in `links` or leave
+    /// stale decorations when a paragraph with links grows over many updates.
+    @Test func incrementalParagraphSuffixDoesNotLeakLinksOrDecorations() throws {
+        let url = try #require(URL(string: "https://example.com"))
+        let baseInlines = [
+            MarkdownInline(text: "Line one of text that definitely wraps across multiple lines in a narrow column here. "),
+            MarkdownInline(text: "Line two of text that also wraps cleanly across the column width so keepCount is two. "),
+            MarkdownInline(text: "Check "),
+            MarkdownInline(text: "link", style: [], link: url),
+            MarkdownInline(text: " and "),
+            MarkdownInline(text: "code", style: .code),
+            MarkdownInline(text: " now"),
+        ]
+        let pos = TranscriptBlockPosition(isFirst: true, isLast: true)
+        let key = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
+        var currentInlines = baseInlines
+        var prevKind = TranscriptRowKind.markdownBlock(.paragraph(currentInlines), pos)
+        var prevLayout = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: prevKind, key: key, style: style))
+
+        for step in 0..<10 {
+            currentInlines[currentInlines.count - 1].text += " w\(step)"
+            let nextKind = TranscriptRowKind.markdownBlock(.paragraph(currentInlines), pos)
+            var req = RowLayoutRequest(rowID: "p", kind: nextKind, key: key, style: style)
+            req.previous = (prevKind, prevLayout)
+            prevLayout = RowLayoutBuilder.layout(req)
+            prevKind = nextKind
+        }
+
+        let full = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: prevKind, key: key, style: style))
+        if case .text(let incText, _) = prevLayout.content, case .text(let fullText, _) = full.content {
+            #expect(incText.links == [url])
+            #expect(incText.links == fullText.links)
+            #expect(incText.decorations.count == fullText.decorations.count)
+            #expect(RowContentDiff.unchangedHeight(incText, fullText) == .infinity)
+        } else {
+            Issue.record("expected text layouts")
+        }
     }
 }

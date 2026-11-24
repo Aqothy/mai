@@ -60,16 +60,36 @@ nonisolated enum RowLayoutBuilder {
             case .paragraph(let inlines):
                 if sameStyle, let previous, previous.layout.key.width == width,
                     case .markdownBlock(.paragraph(let oldInlines), _) = previous.kind,
-                    case .text(let prevText, _) = previous.layout.content
+                    case .text(let prevText, _) = previous.layout.content,
+                    !prevText.hasComplexBiDi
                 {
                     let unchanged = Self.commonUTF16Prefix(oldInlines, inlines)
-                    if unchanged > 0 {
-                        let styled = AttributedTextBuilder.build([block], style: style)
-                        let layout = TextLayoutEngine.layout(
-                            styled, width: width,
-                            options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth),
-                            appendingTo: prevText, unchangedUTF16Prefix: unchanged)
-                        return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
+                    var keepCount = 0
+                    while keepCount < prevText.lines.count, prevText.lines[keepCount].range.upperBound <= unchanged {
+                        keepCount += 1
+                    }
+                    keepCount = max(0, keepCount - 1)
+                    if keepCount >= 2, keepCount < prevText.lines.count {
+                        let resumeLine = prevText.lines[keepCount]
+                        let resumeUTF16 = resumeLine.range.lowerBound
+                        let keptLinkCount =
+                            prevText.runs[..<resumeLine.runs.lowerBound].compactMap(\.linkIndex).max().map { $0 + 1 }
+                            ?? 0
+                        let (suffix, links) = AttributedTextBuilder.paragraphSuffix(
+                            inlines, fromUTF16: resumeUTF16, existingLinks: Array(prevText.links.prefix(keptLinkCount)),
+                            style: style)
+                        if suffix.length > 0 {
+                            let prevUTF16 = prevText.string.utf16
+                            let cutIdx = prevUTF16.index(prevUTF16.startIndex, offsetBy: resumeUTF16)
+                            let fullString = String(prevText.string[..<cutIdx]) + suffix.string.string
+                            if let layout = TextLayoutEngine.layoutSuffix(
+                                fullString: fullString, suffix: suffix, links: links, width: width,
+                                options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth),
+                                appendingTo: prevText, keepCount: keepCount)
+                            {
+                                return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
+                            }
+                        }
                     }
                 }
                 let layout = prose([block], width: width, style: style)

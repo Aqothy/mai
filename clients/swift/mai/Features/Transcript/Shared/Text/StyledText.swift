@@ -37,6 +37,7 @@ nonisolated struct StyledText {
     }
 
     mutating func link(_ url: URL) -> Int {
+        if let existing = links.firstIndex(of: url) { return existing }
         links.append(url)
         return links.count - 1
     }

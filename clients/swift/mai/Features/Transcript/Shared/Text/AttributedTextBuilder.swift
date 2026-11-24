@@ -50,6 +50,36 @@ nonisolated struct AttributedTextBuilder {
         return builder.text
     }
 
+    /// Builds a `StyledText` for only the suffix of a single paragraph starting at
+    /// `utf16Offset`, keeping link indices aligned with `existingLinks`.
+    static func paragraphSuffix(
+        _ inlines: [MarkdownInline], fromUTF16 offset: Int, existingLinks: [URL], style: TextStyle
+    ) -> (text: StyledText, links: [URL]) {
+        var builder = AttributedTextBuilder(style: style)
+        builder.text.links = existingLinks
+        builder.beginParagraph(Environment(blockSpacing: 0))
+        var cursor = 0
+        for inline in inlines {
+            let count = inline.text.utf16.count
+            let next = cursor &+ count
+            if next <= offset {
+                cursor = next
+                continue
+            }
+            if cursor < offset {
+                let utf16 = inline.text.utf16
+                let cut = utf16.index(utf16.startIndex, offsetBy: offset &- cursor)
+                var sliced = inline
+                sliced.text = String(inline.text[cut...])
+                builder.append([sliced], Inline())
+            } else {
+                builder.append([inline], Inline())
+            }
+            cursor = next
+        }
+        return (builder.text, builder.text.links)
+    }
+
     mutating func append(_ block: MarkdownBlock, environment: Environment) {
         switch block {
         case .paragraph(let inlines):
@@ -83,22 +113,30 @@ nonisolated struct AttributedTextBuilder {
         nested.blockSpacing = style.listItemSpacing
         let depth = environment.listDepth
         for (offset, item) in list.items.enumerated() {
-            for (blockIndex, child) in item.enumerated() {
+            for (blockIndex, child) in item.blocks.enumerated() {
                 guard blockIndex == 0 else {
                     append(child, environment: nested)
                     continue
                 }
                 // The marker starts the item's first paragraph; an item that
                 // starts with another block (code, a list) gets it on a line
-                // of its own above that block.
+                // of its own above that block. Task items draw a vector
+                // checkbox in the leading gutter instead of a bullet/number.
                 var first = environment
                 first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
-                beginParagraph(first, headIndent: nested.indent)
-                if let start = list.startIndex {
-                    appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
+                if let checked = item.taskChecked {
+                    first.indent = nested.indent
+                    beginParagraph(
+                        first, headIndent: nested.indent,
+                        taskMarker: StyledParagraph.TaskMarker(x: environment.indent, checked: checked))
                 } else {
-                    let bullet = ["•", "◦", "▪"][depth % 3]
-                    appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
+                    beginParagraph(first, headIndent: nested.indent)
+                    if let start = list.startIndex {
+                        appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
+                    } else {
+                        let bullet = ["•", "◦", "▪"][depth % 3]
+                        appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
+                    }
                 }
                 if case .paragraph(let inlines) = child {
                     append(inlines, Inline())
@@ -148,7 +186,8 @@ nonisolated struct AttributedTextBuilder {
     /// Starts a block-level paragraph: a newline ends the one before, and the
     /// block spacing separates them.
     private mutating func beginParagraph(
-        _ environment: Environment, headIndent: CGFloat? = nil, isRule: Bool = false
+        _ environment: Environment, headIndent: CGFloat? = nil, isRule: Bool = false,
+        taskMarker: StyledParagraph.TaskMarker? = nil
     ) {
         let isFirst = text.length == 0
         if !isFirst { text.append("\n", font: lastFont ?? style.font(.body), style: TextRunStyle()) }
@@ -157,6 +196,6 @@ nonisolated struct AttributedTextBuilder {
                 start: text.length, firstLineIndent: environment.indent,
                 headIndent: headIndent ?? environment.indent,
                 spacingBefore: isFirst ? 0 : environment.blockSpacing,
-                quoteBars: environment.quoteBars, isRule: isRule))
+                quoteBars: environment.quoteBars, isRule: isRule, taskMarker: taskMarker))
     }
 }

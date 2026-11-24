@@ -48,51 +48,44 @@ nonisolated enum TextLayoutEngine {
         return builder.finish()
     }
 
-    /// Incremental layout for a growing block (streaming prose or code): keeps
-    /// the finished lines of `previous` before `unchangedUTF16Prefix` (with a
-    /// 1-line wrap margin for wrapped prose) and only invokes Core Text on the
-    /// changed suffix. Falls back to full layout for BiDi text or when too few
-    /// lines can be kept.
-    static func layout(
-        _ text: StyledText, width: CGFloat, options: Options, appendingTo previous: TextLayout,
-        unchangedUTF16Prefix: Int
-    ) -> TextLayout {
-        guard !previous.hasComplexBiDi, !previous.lines.isEmpty, text.length > 0, text.paragraphs.count <= 1 else {
-            return layout(text, width: width, options: options)
-        }
-        // Keep lines strictly before the unchanged prefix; for wrapped text,
-        // back up one extra line so a growing word on the boundary re-breaks.
-        var keepCount = 0
-        while keepCount < previous.lines.count, previous.lines[keepCount].range.upperBound <= unchangedUTF16Prefix {
-            keepCount += 1
-        }
-        if options.wraps { keepCount = max(0, keepCount - 1) }
-        guard keepCount >= 2, keepCount < previous.lines.count else {
-            return layout(text, width: width, options: options)
+    /// Incremental layout from an already-sliced suffix `StyledText` (avoiding
+    /// allocating a full `NSMutableAttributedString` for the unchanged prefix).
+    /// Returns `nil` when complex BiDi appears in the suffix and full layout is required.
+    static func layoutSuffix(
+        fullString: String,
+        suffix: StyledText,
+        links: [URL],
+        width: CGFloat,
+        options: Options,
+        appendingTo previous: TextLayout,
+        keepCount: Int
+    ) -> TextLayout? {
+        guard !previous.hasComplexBiDi, keepCount >= 2, keepCount < previous.lines.count, suffix.length > 0 else {
+            return nil
         }
         let resumeLine = previous.lines[keepCount]
         let resumeUTF16 = resumeLine.range.lowerBound
-        guard resumeUTF16 > 0, resumeUTF16 < text.length else {
-            return layout(text, width: width, options: options)
-        }
+        let suffixLength = suffix.string.length
+        guard resumeUTF16 > 0, suffixLength > 0 else { return nil }
 
-        // Build a suffix `StyledText` for `[resumeUTF16..<text.length]` so
-        // Core Text only typesets the few newly changed lines.
-        let suffixLength = text.length - resumeUTF16
-        let suffixAttributed = text.string.attributedSubstring(from: NSRange(location: resumeUTF16, length: suffixLength))
-        let typesetter = CTTypesetterCreateWithAttributedString(suffixAttributed)
-        let suffixNS = suffixAttributed.string as NSString
-        let paragraph = text.paragraphs.first
+        let typesetter = CTTypesetterCreateWithAttributedString(suffix.string)
+        let suffixNS = suffix.string.string as NSString
+        let paragraph = suffix.paragraphs.first
         let indent = paragraph?.headIndent ?? 0
         let lastKept = previous.lines[keepCount - 1]
         let keptRunEnd = resumeLine.runs.lowerBound
+        let keptDecorationsEnd = resumeLine.decorations.lowerBound
         let keptY = lastKept.bottom
 
+        var stubText = StyledText()
+        stubText.styles = suffix.styles
+        stubText.links = links
+
         var builder = Builder(
-            text: text, nsString: suffixNS, options: options, availableWidth: width,
+            text: stubText, nsString: suffixNS, options: options, availableWidth: width,
             initialLines: Array(previous.lines[..<keepCount]),
             initialRuns: Array(previous.runs[..<keptRunEnd]),
-            initialDecorations: previous.decorations.filter { $0.rect.midY <= keptY },
+            initialDecorations: Array(previous.decorations[..<keptDecorationsEnd]),
             initialY: keptY,
             initialWidth: previous.lines[..<keepCount].reduce(CGFloat(0)) { max($0, $1.x + $1.width) },
             previousQuoteBars: paragraph?.quoteBars ?? [],
@@ -110,12 +103,8 @@ nonisolated enum TextLayoutEngine {
                 endsWithNewline: suffixNS.character(at: localStart + count - 1) == 0x0A)
             localStart += count
         }
-        // If complex BiDi appeared in the suffix, recompute cleanly so
-        // paragraph-level BiDi ordering matches one-shot layout.
-        if builder.hasComplexBiDi {
-            return layout(text, width: width, options: options)
-        }
-        return builder.finish()
+        if builder.hasComplexBiDi { return nil }
+        return builder.finish(overrideString: fullString)
     }
 
     /// The UTF-16 length of the line starting at `start`: Core Text's break
@@ -191,23 +180,26 @@ nonisolated enum TextLayoutEngine {
             let height = options.fixedLineHeight ?? ceil(ascent + descent + leading)
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let firstRun = runs.count
+            let firstDecoration = decorations.count
             let carets = addRunsAndCarets(of: line, range: range, indent: indent, baseline: baseline, width: lineWidth)
+            if let paragraph {
+                addParagraphDecorations(
+                    paragraph, lineHeight: height, gapAbove: gapAbove, isParagraphStart: isParagraphStart)
+            }
             let textRange = (range.lowerBound + utf16BaseOffset)..<(range.upperBound + utf16BaseOffset)
             lines.append(
                 TextLine(
                     top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: textRange,
-                    caretOffsets: carets, runs: firstRun..<runs.count, endsWithNewline: endsWithNewline))
-            if let paragraph {
-                addParagraphDecorations(paragraph, lineHeight: height, gapAbove: gapAbove)
-            }
+                    caretOffsets: carets, runs: firstRun..<runs.count,
+                    decorations: firstDecoration..<decorations.count, endsWithNewline: endsWithNewline))
             width = max(width, indent + lineWidth)
             y += height
         }
 
-        func finish() -> TextLayout {
+        func finish(overrideString: String? = nil) -> TextLayout {
             TextLayout(
-                string: text.string.string, size: CGSize(width: ceil(width), height: ceil(y)), lines: lines,
-                runs: runs, decorations: decorations, links: text.links, hasComplexBiDi: hasComplexBiDi)
+                string: overrideString ?? text.string.string, size: CGSize(width: ceil(width), height: ceil(y)),
+                lines: lines, runs: runs, decorations: decorations, links: text.links, hasComplexBiDi: hasComplexBiDi)
         }
 
         /// Copies the line's runs and their decorations, and returns its
@@ -385,7 +377,7 @@ nonisolated enum TextLayoutEngine {
         /// the gap above it when the paragraph before shares them; a rule is
         /// a hairline across the paragraph's width.
         private mutating func addParagraphDecorations(
-            _ paragraph: StyledParagraph, lineHeight: CGFloat, gapAbove: CGFloat
+            _ paragraph: StyledParagraph, lineHeight: CGFloat, gapAbove: CGFloat, isParagraphStart: Bool
         ) {
             for bar in paragraph.quoteBars {
                 let joinsAbove = previousQuoteBars.contains(bar)
@@ -398,6 +390,15 @@ nonisolated enum TextLayoutEngine {
                         color: .tertiary))
             }
             previousQuoteBars = paragraph.quoteBars
+            if isParagraphStart, let task = paragraph.taskMarker {
+                let boxSize = min(14, max(11, (lineHeight * 0.68).rounded()))
+                let boxY = y + ((lineHeight - boxSize) / 2).rounded()
+                decorations.append(
+                    TextDecoration(
+                        kind: task.checked ? .taskChecked : .taskUnchecked,
+                        rect: CGRect(x: task.x, y: boxY, width: boxSize, height: boxSize),
+                        color: task.checked ? .primary : .secondary))
+            }
             if paragraph.isRule {
                 decorations.append(
                     TextDecoration(

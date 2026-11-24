@@ -44,15 +44,30 @@ nonisolated struct CodeLayout: Sendable {
         let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
         let body: TextLayout
         if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
-            code.hasPrefix(previous.code), previous.body.lines.count >= 3
+            code.hasPrefix(previous.code), previous.body.lines.count >= 3, !previous.body.hasComplexBiDi
         {
             // Streaming plain fence: keep all finished lines before the last
-            // line of `previous.code` and only typeset the growing tail.
-            let unchangedPrefix = previous.body.lines[previous.body.lines.count - 1].range.lowerBound
-            let text = AttributedTextBuilder.plain(code, role: .code, color: .primary, style: style)
-            body = TextLayoutEngine.layout(
-                text, width: .greatestFiniteMagnitude, options: bodyOptions, appendingTo: previous.body,
-                unchangedUTF16Prefix: unchangedPrefix)
+            // line of `previous.code` and build/typeset ONLY the growing suffix.
+            let keepCount = previous.body.lines.count - 1
+            let resumeUTF16 = previous.body.lines[keepCount].range.lowerBound
+            let utf16 = code.utf16
+            if resumeUTF16 > 0, resumeUTF16 < utf16.count {
+                let startIdx = utf16.index(utf16.startIndex, offsetBy: resumeUTF16)
+                let suffixText = AttributedTextBuilder.plain(
+                    String(code[startIdx...]), role: .code, color: .primary, style: style)
+                if let incremental = TextLayoutEngine.layoutSuffix(
+                    fullString: code, suffix: suffixText, links: [], width: .greatestFiniteMagnitude,
+                    options: bodyOptions, appendingTo: previous.body, keepCount: keepCount)
+                {
+                    body = incremental
+                } else {
+                    let text = buildStyledCode(code, colors: nil, style: style)
+                    body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
+                }
+            } else {
+                let text = buildStyledCode(code, colors: nil, style: style)
+                body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
+            }
         } else {
             let text = buildStyledCode(code, colors: colors, style: style)
             body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
