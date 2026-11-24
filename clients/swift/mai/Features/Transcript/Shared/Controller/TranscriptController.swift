@@ -450,10 +450,11 @@ final class TranscriptController {
         pendingRestorePlace = saved
     }
 
-    /// Saves the reader's position into the store's session cache if this
-    /// transcript has already shown. Never overwrites a saved place while still
-    /// hidden waiting for initial alignment.
-    func persistSavedPlace() {
+    /// Saves the reader's position into the store's session cache on detach:
+    /// every way a chat leaves (another chat selected, a pop, its window
+    /// closing) takes its view out of the window. Never overwrites a saved
+    /// place while still hidden waiting for initial alignment.
+    private func persistSavedPlace() {
         guard let store, let threadID, !isAwaitingInitialEnd else { return }
         store.setSavedTranscriptPlace(savedPlace(), for: threadID)
     }

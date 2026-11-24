@@ -120,10 +120,7 @@ extension TranscriptController {
 
     func widthDidChange(_ viewportWidth: CGFloat) {
         let width = Self.columnWidth(for: viewportWidth)
-        guard width != columnWidth else {
-            checkWarm()
-            return
-        }
+        guard width != columnWidth else { return }
         columnWidth = width
         scheduleWork()
     }
