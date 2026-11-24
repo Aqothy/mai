@@ -11,8 +11,18 @@ nonisolated struct StyledText {
     let string = NSMutableAttributedString()
     var paragraphs: [StyledParagraph] = []
     var styles: [TextRunStyle] = []
-    var links: [URL] = []
+    private(set) var links: [URL] = []
     private var styleIndices: [TextRunStyle: Int] = [:]
+    private var linkIndices: [URL: Int] = [:]
+
+    init(existingLinks: [URL] = []) {
+        guard !existingLinks.isEmpty else { return }
+        links = existingLinks
+        linkIndices.reserveCapacity(existingLinks.count)
+        for (index, url) in existingLinks.enumerated() where linkIndices[url] == nil {
+            linkIndices[url] = index
+        }
+    }
 
     var length: Int { string.length }
 
@@ -37,8 +47,10 @@ nonisolated struct StyledText {
     }
 
     mutating func link(_ url: URL) -> Int {
-        if let existing = links.firstIndex(of: url) { return existing }
+        if let existing = linkIndices[url] { return existing }
+        let index = links.count
         links.append(url)
-        return links.count - 1
+        linkIndices[url] = index
+        return index
     }
 }

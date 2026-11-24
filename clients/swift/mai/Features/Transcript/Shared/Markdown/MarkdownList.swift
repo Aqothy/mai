@@ -6,11 +6,6 @@ nonisolated struct MarkdownList: Hashable, Sendable {
         /// `nil` for a regular item, `false` for `[ ]`, `true` for `[x]`/`[X]`.
         var taskChecked: Bool?
         var blocks: [MarkdownBlock]
-
-        init(taskChecked: Bool? = nil, blocks: [MarkdownBlock]) {
-            self.taskChecked = taskChecked
-            self.blocks = blocks
-        }
     }
 
     /// Nil for a bulleted list.

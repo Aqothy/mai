@@ -86,7 +86,7 @@ extension MarkdownPlanner {
         /// Reusable scratch buffer for multi-line leaves that cannot read source directly.
         var scratch: [UInt8] = []
         /// Reusable inline-parser work buffers across all blocks in this document.
-        var inlineScratch = MarkdownInlineParser.Scratch()
+        var inlineScratch: MarkdownInlineParser.Scratch
 
         init(
             bytes: UnsafeBufferPointer<UInt8>, result: MarkdownBlockParser.Result,
@@ -116,7 +116,7 @@ extension MarkdownPlanner {
             let pendingLabel = labelAtEnd && index == result.lastLeaf
             index &+= 1
             switch rec.kind {
-            case .none, .quoteClose, .ulClose, .olClose, .liClose:
+            case .none, .quoteClose, .ulClose, .olClose, .liClose, .liOpen:
                 return nil
             case .paragraph:
                 guard rec.lineCount > 0 else { return nil }
@@ -158,38 +158,20 @@ extension MarkdownPlanner {
                 var items: [MarkdownList.Item] = []
                 while index < result.records.count {
                     let nextRec = result.records[index]
-                    if nextRec.kind == closeKind {
-                        index &+= 1
-                        break
-                    }
-                    if nextRec.kind == .liOpen {
-                        let taskChecked = Self.taskState(from: nextRec.flags)
-                        index &+= 1
-                        var itemBlocks: [MarkdownBlock] = []
-                        while index < result.records.count {
-                            if result.records[index].kind == .liClose {
-                                index &+= 1
-                                break
-                            }
-                            if let child = readNextBlock() { itemBlocks.append(child) }
+                    index &+= 1
+                    if nextRec.kind == closeKind { break }
+                    let taskChecked = Self.taskState(from: nextRec.flags)
+                    var itemBlocks: [MarkdownBlock] = []
+                    while index < result.records.count {
+                        if result.records[index].kind == .liClose {
+                            index &+= 1
+                            break
                         }
-                        items.append(MarkdownList.Item(taskChecked: taskChecked, blocks: itemBlocks))
-                    } else {
-                        index &+= 1
+                        if let child = readNextBlock() { itemBlocks.append(child) }
                     }
+                    items.append(MarkdownList.Item(taskChecked: taskChecked, blocks: itemBlocks))
                 }
                 return .list(MarkdownList(startIndex: startIndex, items: items))
-            case .liOpen:
-                let taskChecked = Self.taskState(from: rec.flags)
-                var itemBlocks: [MarkdownBlock] = []
-                while index < result.records.count {
-                    if result.records[index].kind == .liClose {
-                        index &+= 1
-                        break
-                    }
-                    if let child = readNextBlock() { itemBlocks.append(child) }
-                }
-                return .list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(taskChecked: taskChecked, blocks: itemBlocks)]))
             }
         }
 

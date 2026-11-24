@@ -51,7 +51,7 @@ nonisolated struct CodeLayout: Sendable {
             label = .empty
         }
         let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
-        let body: TextLayout
+        var incremental: TextLayout?
         if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
             code.hasPrefix(previous.code), previous.body.lines.count >= 3, !previous.body.hasComplexBiDi
         {
@@ -64,23 +64,16 @@ nonisolated struct CodeLayout: Sendable {
                 let startIdx = utf16.index(utf16.startIndex, offsetBy: resumeUTF16)
                 let suffixText = AttributedTextBuilder.plain(
                     String(code[startIdx...]), role: .code, color: .primary, style: style)
-                if let incremental = TextLayoutEngine.layoutSuffix(
-                    fullString: code, suffix: suffixText, links: [], width: .greatestFiniteMagnitude,
+                incremental = TextLayoutEngine.layoutSuffix(
+                    fullString: code, suffix: suffixText, width: .greatestFiniteMagnitude,
                     options: bodyOptions, appendingTo: previous.body, keepCount: keepCount)
-                {
-                    body = incremental
-                } else {
-                    let text = buildStyledCode(code, colors: nil, style: style)
-                    body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
-                }
-            } else {
-                let text = buildStyledCode(code, colors: nil, style: style)
-                body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
             }
-        } else {
-            let text = buildStyledCode(code, colors: colors, style: style)
-            body = TextLayoutEngine.layout(text, width: .greatestFiniteMagnitude, options: bodyOptions)
         }
+        let body =
+            incremental
+            ?? TextLayoutEngine.layout(
+                buildStyledCode(code, colors: colors, style: style), width: .greatestFiniteMagnitude,
+                options: bodyOptions)
         let headerHeight = hasHeader ? style.codeHeaderHeight : 0
         let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
         let height = Self.height(for: code, style: style, position: position)

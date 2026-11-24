@@ -77,7 +77,7 @@ nonisolated enum RowLayoutBuilder {
                         let keptLinkCount =
                             prevText.runs[..<resumeLine.runs.lowerBound].compactMap(\.linkIndex).max().map { $0 + 1 }
                             ?? 0
-                        let (suffix, links) = AttributedTextBuilder.paragraphSuffix(
+                        let suffix = AttributedTextBuilder.paragraphSuffix(
                             inlines, fromUTF16: resumeUTF16, existingLinks: Array(prevText.links.prefix(keptLinkCount)),
                             style: style)
                         if suffix.length > 0 {
@@ -85,7 +85,7 @@ nonisolated enum RowLayoutBuilder {
                             let cutIdx = prevUTF16.index(prevUTF16.startIndex, offsetBy: resumeUTF16)
                             let fullString = String(prevText.string[..<cutIdx]) + suffix.string.string
                             if let layout = TextLayoutEngine.layoutSuffix(
-                                fullString: fullString, suffix: suffix, links: links, width: width,
+                                fullString: fullString, suffix: suffix, width: width,
                                 options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth),
                                 appendingTo: prevText, keepCount: keepCount)
                             {

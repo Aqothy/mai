@@ -71,21 +71,18 @@ nonisolated enum TextLayoutEngine {
     static func layoutSuffix(
         fullString: String,
         suffix: StyledText,
-        links: [URL],
         width: CGFloat,
         options: Options,
         appendingTo previous: TextLayout,
         keepCount: Int
     ) -> TextLayout? {
-        guard !previous.hasComplexBiDi, keepCount >= 2, keepCount < previous.lines.count, suffix.length > 0 else {
+        let suffixLength = suffix.length
+        guard !previous.hasComplexBiDi, keepCount >= 2, keepCount < previous.lines.count, suffixLength > 0 else {
             return nil
         }
         let resumeLine = previous.lines[keepCount]
         let resumeUTF16 = resumeLine.range.lowerBound
-        let suffixLength = suffix.string.length
-        guard resumeUTF16 > 0, suffixLength > 0 else { return nil }
-
-        let suffixNS = suffix.string.string as NSString
+        let suffixNS = suffix.string.mutableString
         let paragraph = suffix.paragraphs.first
         let indent = paragraph?.headIndent ?? 0
         let lastKept = previous.lines[keepCount - 1]
@@ -93,12 +90,8 @@ nonisolated enum TextLayoutEngine {
         let keptDecorationsEnd = resumeLine.decorations.lowerBound
         let keptY = lastKept.bottom
 
-        var stubText = StyledText()
-        stubText.styles = suffix.styles
-        stubText.links = links
-
         var builder = Builder(
-            text: stubText, nsString: suffixNS, options: options, availableWidth: width,
+            text: suffix, nsString: suffixNS, options: options, availableWidth: width,
             initialLines: Array(previous.lines[..<keepCount]),
             initialRuns: Array(previous.runs[..<keptRunEnd]),
             initialDecorations: Array(previous.decorations[..<keptDecorationsEnd]),
@@ -519,8 +512,7 @@ nonisolated enum TextLayoutEngine {
                     TextDecoration(
                         kind: .inlineCodeBackground,
                         rect: CGRect(
-                            x: start - 3, y: baseline - ascent - 1, width: runWidth + 6, height: ascent + descent + 2),
-                        color: .primary))
+                            x: start - 3, y: baseline - ascent - 1, width: runWidth + 6, height: ascent + descent + 2)))
             }
             if style.isUnderlined {
                 decorations.append(
@@ -555,8 +547,7 @@ nonisolated enum TextLayoutEngine {
                         kind: .quoteBar,
                         rect: CGRect(
                             x: bar, y: y - (joinsAbove ? gapAbove : 0), width: options.quoteBarWidth,
-                            height: lineHeight + (joinsAbove ? gapAbove : 0)),
-                        color: .tertiary))
+                            height: lineHeight + (joinsAbove ? gapAbove : 0))))
             }
             previousQuoteBars = paragraph.quoteBars
             if isParagraphStart, let task = paragraph.taskMarker {
@@ -565,8 +556,7 @@ nonisolated enum TextLayoutEngine {
                 decorations.append(
                     TextDecoration(
                         kind: task.checked ? .taskChecked : .taskUnchecked,
-                        rect: CGRect(x: task.x, y: boxY, width: boxSize, height: boxSize),
-                        color: task.checked ? .primary : .secondary))
+                        rect: CGRect(x: task.x, y: boxY, width: boxSize, height: boxSize)))
             }
             if paragraph.isRule {
                 decorations.append(
@@ -574,8 +564,7 @@ nonisolated enum TextLayoutEngine {
                         kind: .rule,
                         rect: CGRect(
                             x: paragraph.firstLineIndent, y: (y + lineHeight / 2).rounded(.down),
-                            width: max(0, availableWidth - paragraph.firstLineIndent), height: 1),
-                        color: .tertiary))
+                            width: max(0, availableWidth - paragraph.firstLineIndent), height: 1)))
             }
         }
     }

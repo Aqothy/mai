@@ -24,13 +24,14 @@ nonisolated struct AttributedTextBuilder {
     }
 
     let style: TextStyle
-    private(set) var text = StyledText()
+    private(set) var text: StyledText
     /// The font of the last text appended: the newline ending its paragraph
     /// takes it, since a line is as tall as its tallest run.
     private var lastFont: TranscriptFont?
 
-    init(style: TextStyle) {
+    init(style: TextStyle, existingLinks: [URL] = []) {
         self.style = style
+        text = StyledText(existingLinks: existingLinks)
     }
 
     static func build(_ blocks: [MarkdownBlock], style: TextStyle) -> StyledText {
@@ -54,9 +55,8 @@ nonisolated struct AttributedTextBuilder {
     /// `utf16Offset`, keeping link indices aligned with `existingLinks`.
     static func paragraphSuffix(
         _ inlines: [MarkdownInline], fromUTF16 offset: Int, existingLinks: [URL], style: TextStyle
-    ) -> (text: StyledText, links: [URL]) {
-        var builder = AttributedTextBuilder(style: style)
-        builder.text.links = existingLinks
+    ) -> StyledText {
+        var builder = AttributedTextBuilder(style: style, existingLinks: existingLinks)
         builder.beginParagraph(Environment(blockSpacing: 0))
         var cursor = 0
         for inline in inlines {
@@ -77,7 +77,7 @@ nonisolated struct AttributedTextBuilder {
             }
             cursor = next
         }
-        return (builder.text, builder.text.links)
+        return builder.text
     }
 
     mutating func append(_ block: MarkdownBlock, environment: Environment) {

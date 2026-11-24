@@ -16,7 +16,8 @@ nonisolated struct TextDecoration: Sendable {
 
     let kind: Kind
     let rect: CGRect
-    let color: TextColor
+    /// Per-run color for `.underline` and `.strikethrough`; other kinds use fixed palette roles.
+    var color: TextColor?
 
     var isBehindText: Bool {
         switch kind {

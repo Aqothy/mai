@@ -102,7 +102,6 @@ nonisolated enum TextRenderer {
                 context.setLineWidth(1.25)
                 context.addPath(boxPath)
                 context.strokePath()
-                context.setStrokeColor(palette.primary)
                 context.setLineWidth(1.6)
                 context.setLineCap(.round)
                 context.setLineJoin(.round)
@@ -113,7 +112,7 @@ nonisolated enum TextRenderer {
                 context.addLine(to: CGPoint(x: r.minX + r.width * 0.75, y: r.minY + r.height * 0.30))
                 context.strokePath()
             case .underline, .strikethrough:
-                guard let color = palette.color(decoration.color) else { continue }
+                guard let color = decoration.color.flatMap(palette.color) else { continue }
                 context.setFillColor(color)
                 context.fill(decoration.rect)
             }

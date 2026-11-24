@@ -648,7 +648,6 @@ nonisolated struct MarkdownInlineParser {
             }
             i &+= 1
         }
-        _ = segment
         if underscores1 > 0 || underscores2 > 0 {
             wwwRejectBefore = previousSegment
             return 0
