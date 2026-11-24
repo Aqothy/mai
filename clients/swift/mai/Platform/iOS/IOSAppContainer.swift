@@ -52,9 +52,10 @@ struct IOSAppContainer: View {
                 }
             }
         }
-        // NavigationStack's path is the sole owner of iOS thread selection.
-        // Driving selection from the path instead of destination onDisappear
-        // avoids a delayed pop completion clearing a freshly re-pushed thread.
+        // NavigationStack's path decides iOS thread selection; call sites that
+        // push a thread select it first only so its first page loads before
+        // the push. Following the path, not a destination's onDisappear, keeps
+        // a delayed pop completion from clearing a freshly re-pushed thread.
         .onChange(of: path, initial: true) { _, newPath in
             let target = IOSNavigationRoute.selectedThreadID(in: newPath)
             if store.selectedThreadID != target {
