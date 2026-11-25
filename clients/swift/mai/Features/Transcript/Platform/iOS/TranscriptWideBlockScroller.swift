@@ -29,10 +29,15 @@
             alwaysBounceVertical = false
             alwaysBounceHorizontal = false
             isDirectionalLockEnabled = true
+            delaysContentTouches = false
             showsVerticalScrollIndicator = false
             scrollsToTop = false
             backgroundColor = .clear
-            body.isUserInteractionEnabled = false
+            // Keep `body` user-interaction enabled so touches inside wide code
+            // blocks hit a plain `UIView` rather than the nested `UIScrollView`
+            // directly, letting the outer `UITextInteraction` initiate long-press
+            // selection while horizontal pans still scroll normally.
+            body.isUserInteractionEnabled = true
             body.layer.addSublayer(row)
             addSubview(body)
         }

@@ -237,7 +237,7 @@ struct TranscriptControllerScrollTests {
         let smallMessage = TranscriptMessage(kind: .assistant, turnID: "t", ref: "small")
         let giantMessage = TranscriptMessage(kind: .assistant, turnID: "t", ref: "giant")
         let smallPending = smallMessage.pendingRow(source: "Short reply paragraph.")
-        let giantPending = giantMessage.pendingRow(source: String(repeating: "word ", count: 2_500))
+        let giantPending = giantMessage.pendingRow(source: String(repeating: "word ", count: 30_000))
         let tail = TranscriptRow(
             id: "tail", sourceID: "tail", kind: .userMessage([.paragraph([MarkdownInline(text: "End")])]))
         controller.setRows(
@@ -255,7 +255,7 @@ struct TranscriptControllerScrollTests {
         // Small visible pending row parsed and laid out synchronously.
         #expect(controller.rows.contains { $0.id == "\(smallMessage.id)#0" })
         #expect(controller.layouts["\(smallMessage.id)#0"] != nil)
-        // Giant > 4 KB pending row stayed untouched for off-main LayoutQueue.
+        // Giant > 128 KB pending row stayed untouched for off-main LayoutQueue.
         #expect(controller.rows.contains { $0.id == giantPending.id })
 
         // A large Markdown table (metrics.bytes == 0, > 64 cells) must also be

@@ -258,12 +258,19 @@
             placeRows()
         }
 
+        private var displayMaximumFPS: Int {
+            window?.screen?.maximumFramesPerSecond ?? NSScreen.main?.maximumFramesPerSecond ?? 60
+        }
+
         /// Places rows using cached layouts and pre-drawn bands, spending up to
-        /// `syncFallbackBudget` on normal-sized visible blank rows when rapid
-        /// scrolling or scrollbar scrubbing outruns off-main prefetch.
+        /// the display-adaptive sync fallback budget on normal-sized visible
+        /// blank rows when rapid scrolling or scrollbar scrubbing outruns
+        /// off-main prefetch.
         private func placeRows() {
             guard let clip, let palette, controller.columnWidth > 0 else { return }
-            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
+            let budget =
+                isContentVisible
+                ? controller.configuration.effectiveSyncFallbackBudget(maximumFramesPerSecond: displayMaximumFPS) : 0
             let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
             if deadline > 0 {
                 controller.prepareVisibleSynchronously(in: clip.documentVisibleRect, deadline: deadline)

@@ -26,7 +26,13 @@
         weak var inputDelegate: (any UITextInputDelegate)?
         private lazy var baseTokenizer = UITextInputStringTokenizer(textInput: self)
         var tokenizer: any UITextInputTokenizer { self }
+        /// Zero-size input view so `becomeFirstResponder()` during non-editable
+        /// text selection never asks `UIKeyboardSceneDelegate` to negotiate or
+        /// present the system keyboard (avoids 300 ms–2.7 s XPC hangs in Low
+        /// Power Mode).
+        private let emptyInputView = UIView(frame: .zero)
 
+        override var inputView: UIView? { emptyInputView }
         override var canBecomeFirstResponder: Bool { true }
         var isEditable: Bool { false }
 
@@ -263,7 +269,7 @@
         }
 
         func interactionWillBegin(_ interaction: UITextInteraction) {
-            _ = becomeFirstResponder()
+            if !isFirstResponder { _ = becomeFirstResponder() }
         }
     }
 

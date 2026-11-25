@@ -330,9 +330,15 @@
             CGRect(x: 0, y: contentOffset.y, width: bounds.width, height: bounds.height)
         }
 
+        private var displayMaximumFPS: Int {
+            window?.windowScene?.screen.maximumFramesPerSecond ?? 60
+        }
+
         private func placeRows() {
             guard let palette, controller.columnWidth > 0 else { return }
-            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
+            let budget =
+                isContentVisible
+                ? controller.configuration.effectiveSyncFallbackBudget(maximumFramesPerSecond: displayMaximumFPS) : 0
             let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
             if deadline > 0 {
                 controller.prepareVisibleSynchronously(in: visibleRect, deadline: deadline)

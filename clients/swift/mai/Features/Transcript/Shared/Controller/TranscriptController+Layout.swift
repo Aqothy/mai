@@ -15,9 +15,14 @@ extension TranscriptController {
     private static let maxCachedLayoutBytes = 12 << 20
     private static let maxParsedMessageBytes = 16 * 1024 * 1024
     /// Maximum UTF-8 bytes (or selectable UTF-16 units) of a visible blank row
-    /// eligible for bounded-budget synchronous layout/parse fallback (keeps
-    /// dense/giant blocks strictly off-main).
-    static let syncFallbackByteLimit = 4_096
+    /// eligible for bounded-budget synchronous layout fallback (matches
+    /// `TranscriptBlockFlattener.maxSliceBytes` plus a 256-byte marker margin
+    /// so every flattened slice qualifies while giant blocks stay off-main).
+    static let syncFallbackByteLimit = 4_352
+    /// Maximum UTF-8 bytes of a visible `.pendingMessage` eligible for
+    /// synchronous parse-only splicing (< 2 ms via SIMD C scanner); step 2 then
+    /// lays out strictly the 1–3 slices intersecting the viewport.
+    static let syncFallbackParseByteLimit = 131_072
     /// Maximum cells in a Markdown table eligible for synchronous fallback.
     private static let syncFallbackTableCellLimit = 64
 
@@ -96,10 +101,11 @@ extension TranscriptController {
         layouts[rows[index].id]
     }
 
-    /// Synchronously parses/lays out normal-sized visible rows (`<= 8 KB`) that
-    /// have no cached layout yet, stopping immediately once `deadline` elapses.
-    /// Runs before `mounter.place` so rapid scrollbar scrubbing never shows
-    /// white flashes while giant blocks stay strictly off-main.
+    /// Synchronously parses visible `.pendingMessage` turns (`<= 128 KB`,
+    /// parse-only) and lays out only the visible `<= 4 KB` slices missing a
+    /// cached layout, stopping immediately once `deadline` elapses. Runs before
+    /// `mounter.place` so rapid scrollbar scrubbing never shows white flashes
+    /// while giant blocks and huge tables stay strictly off-main.
     func prepareVisibleSynchronously(in visible: CGRect, deadline: CFTimeInterval) {
         guard configuration.laysOutRows, columnWidth > 0, !isAwaitingInitialEnd,
             let range = geometry.indices(overlapping: max(0, visible.minY), visible.maxY)
@@ -119,20 +125,22 @@ extension TranscriptController {
         }
         guard hasMissing, CACurrentMediaTime() < deadline else { return }
 
-        // 1. Parse and lay out small visible `.pendingMessage` rows first so
-        // they splice cleanly before mounting begins.
+        // 1. Parse visible `.pendingMessage` rows up to 128 KB so their
+        // bounded <= 4 KB slices splice cleanly before mounting. Larger
+        // messages skip eager whole-message layout here so step 2 lays out
+        // strictly the 1–3 slices actually intersecting the viewport.
         var parsedBatch: [ParsedBatchItem] = []
         for index in range {
             guard CACurrentMediaTime() < deadline else { break }
             guard case .pendingMessage(let message, let source) = rows[index].kind,
-                source.utf8.count <= Self.syncFallbackByteLimit
+                source.utf8.count <= Self.syncFallbackParseByteLimit
             else { continue }
             let blocks = MarkdownPlanner.blocks(from: source)
             let builtRows = message.rows(from: blocks)
             let metrics = builtRows.map(\.metrics)
             cacheParsedMessage(id: message.id, source: source, blocks: blocks, metrics: metrics)
             var blockLayouts: [RowLayout]?
-            if builtRows.count <= 16 {
+            if source.utf8.count <= Self.syncFallbackByteLimit, builtRows.count <= 8 {
                 let key = RowLayoutKey(contentVersion: 0, width: columnWidth, styleVersion: style.version)
                 var laid: [RowLayout] = []
                 laid.reserveCapacity(builtRows.count)
@@ -166,7 +174,7 @@ extension TranscriptController {
             guard CACurrentMediaTime() < deadline else { break }
             let row = rows[index]
             if case .pendingMessage = row.kind { continue }
-            if case .markdownBlock(.table(let table), _) = row.kind,
+            if case .markdownBlock(.table(let table), _, _) = row.kind,
                 (table.rows.count + 1) * table.columnCount > Self.syncFallbackTableCellLimit
             {
                 continue
@@ -260,7 +268,9 @@ extension TranscriptController {
         let minY = top - (downward ? 1 : 2) * screen
         let maxY = top + screen + (downward ? 2 : 1) * screen
         let drawing = currentDrawing
-        let nearLimit = Int(screen)
+        // In Low Power Mode keep speculative 1-hop pre-raster focused tightly
+        // on the visible screen so throttled cores don't paint offscreen rows.
+        let nearLimit = Int(ProcessInfo.processInfo.isLowPowerModeEnabled ? max(1, screen / 2) : screen)
         var jobs: [LayoutQueue.Job] = []
         if let range = geometry.indices(overlapping: max(0, minY), maxY) {
             for index in range {

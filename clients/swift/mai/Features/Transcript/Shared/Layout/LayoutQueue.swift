@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 
 /// Background layout for one transcript (PLAN 4.2): parses and lays out rows
 /// near the viewport, nearest first, on a few tasks at once. Off-screen history
@@ -13,6 +14,10 @@ actor LayoutQueue {
     /// visible and nearby rows.
     static let eagerParseLayoutByteLimit = 16_384
     static let eagerParseLayoutBlockLimit = 32
+
+    private final class GenerationBox: Sendable {
+        let value = Mutex<Int>(0)
+    }
 
     enum Work: Sendable {
         case layout(RowLayoutRequest, drawing: DrawnBands.Drawing? = nil)
@@ -41,6 +46,7 @@ actor LayoutQueue {
 
     private var urgent: [String: Job] = [:]
     private var latestUrgentGeneration = 0
+    private let activeGeneration = GenerationBox()
     private var running: Set<String> = []
     private let concurrency: Int
     private let deliver: @Sendable (Result) -> Void
@@ -55,8 +61,11 @@ actor LayoutQueue {
     /// overwrite a newer layout window.
     func submit(urgent jobs: [Job], generation: Int, replacingUrgent: Bool) {
         if generation < latestUrgentGeneration { return }
+        if generation > latestUrgentGeneration {
+            latestUrgentGeneration = generation
+            activeGeneration.value.withLock { $0 = generation }
+        }
         if replacingUrgent {
-            latestUrgentGeneration = max(latestUrgentGeneration, generation)
             urgent.removeAll(keepingCapacity: true)
         }
         for job in jobs {
@@ -68,8 +77,11 @@ actor LayoutQueue {
     private func pump() {
         while running.count < concurrency, let job = takeNext() {
             running.insert(job.id)
+            let expectedGeneration = latestUrgentGeneration
+            let generationBox = activeGeneration
             Task.detached(priority: .userInitiated) { [weak self] in
-                let result = Self.perform(job.work)
+                let result = Self.perform(
+                    job.work, expectedGeneration: expectedGeneration, activeGeneration: generationBox)
                 await self?.finish(job.id, result)
             }
         }
@@ -90,11 +102,24 @@ actor LayoutQueue {
         pump()
     }
 
-    private nonisolated static func perform(_ work: Work) -> Result {
+    private nonisolated static func isCurrentGeneration(_ expected: Int, box: GenerationBox) -> Bool {
+        box.value.withLock { $0 } == expected
+    }
+
+    private nonisolated static func perform(
+        _ work: Work, expectedGeneration: Int, activeGeneration: GenerationBox
+    ) -> Result {
         switch work {
         case .layout(let request, let drawing):
             let layout = RowLayoutBuilder.layout(request)
-            let drawn = drawing.flatMap { DrawnBands.drawInitial(layout, drawing: $0, maxBands: 2) }
+            // Skip speculative 1-hop pre-raster if the viewport already moved on
+            // (eliminates wasted glyph painting during fast scrolling).
+            let drawn: DrawnBands? =
+                if let drawing, isCurrentGeneration(expectedGeneration, box: activeGeneration) {
+                    DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 2)
+                } else {
+                    nil
+                }
             return .layout(layout, drawn: drawn)
         case .parseAndLayout(let message, let source, let width, let style, let drawing):
             let blocks = MarkdownPlanner.blocks(from: source)
@@ -112,11 +137,11 @@ actor LayoutQueue {
                     RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
             }
             var preDrawn: [DrawnBands?] = []
-            if let drawing {
+            if let drawing, isCurrentGeneration(expectedGeneration, box: activeGeneration) {
                 preDrawn.reserveCapacity(layouts.count)
                 var remainingBands = 4
                 for layout in layouts {
-                    if remainingBands > 0,
+                    if remainingBands > 0, isCurrentGeneration(expectedGeneration, box: activeGeneration),
                         let bands = DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 1)
                     {
                         remainingBands -= bands.bands.count + bands.wideBands.count
