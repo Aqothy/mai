@@ -111,12 +111,52 @@ extension MarkdownPlanner {
             return blocks
         }
 
+        /// Containers recurse through here, a frame per nesting level, so
+        /// leaves are built out of line (`readLeaf`): a level costs only this
+        /// small frame. The parser allows `maxNesting` levels and runs on
+        /// workers' 512 KB stacks.
         private mutating func readNextBlock() -> MarkdownBlock? {
+            let rec = result.records[index]
+            switch rec.kind {
+            case .quoteOpen:
+                index &+= 1
+                return .quote(readChildren(until: .quoteClose))
+            case .ulOpen, .olOpen:
+                index &+= 1
+                let closeKind: MarkdownBlockParser.RecordKind = rec.kind == .ulOpen ? .ulClose : .olClose
+                var items: [MarkdownList.Item] = []
+                while index < result.records.count {
+                    let next = result.records[index]
+                    index &+= 1
+                    if next.kind == closeKind { break }
+                    items.append(
+                        MarkdownList.Item(taskChecked: Self.taskState(from: next.flags), blocks: readChildren(until: .liClose)))
+                }
+                return .list(MarkdownList(startIndex: rec.kind == .olOpen ? Int(rec.data) : nil, items: items))
+            default:
+                return readLeaf()
+            }
+        }
+
+        private mutating func readChildren(until close: MarkdownBlockParser.RecordKind) -> [MarkdownBlock] {
+            var children: [MarkdownBlock] = []
+            while index < result.records.count {
+                if result.records[index].kind == close {
+                    index &+= 1
+                    break
+                }
+                if let child = readNextBlock() { children.append(child) }
+            }
+            return children
+        }
+
+        @inline(never)
+        private mutating func readLeaf() -> MarkdownBlock? {
             let rec = result.records[index]
             let pendingLabel = labelAtEnd && index == result.lastLeaf
             index &+= 1
             switch rec.kind {
-            case .none, .quoteClose, .ulClose, .olClose, .liClose, .liOpen:
+            case .none, .quoteClose, .ulClose, .olClose, .liClose, .quoteOpen, .ulOpen, .olOpen, .liOpen:
                 return nil
             case .paragraph:
                 guard rec.lineCount > 0 else { return nil }
@@ -142,36 +182,6 @@ extension MarkdownPlanner {
                 return .rule(spelling: spelling)
             case .table:
                 return .table(buildTable(rec, pendingLabel: pendingLabel))
-            case .quoteOpen:
-                var children: [MarkdownBlock] = []
-                while index < result.records.count {
-                    if result.records[index].kind == .quoteClose {
-                        index &+= 1
-                        break
-                    }
-                    if let child = readNextBlock() { children.append(child) }
-                }
-                return .quote(children)
-            case .ulOpen, .olOpen:
-                let closeKind: MarkdownBlockParser.RecordKind = rec.kind == .ulOpen ? .ulClose : .olClose
-                let startIndex: Int? = rec.kind == .olOpen ? Int(rec.data) : nil
-                var items: [MarkdownList.Item] = []
-                while index < result.records.count {
-                    let nextRec = result.records[index]
-                    index &+= 1
-                    if nextRec.kind == closeKind { break }
-                    let taskChecked = Self.taskState(from: nextRec.flags)
-                    var itemBlocks: [MarkdownBlock] = []
-                    while index < result.records.count {
-                        if result.records[index].kind == .liClose {
-                            index &+= 1
-                            break
-                        }
-                        if let child = readNextBlock() { itemBlocks.append(child) }
-                    }
-                    items.append(MarkdownList.Item(taskChecked: taskChecked, blocks: itemBlocks))
-                }
-                return .list(MarkdownList(startIndex: startIndex, items: items))
             }
         }
 

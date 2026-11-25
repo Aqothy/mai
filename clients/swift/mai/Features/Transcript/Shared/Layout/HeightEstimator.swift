@@ -30,7 +30,7 @@ nonisolated enum HeightEstimator {
             let inner = max(12, (width - 2 * style.bubbleHorizontalPadding) / (body.pointSize * 0.52))
             let topInset = position.joinsAbove ? 0 : style.messageVerticalInset
             let bottomInset = position.joinsBelow ? 0 : style.messageVerticalInset
-            let topPad = position.joinsAbove ? style.lineSpacing : style.bubbleVerticalPadding
+            let topPad = RowLayoutBuilder.bubbleTopPadding(position, style: style)
             let bottomPad = position.joinsBelow ? 0 : style.bubbleVerticalPadding
             height = topInset + bottomInset + topPad + bottomPad + scanLines(source, perLine: inner).lines * lineHeight
         case .pendingMessage(let source):

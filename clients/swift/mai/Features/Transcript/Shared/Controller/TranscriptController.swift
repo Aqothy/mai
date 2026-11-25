@@ -72,9 +72,9 @@ final class TranscriptController {
     @ObservationIgnored var palette: TextPalette?
     @ObservationIgnored var columnWidth: CGFloat = 0
     /// Layouts of rows in and near the viewport (state: being shown or about
-    /// to be). Others are dropped by row count and total cached line budget.
+    /// to be). Others are dropped by row count and total retained bytes.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
-    @ObservationIgnored var cachedLayoutLineCount = 0
+    @ObservationIgnored var cachedLayoutBytes = 0
     @ObservationIgnored let layoutInbox = LayoutInbox()
     @ObservationIgnored var urgentGeneration = 0
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
@@ -92,6 +92,12 @@ final class TranscriptController {
             Task { @MainActor [weak self] in self?.drainInbox() }
         }
     }
+
+    /// How far each wide block is scrolled sideways, by block
+    /// (`wideBlockGroup`): the chunks of a split code block scroll together,
+    /// and a block scrolled out of view comes back where it was left, as a
+    /// browser keeps an element's `scrollLeft`.
+    @ObservationIgnored var wideBlockOffsets: [String: CGFloat] = [:]
 
     /// The reader's selection (PLAN 5), state: it outlives the rows'
     /// layouts and views. Used by TranscriptController+Selection.
@@ -429,6 +435,14 @@ final class TranscriptController {
         baselineTop = host.viewportTop
         lastViewport = host.viewport
         updateEndVisibility()
+    }
+
+    /// The block row `index`'s wide body belongs to: the first chunk of a
+    /// split code block, else the row itself.
+    func wideBlockGroup(forRowAt index: Int) -> String {
+        var first = index
+        while first > 0, case .markdownBlock(.code, let position) = rows[first].kind, position.joinsAbove { first -= 1 }
+        return rows[first].id
     }
 
     /// Resolves the clipboard text for a copy accessory action.

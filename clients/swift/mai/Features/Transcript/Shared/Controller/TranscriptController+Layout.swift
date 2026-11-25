@@ -8,7 +8,8 @@ import Synchronization
 /// so the reader's place holds.
 extension TranscriptController {
     private static let maxCachedLayoutRows = 64
-    private static let maxCachedLayoutLines = 4_000
+    /// What 4,000 lines of prose hold (`RowContentLayout.retainedBytes`).
+    private static let maxCachedLayoutBytes = 12 << 20
     private static let maxParsedMessageBytes = 16 * 1024 * 1024
 
     /// The key a row's layout must have to be current.
@@ -18,14 +19,14 @@ extension TranscriptController {
 
     func storeLayout(_ layout: RowLayout) {
         if let previous = layouts.updateValue(layout, forKey: layout.rowID) {
-            cachedLayoutLineCount -= previous.content.lineCount
+            cachedLayoutBytes -= previous.content.retainedBytes
         }
-        cachedLayoutLineCount += layout.content.lineCount
+        cachedLayoutBytes += layout.content.retainedBytes
     }
 
     func removeLayout(for rowID: String) {
         if let removed = layouts.removeValue(forKey: rowID) {
-            cachedLayoutLineCount -= removed.content.lineCount
+            cachedLayoutBytes -= removed.content.retainedBytes
         }
     }
 
@@ -178,10 +179,10 @@ extension TranscriptController {
     }
 
     /// Layouts are state only near the viewport; the rest are dropped by row
-    /// count and total cached line budget so huge rows never pin memory
+    /// count and total retained bytes so huge rows never pin memory
     /// off-screen.
     func dropLayouts(outside window: ClosedRange<CGFloat>) {
-        guard layouts.count > Self.maxCachedLayoutRows || cachedLayoutLineCount > Self.maxCachedLayoutLines else {
+        guard layouts.count > Self.maxCachedLayoutRows || cachedLayoutBytes > Self.maxCachedLayoutBytes else {
             return
         }
         for id in Array(layouts.keys) {

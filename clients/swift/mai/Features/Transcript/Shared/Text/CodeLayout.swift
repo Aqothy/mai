@@ -75,7 +75,10 @@ nonisolated struct CodeLayout: Sendable {
                 buildStyledCode(code, colors: colors, style: style), width: .greatestFiniteMagnitude,
                 options: bodyOptions)
         let headerHeight = hasHeader ? style.codeHeaderHeight : 0
-        let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
+        // A chunk of a split block scrolls over the whole block's width.
+        let contentWidth = ceil(
+            max(body.size.width, CGFloat(position.widestLineColumns) * style.codeColumnWidth)
+                + 2 * style.codeHorizontalInset)
         let height = Self.height(for: code, style: style, position: position)
         return CodeLayout(
             label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,

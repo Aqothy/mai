@@ -64,6 +64,10 @@ nonisolated struct TextStyle: Sendable {
 
     var codeLineHeight: CGFloat { font(.code).lineHeight + codeLineSpacing }
 
+    /// One column of the monospaced code font: an ASCII line's exact width
+    /// per character.
+    let codeColumnWidth: CGFloat
+
     init(version: Int, baseFont: (FontRole) -> CTFont) {
         self.version = version
         var fonts: [TranscriptFont] = []
@@ -74,6 +78,11 @@ nonisolated struct TextStyle: Sendable {
             }
         }
         self.fonts = fonts
+        let code = fonts[FontRole.code.rawValue * 4].font
+        var zero: UniChar = 0x30
+        var glyph: CGGlyph = 0
+        CTFontGetGlyphsForCharacters(code, &zero, &glyph, 1)
+        codeColumnWidth = CGFloat(CTFontGetAdvancesForGlyphs(code, .horizontal, &glyph, nil, 1))
     }
 }
 

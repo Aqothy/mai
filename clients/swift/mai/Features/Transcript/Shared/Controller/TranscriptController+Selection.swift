@@ -122,7 +122,7 @@ extension TranscriptController {
     }
 
     /// The text from `start` to `end` (in order), rows joined by newlines
-    /// (mid-line continuation chunks join directly with no extra newline).
+    /// (chunks of one block join by their `separatorBefore`).
     func text(from start: TextPosition, to end: TextPosition) -> String {
         guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
         else { return "" }
@@ -136,7 +136,7 @@ extension TranscriptController {
             guard from <= to else { continue }
             let lower = utf16.index(utf16.startIndex, offsetBy: from)
             let upper = utf16.index(utf16.startIndex, offsetBy: to)
-            if hasPart, !rows[index].joinsPreviousWithoutNewline { result += "\n" }
+            if hasPart { result += rows[index].separatorBefore }
             result += text[lower..<upper]
             hasPart = true
         }
@@ -165,7 +165,7 @@ extension TranscriptController {
         while true {
             guard let length = selectableLength(ofRowAt: index) else { return nil }
             if offset < 0 {
-                let sep = rows[index].joinsPreviousWithoutNewline ? 0 : 1
+                let sep = rows[index].separatorBefore.utf16.count
                 guard let previous = rows[..<index].lastIndex(where: \.kind.isSelectable),
                     let previousLength = selectableLength(ofRowAt: previous)
                 else { return nil }
@@ -173,7 +173,7 @@ extension TranscriptController {
                 index = previous
             } else if offset > length {
                 guard let next = rows[(index + 1)...].firstIndex(where: \.kind.isSelectable) else { return nil }
-                let sep = rows[next].joinsPreviousWithoutNewline ? 0 : 1
+                let sep = rows[next].separatorBefore.utf16.count
                 offset -= length + sep
                 index = next
             } else {
@@ -189,10 +189,10 @@ extension TranscriptController {
         if second < first { return -offset(from: b, to: a) }
         var count = (selectableLength(ofRowAt: first) ?? 0) - a.offset
         for index in (first + 1)..<second where rows[index].kind.isSelectable {
-            let sep = rows[index].joinsPreviousWithoutNewline ? 0 : 1
+            let sep = rows[index].separatorBefore.utf16.count
             count += sep + (selectableLength(ofRowAt: index) ?? 0)
         }
-        let finalSep = rows[second].joinsPreviousWithoutNewline ? 0 : 1
+        let finalSep = rows[second].separatorBefore.utf16.count
         return count + finalSep + b.offset
     }
 
@@ -296,7 +296,10 @@ extension TranscriptController {
                 stop.pointee = true
             }
         }
-        let range = found ?? string.rangeOfComposedCharacterSequence(at: offset)
+        // Whole clusters, as browsers snap words: the tokenizer can cut a
+        // letter from its combining marks (`n` + U+0308 next to kana).
+        let range = found.map(string.rangeOfComposedCharacterSequences(for:))
+            ?? string.rangeOfComposedCharacterSequence(at: offset)
         return TranscriptSelection(
             anchor: TextPosition(rowID: position.rowID, offset: range.location),
             focus: TextPosition(rowID: position.rowID, offset: NSMaxRange(range)))

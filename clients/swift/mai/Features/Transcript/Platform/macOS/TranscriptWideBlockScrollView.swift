@@ -16,6 +16,12 @@
         weak var transcriptScrollView: NSScrollView?
         private let body = TranscriptWideBlockBodyView()
         private(set) var rowID: String?
+        /// The block the body belongs to: its scrollers share one offset.
+        private(set) var group: String?
+        /// The reader scrolled this block sideways (never called for
+        /// `scroll(toX:)`, so scrollers kept in step do not echo).
+        var onReaderScroll: ((TranscriptWideBlockScrollView) -> Void)?
+        private var isSettingOffset = false
         /// The axis the trackpad gesture in progress was latched to.
         private var gestureAxis: NSEvent.GestureAxis?
 
@@ -40,6 +46,17 @@
             let minX = max(0, bounds.minX)
             let maxX = max(minX, minX + bounds.width)
             body.updateHorizontalViewport(minX...maxX)
+            if !isSettingOffset { onReaderScroll?(self) }
+        }
+
+        /// Scrolls to `x` (clamped to the content) without reporting it.
+        func scroll(toX x: CGFloat) {
+            let clamped = min(max(0, x), max(0, body.frame.width - contentView.bounds.width))
+            guard abs(contentView.bounds.origin.x - clamped) > 0.5 else { return }
+            isSettingOffset = true
+            contentView.scroll(to: NSPoint(x: clamped, y: contentView.bounds.origin.y))
+            reflectScrolledClipView(contentView)
+            isSettingOffset = false
         }
 
         @available(*, unavailable)
@@ -47,15 +64,21 @@
             fatalError("init(coder:) has not been implemented")
         }
 
+        /// Shows `wide` for `rowID`; a row new to this scroller starts at its
+        /// block's offset.
         func show(
-            rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
+            rowID: String, group: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
+            palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
+            visible: CGRect, streamed: DrawnBands?
         ) {
-            if self.rowID != rowID { contentView.scroll(to: .zero) }
+            let isNewRow = self.rowID != rowID
             self.rowID = rowID
+            self.group = group
+            if hasHorizontalScroller != wide.showsScroller { hasHorizontalScroller = wide.showsScroller }
             let target = NSRect(x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
             let resized = body.frame != target
             if resized { body.frame = target }
+            if isNewRow { scroll(toX: offset) }
             let visMinX = max(0, contentView.bounds.minX)
             let visWidth = max(frame.width, contentView.bounds.width)
             body.show(
@@ -74,6 +97,8 @@
 
         func resetForReuse() {
             rowID = nil
+            group = nil
+            onReaderScroll = nil
             gestureAxis = nil
             body.resetForReuse()
         }

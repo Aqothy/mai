@@ -22,20 +22,22 @@ nonisolated enum RowContentLayout: Sendable {
 }
 
 nonisolated extension RowContentLayout {
-    /// Total laid-out text lines held by this row, used for memory-budget
-    /// eviction of off-screen layouts.
-    var lineCount: Int {
+    /// About how much memory the layout holds, which off-screen eviction
+    /// budgets (Ghostty bounds scrollback in bytes, not lines, for the same
+    /// reason: one line of a minified file holds megabytes of glyphs).
+    var retainedBytes: Int {
         switch self {
         case .text(let layout, _), .bubble(let layout, _, _, _), .header(let layout, _, _), .notice(let layout, _, _):
-            layout.lines.count
+            layout.retainedBytes
         case .code(let code, _), .codeBody(let code):
-            code.body.lines.count + code.label.lines.count
+            code.body.retainedBytes + code.label.retainedBytes
         case .table(let table, _), .tableBody(let table):
-            table.cells.reduce(0) { $0 + $1.layout.lines.count }
+            table.cells.reduce(0) { $0 + $1.layout.retainedBytes }
         case .actions, .empty:
             0
         }
     }
+
     /// Whether a code block carries its syntax colors.
     var isHighlighted: Bool {
         switch self {

@@ -80,14 +80,12 @@ nonisolated struct AttributedTextBuilder {
         return builder.text
     }
 
+    /// Quotes and lists recurse through here and `append(_:environment:)` for
+    /// lists, a frame each per nesting level, so leaves and item markers are
+    /// built out of line: a level costs only these small frames (layout runs
+    /// on workers' 512 KB stacks, as deep as the parser's `maxNesting`).
     mutating func append(_ block: MarkdownBlock, environment: Environment) {
         switch block {
-        case .paragraph(let inlines):
-            beginParagraph(environment)
-            append(inlines, Inline())
-        case .heading(let level, let inlines):
-            beginParagraph(environment)
-            append(inlines, Inline(role: style.headingRole(level: level), bold: true))
         case .quote(let blocks):
             var quoted = environment
             quoted.quoteBars.append(environment.indent)
@@ -95,6 +93,20 @@ nonisolated struct AttributedTextBuilder {
             for child in blocks { append(child, environment: quoted) }
         case .list(let list):
             append(list, environment: environment)
+        default:
+            appendLeaf(block, environment: environment)
+        }
+    }
+
+    @inline(never)
+    private mutating func appendLeaf(_ block: MarkdownBlock, environment: Environment) {
+        switch block {
+        case .paragraph(let inlines):
+            beginParagraph(environment)
+            append(inlines, Inline())
+        case .heading(let level, let inlines):
+            beginParagraph(environment)
+            append(inlines, Inline(role: style.headingRole(level: level), bold: true))
         case .code(_, let code):
             beginParagraph(environment)
             appendRun(code, font: style.font(.code), style: TextRunStyle())
@@ -103,6 +115,8 @@ nonisolated struct AttributedTextBuilder {
         case .rule(let spelling):
             beginParagraph(environment, isRule: true)
             appendRun(spelling, font: style.font(.body), style: TextRunStyle(color: .clear))
+        case .quote, .list:
+            append(block, environment: environment)
         }
     }
 
@@ -111,40 +125,46 @@ nonisolated struct AttributedTextBuilder {
         nested.indent += style.listIndent
         nested.listDepth += 1
         nested.blockSpacing = style.listItemSpacing
-        let depth = environment.listDepth
         for (offset, item) in list.items.enumerated() {
             for (blockIndex, child) in item.blocks.enumerated() {
-                guard blockIndex == 0 else {
-                    append(child, environment: nested)
+                if blockIndex == 0,
+                    beginItem(item, at: offset, of: list, first: child, environment: environment, nested: nested)
+                {
                     continue
                 }
-                // The marker starts the item's first paragraph; an item that
-                // starts with another block (code, a list) gets it on a line
-                // of its own above that block. Task items draw a vector
-                // checkbox in the leading gutter instead of a bullet/number.
-                var first = environment
-                first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
-                if let checked = item.taskChecked {
-                    first.indent = nested.indent
-                    beginParagraph(
-                        first, headIndent: nested.indent,
-                        taskMarker: StyledParagraph.TaskMarker(x: environment.indent, checked: checked))
-                } else {
-                    beginParagraph(first, headIndent: nested.indent)
-                    if let start = list.startIndex {
-                        appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
-                    } else {
-                        let bullet = ["•", "◦", "▪"][depth % 3]
-                        appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
-                    }
-                }
-                if case .paragraph(let inlines) = child {
-                    append(inlines, Inline())
-                } else {
-                    append(child, environment: nested)
-                }
+                append(child, environment: nested)
             }
         }
+    }
+
+    /// The marker starts the item's first paragraph (returns true, having
+    /// appended it); an item that starts with another block (code, a list)
+    /// gets it on a line of its own above that block. Task items draw a
+    /// vector checkbox in the leading gutter instead of a bullet/number.
+    @inline(never)
+    private mutating func beginItem(
+        _ item: MarkdownList.Item, at offset: Int, of list: MarkdownList, first child: MarkdownBlock,
+        environment: Environment, nested: Environment
+    ) -> Bool {
+        var first = environment
+        first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
+        if let checked = item.taskChecked {
+            first.indent = nested.indent
+            beginParagraph(
+                first, headIndent: nested.indent,
+                taskMarker: StyledParagraph.TaskMarker(x: environment.indent, checked: checked))
+        } else {
+            beginParagraph(first, headIndent: nested.indent)
+            if let start = list.startIndex {
+                appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
+            } else {
+                let bullet = ["•", "◦", "▪"][environment.listDepth % 3]
+                appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
+            }
+        }
+        guard case .paragraph(let inlines) = child else { return false }
+        append(inlines, Inline())
+        return true
     }
 
     /// A table inside a list or quote: one line per row, cells separated.

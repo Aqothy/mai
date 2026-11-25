@@ -274,8 +274,8 @@
         // MARK: TranscriptRowMounterDelegate
 
         func showWideBlock(
-            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect, visible: CGRect,
-            streamed: DrawnBands?
+            rowID: String, group: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
+            visible: CGRect, streamed: DrawnBands?
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScrollView()
             if wideBlocks[rowID] == nil {
@@ -283,6 +283,7 @@
                 scroller.transcriptScrollView = enclosingScrollView
                 if scroller.superview == nil { addSubview(scroller) }
                 scroller.isHidden = false
+                scroller.onReaderScroll = { [weak self] in self?.wideBlockDidScroll($0) }
             }
             let frame = body.frame.offsetBy(dx: origin.x, dy: origin.y)
             if scroller.frame != frame { scroller.frame = frame }
@@ -290,9 +291,20 @@
             let localDrawn = drawn.offsetBy(dx: -frame.minX, dy: -frame.minY)
             let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -frame.minX, dy: -frame.minY)
             scroller.show(
-                rowID: rowID, body: body, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
+                rowID: rowID, group: group, offset: controller.wideBlockOffsets[group] ?? 0, body: body, key: key,
+                palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
                 streamed: streamed)
+        }
+
+        /// The reader scrolled a wide block: its offset is kept, and the
+        /// other chunks of its block follow.
+        private func wideBlockDidScroll(_ scroller: TranscriptWideBlockScrollView) {
+            guard let group = scroller.group else { return }
+            controller.wideBlockOffsets[group] = scroller.scrollX
+            for other in wideBlocks.values where other !== scroller && other.group == group {
+                other.scroll(toX: scroller.scrollX)
+            }
         }
 
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {

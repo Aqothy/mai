@@ -10,6 +10,16 @@ nonisolated struct TranscriptBlockPosition: Hashable, Sendable {
     var isLast: Bool
     var joinsAbove: Bool = false
     var joinsBelow: Bool = false
+    /// A joined chunk of a user message that starts a Markdown block (the
+    /// message split at a blank line): the seam takes the block spacing.
+    var startsBlock = false
+    /// The widest line of the whole split code block this chunk belongs to,
+    /// in monospace columns (0 when not split): every chunk scrolls over the
+    /// same width, as one `<pre>` does. Exact for the code font's own glyphs;
+    /// a fallback font's wide glyph counts two columns, which CJK runs a
+    /// fifth under and emoji a tenth over, so such a block can scroll a
+    /// little past its text, or one chunk a little further than the rest.
+    var widestLineColumns = 0
 
     static let single = TranscriptBlockPosition(isFirst: true, isLast: true)
 

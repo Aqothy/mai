@@ -101,6 +101,26 @@ struct TranscriptSelectionTests {
         #expect(line?.focus.offset == 9)
     }
 
+    /// A double-click never selects part of a grapheme cluster, as a browser
+    /// snaps word boundaries to clusters: the system's word tokenizer cuts
+    /// `n` from its combining marks next to kana (the selection fuzzer at
+    /// scale 50 found it: seed 0, iteration 10).
+    @Test func aWordRangeNeverCutsAGraphemeCluster() {
+        let controller = TranscriptController(configuration: .testing)
+        let text = ".✌︎かな()n\u{0308}\u{0308}a🇦🇧🇨fi\u{00AD}.✌︎ 👍ສະ"
+        let row = TranscriptRow(id: "p", kind: .markdownBlock(.paragraph([MarkdownInline(text: text)]), .single))
+        controller.setRows([row], measuredHeights: ["p": 40])
+        let ns = text as NSString
+        for offset in 0..<ns.length where ns.rangeOfComposedCharacterSequence(at: offset).location == offset {
+            guard let word = controller.wordRange(around: TextPosition(rowID: "p", offset: offset)) else { continue }
+            for edge in [word.anchor.offset, word.focus.offset] where edge < ns.length {
+                #expect(
+                    ns.rangeOfComposedCharacterSequence(at: edge).location == edge,
+                    "word around \(offset) is \(word.anchor.offset)..<\(word.focus.offset): \(edge) cuts a cluster")
+            }
+        }
+    }
+
     /// Rows far from the viewport have no layout: their text, built from
     /// their content, must match what their layout would select.
     @Test func textWithoutALayoutMatchesTheLayoutsText() {

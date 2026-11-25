@@ -18,6 +18,12 @@
         /// Called when the horizontal offset changes so UIKit selection rects
         /// and handles follow the scrolled content.
         var onHorizontalScroll: (() -> Void)?
+        /// The block the body belongs to: its scrollers share one offset.
+        private(set) var group: String?
+        /// The reader scrolled this block sideways (never called for
+        /// `scroll(toX:)`, so scrollers kept in step do not echo).
+        var onReaderScroll: ((TranscriptWideBlockScroller) -> Void)?
+        private var isSettingOffset = false
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -41,20 +47,36 @@
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateHorizontalTilesIfNeeded()
             onHorizontalScroll?()
+            if !isSettingOffset { onReaderScroll?(self) }
         }
 
+        /// Scrolls to `x` (clamped to the content) without reporting it.
+        func scroll(toX x: CGFloat) {
+            let clamped = min(max(0, x), max(0, contentSize.width - bounds.width))
+            guard abs(contentOffset.x - clamped) > 0.5 else { return }
+            isSettingOffset = true
+            contentOffset = CGPoint(x: clamped, y: contentOffset.y)
+            isSettingOffset = false
+        }
+
+        /// Shows `wide` for `rowID`; a row new to this scroller starts at its
+        /// block's offset.
         func show(
-            rowID: String, body wide: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect, streamed: DrawnBands?
+            rowID: String, group: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
+            palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
+            visible: CGRect, streamed: DrawnBands?
         ) {
-            if self.rowID != rowID { contentOffset = .zero }
+            let isNewRow = self.rowID != rowID
             self.rowID = rowID
+            self.group = group
+            showsHorizontalScrollIndicator = wide.showsScroller
             let height = wide.frame.height
             let targetSize = CGSize(width: max(bounds.width, wide.contentWidth), height: height)
             if contentSize != targetSize {
                 contentSize = targetSize
                 body.frame = CGRect(origin: .zero, size: targetSize)
             }
+            if isNewRow { scroll(toX: offset) }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             let rowFrame = CGRect(x: 0, y: 0, width: wide.contentWidth, height: height)
@@ -125,6 +147,8 @@
 
         func resetForReuse() {
             rowID = nil
+            group = nil
+            onReaderScroll = nil
             lastDrawnY = .null
             lastVisibleY = .null
             lastContentWidth = 0

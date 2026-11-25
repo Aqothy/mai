@@ -30,6 +30,11 @@ nonisolated struct TextLayout: Sendable {
         self.hasComplexBiDi = hasComplexBiDi
     }
 
+    /// About how much memory the layout holds: per UTF-16 unit a caret
+    /// (8 B), a glyph and its position (18 B) and the text (~2 B); per line
+    /// its record and caret array (~144 B).
+    var retainedBytes: Int { 28 * (lines.last?.range.upperBound ?? 0) + 144 * lines.count }
+
     static let empty = TextLayout(string: "", size: .zero, lines: [], runs: [], decorations: [], links: [])
 
     /// The lines overlapping `minY..<maxY`, for drawing one band.

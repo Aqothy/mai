@@ -15,25 +15,6 @@ import Testing
 struct TranscriptExtremeAndFuzzTests {
     private let style = TextStyle.current()
 
-    /// Simple deterministic SplitMix64 PRNG so every fuzz case is 100%
-    /// reproducible across machines and CI runs.
-    private struct SeededRNG {
-        private var state: UInt64
-        init(seed: UInt64) { state = seed }
-
-        mutating func next() -> UInt64 {
-            state &+= 0x9E37_79B9_7F4A_7C15
-            var z = state
-            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-            return z ^ (z >> 31)
-        }
-
-        mutating func int(in range: Range<Int>) -> Int {
-            range.lowerBound + Int(next() % UInt64(range.count))
-        }
-    }
-
     /// Reference single-typesetter layout (no sliding window) for differential
     /// verification on medium strings above `slidingWindowThreshold`.
     private func unslicedReferenceLayout(_ styled: StyledText, width: CGFloat) -> (
@@ -62,19 +43,6 @@ struct TranscriptExtremeAndFuzzTests {
         }
         return (ranges, widths, ceil(y))
     }
-
-    /// Ghostty's CoreText/Unicode adversarial alphabet: ASCII, punctuation,
-    /// combining marks, CJK, Hangul, Cyrillic, Greek, SMP surrogates, ZWJ
-    /// emoji, Fitzpatrick modifiers, VS15/VS16, keycaps, regional indicators,
-    /// and non-monotonic Indic/SEA scripts.
-    private static let adversarialTokens: [String] = [
-        "word", "transcript", " ", "  ", "\u{00A0}", "\u{00AD}", "-", "—", ".", ",", "()",
-        "café", "cafe\u{0301}", "n\u{0308}\u{0308}a",
-        "漢字", "かな", "한글", "Привет", "Ελληνικά",
-        "👍", "👍🏼", "👩🏽‍💻", "👩‍👩‍👧‍👦", "🏴‍☠️", "#️⃣", "✌️", "✌︎",
-        "🇦🇧🇨", "\u{1FB70}", "===", "!==", "->",
-        "अपार्टमेंट", "রাষ্ট্র্রে", "\u{0F00}", "\u{1A2F}\u{1A70}",
-    ]
 
     // MARK: 1. Sliding-Window CTTypesetter (Parity, Extreme Length, Boundary Fuzzing, BiDi, Zalgo)
 
@@ -141,7 +109,7 @@ struct TranscriptExtremeAndFuzzTests {
     }
 
     @Test func slidingWindowBoundaryFuzzerPreservesAllUnicodeAndCaretInvariants() {
-        var rng = SeededRNG(seed: 0xDEAD_BEEF_CAFE_0001)
+        var rng = FuzzRNG(seed: 0xDEAD_BEEF_CAFE_0001)
         let widths: [CGFloat] = [120, 280, 480, 728]
 
         for iteration in 0..<24 {
@@ -151,7 +119,7 @@ struct TranscriptExtremeAndFuzzTests {
             var parts: [String] = []
             var utf16Count = 0
             while utf16Count < targetLength {
-                let token = Self.adversarialTokens[rng.int(in: 0..<Self.adversarialTokens.count)]
+                let token = TranscriptFuzz.adversarialTokens[rng.int(in: 0..<TranscriptFuzz.adversarialTokens.count)]
                 parts.append(token)
                 utf16Count += token.utf16.count
             }
@@ -321,7 +289,7 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: 3. Bounded Row Chunking, Memory-Budget Eviction & Non-Blocking Accessibility
 
-    @Test func tall20000LineCodeBlockChunksSeamlesslyAndEvictsByLineBudget() {
+    @Test func tall20000LineCodeBlockChunksSeamlesslyAndEvictsByByteBudget() {
         let code = (0..<20_000).map { "let line\($0) = \($0) * 2" }.joined(separator: "\n")
         let rows = TranscriptRowChunker.assistantRows(
             messageID: "t1|a1", turnID: "t1", blocks: [.code(language: "swift", code: code)])
@@ -345,18 +313,22 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(midLayout.content.codeLayout?.headerHeight == 0)
         #expect(midLayout.content.accessories(forRowID: rows[1].id).isEmpty)
 
-        // Memory-budget eviction: 30 chunks x 200 lines = 6,000 lines (> 4,000 cap)
-        // must evict off-window rows even though row count (30) <= 64.
-        for i in 0..<30 {
-            let layout = RowLayoutBuilder.layout(
-                RowLayoutRequest(rowID: rows[i].id, kind: rows[i].kind, key: key, style: style))
-            controller.storeLayout(layout)
+        // Memory-budget eviction: 30 chunks of 200 wide lines hold ~30 MB of
+        // layout (> 12 MB) in fewer rows than the 64-row cap; the off-window
+        // ones go.
+        let wide = (0..<6_000).map { "let line\($0) = " + String(repeating: "x", count: 150) }.joined(separator: "\n")
+        let wideRows = TranscriptRowChunker.assistantRows(
+            messageID: "t1|a2", turnID: "t1", blocks: [.code(language: "swift", code: wide)])
+        controller.setRows(wideRows)
+        for row in wideRows.prefix(30) {
+            controller.storeLayout(
+                RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
         }
         #expect(controller.layouts.count == 30)
-        #expect(controller.cachedLayoutLineCount > 4_000)
+        #expect(controller.cachedLayoutBytes > 12 << 20)
         controller.dropLayouts(outside: 0...1_000)
         #expect(controller.layouts.count < 30)
-        #expect(controller.cachedLayoutLineCount < 4_000)
+        #expect(controller.cachedLayoutBytes == controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
     }
 
     @Test func giant500KBUserMessageChunksAndPreservesExactTextAndFastAccessibility() {
@@ -367,10 +339,11 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(logRows.count > 20)
         #expect(logRows.allSatisfy { $0.sourceID == "t1|u1" })
 
+        // Split, it copies as it would whole: Markdown rendered either way.
         let controller = TranscriptController(configuration: .testing)
         controller.setRows(logRows)
         controller.selectAll()
-        #expect(controller.selectedText() == bigLog)
+        #expect(controller.selectedText() == RowSelectableText.string(for: .userMessage(source: bigLog), style: style))
 
         // Accessibility query must not parse Markdown synchronously on MainActor.
         let a11yStart = ContinuousClock.now
@@ -391,7 +364,7 @@ struct TranscriptExtremeAndFuzzTests {
         let controller2 = TranscriptController(configuration: .testing)
         controller2.setRows(jsonRows)
         controller2.selectAll()
-        #expect(controller2.selectedText() == bigJSON)
+        #expect(controller2.selectedText() == RowSelectableText.string(for: .userMessage(source: bigJSON), style: style))
     }
 
     @Test func giantParagraphChunksWithoutSplittingEmojiOrInjectingNewlines() {
@@ -503,7 +476,7 @@ struct TranscriptExtremeAndFuzzTests {
     // MARK: 6. LegendList-Style Geometry & ReadingPlace Invariant Fuzzer
 
     @Test func geometryAndReadingPlaceInvariantFuzzer() {
-        var rng = SeededRNG(seed: 0x1E6E_D115_7000_0001)
+        var rng = FuzzRNG(seed: 0x1E6E_D115_7000_0001)
         var geometry = TranscriptGeometry()
         var modelIDs: [String] = []
         var modelSources: [String] = []
@@ -656,14 +629,14 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(fallback == "Check bold, italic, code, and link.")
     }
 
-    @Test func plainTextChunkerPreservesTrailingNewlineOnMaxLinesBoundary() {
+    @Test func splitUserMessageKeepsItsTrailingNewline() {
         for count in [200, 400] {
             let source = String(repeating: "x\n", count: count)
             let rows = TranscriptRowChunker.userRows(messageID: "m-\(count)", turnID: "t", source: source)
-            #expect(rows.count > 1)
+            #expect(rows.count == (count > 200 ? 2 : 1))
             var joined = ""
             for (index, row) in rows.enumerated() {
-                if index > 0 && !row.joinsPreviousWithoutNewline { joined.append("\n") }
+                if index > 0 { joined.append(row.separatorBefore) }
                 if case .userMessage(let text, _) = row.kind { joined.append(text) }
             }
             #expect(joined == source)

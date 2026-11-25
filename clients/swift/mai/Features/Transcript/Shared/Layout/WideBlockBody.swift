@@ -11,4 +11,11 @@ nonisolated struct WideBlockBody: Sendable {
     let frame: CGRect
     /// The width the scroller scrolls over.
     let contentWidth: CGFloat
+
+    /// A split code block shows one scrollbar, under its last chunk, as one
+    /// `<pre>` does.
+    var showsScroller: Bool {
+        if case .codeBody(let code) = content { return !code.position.joinsBelow }
+        return true
+    }
 }

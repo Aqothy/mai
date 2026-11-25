@@ -103,15 +103,12 @@ nonisolated enum RowLayoutBuilder {
         case .userMessage(let source, let position):
             let inner = max(1, width - 2 * style.bubbleHorizontalPadding)
             let isChunked = position.joinsAbove || position.joinsBelow
-            let layout =
-                isChunked
-                ? plain(source, role: .body, color: .primary, width: inner, style: style)
-                : prose(MarkdownPlanner.blocks(from: source), width: inner, style: style)
+            let layout = prose(MarkdownPlanner.blocks(from: source), width: inner, style: style)
             let bubbleWidth =
                 isChunked ? width : min(width, ceil(layout.size.width) + 2 * style.bubbleHorizontalPadding)
             let topInset = position.joinsAbove ? 0 : style.messageVerticalInset
             let bottomInset = position.joinsBelow ? 0 : style.messageVerticalInset
-            let topPad = position.joinsAbove ? style.lineSpacing : style.bubbleVerticalPadding
+            let topPad = Self.bubbleTopPadding(position, style: style)
             let bottomPad = position.joinsBelow ? 0 : style.bubbleVerticalPadding
             let textHeight = isChunked && source.isEmpty ? style.font(.body).lineHeight : layout.size.height
             let bubble = CGRect(
@@ -157,6 +154,14 @@ nonisolated enum RowLayoutBuilder {
             let frame = CGRect(x: 0, y: 6, width: width, height: layout.size.height + 24)
             return (frame.height + 12, .notice(layout, frame: frame, textOrigin: CGPoint(x: 12, y: 18)))
         }
+    }
+
+    /// Above a bubble's text: the bubble's padding, or at a seam of a split
+    /// message the space the whole message has there (between two blocks,
+    /// or between two lines of one).
+    static func bubbleTopPadding(_ position: TranscriptBlockPosition, style: TextStyle) -> CGFloat {
+        guard position.joinsAbove else { return style.bubbleVerticalPadding }
+        return position.startsBlock ? style.blockSpacing : style.lineSpacing
     }
 
     static func prose(_ blocks: [MarkdownBlock], width: CGFloat, style: TextStyle) -> TextLayout {

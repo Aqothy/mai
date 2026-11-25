@@ -45,7 +45,7 @@ nonisolated enum TranscriptRowChunker {
                         id: "\(messageID)#\(rowIndex)", sourceID: messageID,
                         kind: .markdownBlock(piece.block, piece.position),
                         messageID: messageID, role: .assistant, turnID: turnID,
-                        joinsPreviousWithoutNewline: piece.joinsWithoutNewline))
+                        separatorBefore: piece.joinsWithoutNewline ? "" : "\n"))
                 rowIndex += 1
             }
         }
@@ -53,8 +53,9 @@ nonisolated enum TranscriptRowChunker {
     }
 
     /// Splits an oversized user message into bounded bubble rows sharing
-    /// `sourceID = messageID`. Normal prompts produce one row with id
-    /// `"user|\(messageID)"`.
+    /// `sourceID = messageID`, at Markdown block boundaries so each renders
+    /// as the whole message does there (`markdownPieces`). Normal prompts
+    /// produce one row with id `"user|\(messageID)"`.
     static func userRows(messageID: String, turnID: String?, source: String) -> [TranscriptRow] {
         guard exceedsTextLimit(source, maxBytes: maxUserMessageBytes, maxLines: maxUserMessageLines) else {
             return [
@@ -64,18 +65,244 @@ nonisolated enum TranscriptRowChunker {
                     messageID: messageID, role: .user, turnID: turnID)
             ]
         }
-        let pieces = splitPlainText(source, maxBytes: maxUserMessageBytes, maxLines: maxUserMessageLines)
+        let pieces = markdownPieces(source, maxBytes: maxUserMessageBytes, maxLines: maxUserMessageLines)
         return pieces.enumerated().map { index, piece in
             let position = TranscriptBlockPosition(
                 isFirst: index == 0, isLast: index == pieces.count - 1,
-                joinsAbove: index > 0, joinsBelow: index < pieces.count - 1)
+                joinsAbove: index > 0, joinsBelow: index < pieces.count - 1, startsBlock: index > 0 && piece.startsBlock)
             let rowID = index == 0 ? "user|\(messageID)" : "user|\(messageID)#\(index)"
             return TranscriptRow(
                 id: rowID, sourceID: messageID,
-                kind: .userMessage(source: piece.text, position: position),
-                messageID: messageID, role: .user, turnID: turnID,
-                joinsPreviousWithoutNewline: piece.joinsWithoutNewline)
+                kind: .userMessage(source: piece.prefix + piece.text, position: position),
+                messageID: messageID, role: .user, turnID: turnID, separatorBefore: piece.separator)
         }
+    }
+
+    /// A piece of a split Markdown message: its slice of the source, what
+    /// joins it to the piece before (`TranscriptRow.separatorBefore`), and the
+    /// lines a continuation repeats so it renders as it would in place (a
+    /// fence's opening line, a table's header and delimiter rows).
+    struct MarkdownPiece {
+        let prefix: String
+        let text: Substring
+        let separator: String
+        /// The piece starts a Markdown block (cut at a blank line or fence).
+        let startsBlock: Bool
+    }
+
+    /// Splits Markdown at block boundaries (a blank line outside a fence,
+    /// or a fence opening or closing) into pieces within the limits. A
+    /// block too big for one piece splits at a line, its continuation
+    /// repeating a fence's opening line or a table's header (as a printed
+    /// table repeats its header on every page); a line too long splits at
+    /// a space, else at a character boundary. One pass over the bytes, no
+    /// parse: it runs on the main thread when rows are built.
+    static func markdownPieces(_ text: String, maxBytes: Int, maxLines: Int) -> [MarkdownPiece] {
+        var text = text
+        text.makeContiguousUTF8()
+        return text.utf8.withContiguousStorageIfAvailable { bytes in
+            markdownPieces(text, bytes, maxBytes: maxBytes, maxLines: maxLines)
+        } ?? []
+    }
+
+    private static func markdownPieces(
+        _ text: String, _ bytes: UnsafeBufferPointer<UInt8>, maxBytes: Int, maxLines: Int
+    ) -> [MarkdownPiece] {
+        func index(_ offset: Int) -> String.Index { text.utf8.index(text.utf8.startIndex, offsetBy: offset) }
+        func string(_ range: Range<Int>) -> String { String(decoding: UnsafeBufferPointer(rebasing: bytes[range]), as: UTF8.self) }
+        var pieces: [MarkdownPiece] = []
+        var pieceStart = 0
+        var piecePrefix = ""
+        var pieceSeparator = "\n"
+        var pieceStartsBlock = false
+        var pieceLines = 0
+        var pieceBytes = 0
+        // The latest block start inside the piece, with the piece's counts
+        // before it.
+        var boundary: (offset: Int, lines: Int, bytes: Int)?
+        // The open fence, and the current block's first line, line count and
+        // table header (its first two lines, when they are a table's).
+        var fence: (marker: UInt8, length: Int, opener: Range<Int>)?
+        var blockFirstLine: Range<Int>?
+        var blockLines = 0
+        var blockTable: String?
+        var nextStartsBlock = true
+        var cursor = 0
+
+        func emit(upTo end: Int, next: Int, separator: String, startsBlock: Bool, prefix: String) {
+            pieces.append(
+                MarkdownPiece(
+                    prefix: piecePrefix, text: text[index(pieceStart)..<index(end)], separator: pieceSeparator,
+                    startsBlock: pieceStartsBlock))
+            pieceStart = next
+            piecePrefix = prefix
+            pieceSeparator = separator
+            pieceStartsBlock = startsBlock
+        }
+
+        while cursor < bytes.count {
+            var lineEnd = cursor
+            var isBlank = true
+            while lineEnd < bytes.count, bytes[lineEnd] != 0x0A {
+                let byte = bytes[lineEnd]
+                if byte != 0x20, byte != 0x09, byte != 0x0D { isBlank = false }
+                lineEnd &+= 1
+            }
+            let hasNewline = lineEnd < bytes.count
+            let line = cursor..<lineEnd
+            // What the line is, given the lines before it.
+            let run = isBlank ? nil : fenceMarker(bytes, line)
+            let closesFence =
+                fence.map { open in run.map { $0.marker == open.marker && $0.length >= open.length && $0.isBare } ?? false }
+                ?? false
+            let opensFence = fence == nil && run != nil
+            let startsBlock = fence == nil && (opensFence || (!isBlank && nextStartsBlock))
+            if startsBlock, pieceLines > 0 { boundary = (cursor, pieceLines, pieceBytes) }
+            // Cut before the line when it does not fit: at the latest block
+            // start (the lines after it move on), else here, the continuation
+            // reopening the block.
+            let lineBytes = lineEnd - cursor
+            if pieceLines > 0, pieceBytes + lineBytes + 1 > maxBytes || pieceLines >= maxLines {
+                if let boundary {
+                    emit(upTo: boundary.offset - 1, next: boundary.offset, separator: "\n", startsBlock: true, prefix: "")
+                    pieceLines -= boundary.lines
+                    pieceBytes -= boundary.bytes
+                } else {
+                    let prefix = fence.map { string($0.opener) + "\n" } ?? blockTable ?? ""
+                    emit(upTo: cursor - 1, next: cursor, separator: "\n", startsBlock: false, prefix: prefix)
+                    pieceLines = 0
+                    pieceBytes = 0
+                }
+                boundary = nil
+            }
+            // A line longer than a piece (`lineCut`).
+            var lineStart = cursor
+            while lineEnd - lineStart + pieceBytes > maxBytes {
+                let cut = lineCut(in: text, from: index(lineStart), maxBytes: max(1, maxBytes - pieceBytes))
+                let end = text.utf8.distance(from: text.utf8.startIndex, to: cut.end)
+                let next = text.utf8.distance(from: text.utf8.startIndex, to: cut.next)
+                guard end > lineStart, next < lineEnd else { break }
+                emit(
+                    upTo: end, next: next, separator: cut.separator, startsBlock: false,
+                    prefix: fence.map { string($0.opener) + "\n" } ?? "")
+                pieceLines = 0
+                pieceBytes = 0
+                boundary = nil
+                lineStart = next
+            }
+            pieceLines &+= 1
+            pieceBytes &+= lineEnd - lineStart + (hasNewline ? 1 : 0)
+            // The state after the line.
+            if fence != nil {
+                if closesFence {
+                    fence = nil
+                    nextStartsBlock = true
+                }
+            } else if let run, opensFence {
+                fence = (run.marker, run.length, line)
+                blockTable = nil
+                nextStartsBlock = false
+            } else if isBlank {
+                nextStartsBlock = true
+                blockFirstLine = nil
+                blockTable = nil
+            } else {
+                if startsBlock {
+                    blockFirstLine = line
+                    blockLines = 1
+                    blockTable = nil
+                } else {
+                    blockLines += 1
+                    if blockLines == 2, let first = blockFirstLine, isTableDelimiter(bytes, line),
+                        bytes[first].contains(0x7C)
+                    {
+                        blockTable = string(first.lowerBound..<lineEnd) + "\n"
+                    }
+                }
+                nextStartsBlock = false
+            }
+            cursor = hasNewline ? lineEnd + 1 : lineEnd
+        }
+        pieces.append(
+            MarkdownPiece(
+                prefix: piecePrefix, text: text[index(pieceStart)...], separator: pieceSeparator,
+                startsBlock: pieceStartsBlock))
+        return pieces
+    }
+
+    /// Where to cut a line too long for a piece, within `maxBytes` of
+    /// `start` (and past half of it): at a space before a letter, the space
+    /// becoming the seam's separator (Markdown would drop it at either end of
+    /// a piece) and the letter starting the next piece (no block syntax
+    /// starts with one: never a list, quote or heading); else between two
+    /// ASCII letters; else at any character boundary.
+    private static func lineCut(
+        in text: String, from start: String.Index, maxBytes: Int
+    ) -> (end: String.Index, next: String.Index, separator: String) {
+        let utf8 = text.utf8
+        let limit = utf8.index(start, offsetBy: maxBytes, limitedBy: utf8.endIndex) ?? utf8.endIndex
+        let floor = utf8.index(start, offsetBy: maxBytes / 2, limitedBy: limit) ?? start
+        func isASCIILetter(_ byte: UInt8) -> Bool { (byte | 0x20) >= 0x61 && (byte | 0x20) <= 0x7A }
+        var index = limit
+        while index > floor {
+            let previous = utf8.index(before: index)
+            if utf8[previous] == 0x20, index < utf8.endIndex,
+                let scalarIndex = index.samePosition(in: text.unicodeScalars),
+                case let scalar = text.unicodeScalars[scalarIndex], scalar.properties.isAlphabetic,
+                scalar.properties.generalCategory != .nonspacingMark, scalar.properties.generalCategory != .spacingMark
+            {
+                return (previous, index, " ")
+            }
+            index = previous
+        }
+        index = limit
+        while index > floor {
+            let previous = utf8.index(before: index)
+            if index < utf8.endIndex, isASCIILetter(utf8[previous]), isASCIILetter(utf8[index]) {
+                return (index, index, "")
+            }
+            index = previous
+        }
+        let cut = snapToCharacterBoundary(in: text, from: start, candidate: limit)
+        return (cut, cut, "")
+    }
+
+    /// A fence marker run at the start of `line` (CommonMark: up to three
+    /// spaces, then three or more backticks or tildes), and whether only
+    /// spaces follow it (a closing fence).
+    private static func fenceMarker(
+        _ bytes: UnsafeBufferPointer<UInt8>, _ line: Range<Int>
+    ) -> (marker: UInt8, length: Int, isBare: Bool)? {
+        var index = line.lowerBound
+        while index < line.upperBound, bytes[index] == 0x20, index - line.lowerBound < 4 { index += 1 }
+        guard index - line.lowerBound < 4, index < line.upperBound, bytes[index] == 0x60 || bytes[index] == 0x7E
+        else { return nil }
+        let marker = bytes[index]
+        let runStart = index
+        while index < line.upperBound, bytes[index] == marker { index += 1 }
+        guard index - runStart >= 3 else { return nil }
+        var isBare = true
+        var hasBacktick = false
+        for byte in bytes[index..<line.upperBound] {
+            if byte != 0x20, byte != 0x09, byte != 0x0D { isBare = false }
+            if byte == 0x60 { hasBacktick = true }
+        }
+        // A backtick fence's info string has no backtick (CommonMark 4.5).
+        return marker == 0x60 && hasBacktick ? nil : (marker, index - runStart, isBare)
+    }
+
+    /// A GFM table delimiter row: `|`-separated cells of dashes with
+    /// optional alignment colons.
+    private static func isTableDelimiter(_ bytes: UnsafeBufferPointer<UInt8>, _ line: Range<Int>) -> Bool {
+        var dashes = false
+        for byte in bytes[line] {
+            switch byte {
+            case 0x2D: dashes = true
+            case 0x7C, 0x3A, 0x20, 0x09, 0x0D: continue
+            default: return false
+            }
+        }
+        return dashes
     }
 
     /// Splits an oversized reasoning block into bounded `.thought` rows sharing
@@ -90,7 +317,7 @@ nonisolated enum TranscriptRowChunker {
             let rowID = index == 0 ? baseID : "\(baseID)#\(index)"
             return TranscriptRow(
                 id: rowID, sourceID: baseID, kind: .thought(piece.text), turnID: turnID,
-                joinsPreviousWithoutNewline: piece.joinsWithoutNewline)
+                separatorBefore: piece.joinsWithoutNewline ? "" : "\n")
         }
     }
 
@@ -147,35 +374,46 @@ nonisolated enum TranscriptRowChunker {
     private static func splitCode(
         language: String?, code: String, outer: TranscriptBlockPosition
     ) -> [BlockPiece] {
-        var chunks: [String] = []
-        let utf8 = code.utf8
-        var chunkStart = utf8.startIndex
-        var cursor = utf8.startIndex
-        var chunkBytes = 0
-        var chunkLines = 0
-
-        while cursor < utf8.endIndex {
-            var lineEnd = cursor
-            while lineEnd < utf8.endIndex, utf8[lineEnd] != 0x0A {
-                utf8.formIndex(after: &lineEnd)
-            }
-            let lineBytes = utf8.distance(from: cursor, to: lineEnd)
-            let hasNewline = lineEnd < utf8.endIndex
-            if chunkLines > 0 && (chunkLines >= maxCodeLines || chunkBytes + lineBytes + 1 > maxCodeBytes) {
-                // End chunk right before the `\n` that preceded `cursor`.
-                let prevEnd = utf8.index(before: cursor)
-                chunks.append(String(code[chunkStart..<prevEnd]))
-                chunkStart = cursor
-                chunkBytes = 0
-                chunkLines = 0
-            }
-            chunkLines &+= 1
-            chunkBytes &+= lineBytes + (hasNewline ? 1 : 0)
-            cursor = hasNewline ? utf8.index(after: lineEnd) : lineEnd
-        }
-        if chunkStart < utf8.endIndex || chunks.isEmpty {
-            chunks.append(String(code[chunkStart..<utf8.endIndex]))
-        }
+        var contiguous = code
+        contiguous.makeContiguousUTF8()
+        // One pass over the bytes: where chunks start and the widest line.
+        let (chunks, widestLine) =
+            contiguous.utf8.withContiguousStorageIfAvailable { bytes -> ([String], Int) in
+                var chunks: [String] = []
+                var chunkStart = 0
+                var chunkBytes = 0
+                var chunkLines = 0
+                var widest = 0
+                var cursor = 0
+                while cursor < bytes.count {
+                    var lineEnd = cursor
+                    var columns = 0
+                    while lineEnd < bytes.count, bytes[lineEnd] != 0x0A {
+                        let byte = bytes[lineEnd]
+                        columns =
+                            byte == 0x09 ? (columns / 4 + 1) * 4
+                            : byte < 0x80 ? columns + 1 : columns + nonASCIIColumns(bytes, at: lineEnd)
+                        lineEnd &+= 1
+                    }
+                    widest = max(widest, columns)
+                    let lineBytes = lineEnd - cursor
+                    let hasNewline = lineEnd < bytes.count
+                    if chunkLines > 0 && (chunkLines >= maxCodeLines || chunkBytes + lineBytes + 1 > maxCodeBytes) {
+                        // End the chunk before the newline that preceded `cursor`.
+                        chunks.append(String(decoding: UnsafeBufferPointer(rebasing: bytes[chunkStart..<(cursor - 1)]), as: UTF8.self))
+                        chunkStart = cursor
+                        chunkBytes = 0
+                        chunkLines = 0
+                    }
+                    chunkLines &+= 1
+                    chunkBytes &+= lineBytes + (hasNewline ? 1 : 0)
+                    cursor = hasNewline ? lineEnd + 1 : lineEnd
+                }
+                if !chunks.isEmpty {
+                    chunks.append(String(decoding: UnsafeBufferPointer(rebasing: bytes[chunkStart...]), as: UTF8.self))
+                }
+                return (chunks, widest)
+            } ?? ([], 0)
         if chunks.count <= 1 {
             return [BlockPiece(block: .code(language: language, code: code), position: outer, joinsWithoutNewline: false)]
         }
@@ -184,8 +422,43 @@ nonisolated enum TranscriptRowChunker {
                 isFirst: index == 0 && outer.isFirst,
                 isLast: index == chunks.count - 1 && outer.isLast,
                 joinsAbove: index > 0 || outer.joinsAbove,
-                joinsBelow: index < chunks.count - 1 || outer.joinsBelow)
+                joinsBelow: index < chunks.count - 1 || outer.joinsBelow,
+                widestLineColumns: widestLine)
             return BlockPiece(block: .code(language: language, code: chunk), position: pos, joinsWithoutNewline: false)
+        }
+    }
+
+    /// The monospace columns of the character whose UTF-8 sequence holds
+    /// the non-ASCII byte at `index`, counted at its lead byte, as a terminal
+    /// counts them (wcwidth; Zed sizes a scroll width the same way, longest
+    /// row times the em width): East Asian wide and emoji (astral, and the
+    /// symbols and dingbats replies use: ✅ ❌ ⚠️ ✨ ⭐) 2, combining and
+    /// zero-width marks 0, else 1, as the code font draws its own symbols
+    /// (box drawing, arrows, quotes).
+    private static func nonASCIIColumns(_ bytes: UnsafeBufferPointer<UInt8>, at index: Int) -> Int {
+        let byte = bytes[index]
+        switch byte {
+        case 0xC0..<0xE0:
+            // U+0300-U+036F, combining diacritical marks.
+            return byte == 0xCC || byte == 0xCD ? 0 : 1
+        case 0xE0..<0xF0:
+            guard index + 2 < bytes.count else { return 1 }
+            let scalar =
+                (UInt32(byte & 0x0F) << 12) | (UInt32(bytes[index + 1] & 0x3F) << 6) | UInt32(bytes[index + 2] & 0x3F)
+            switch scalar {
+            case 0x200B...0x200F, 0x20D0...0x20FF, 0xFE00...0xFE0F:
+                return 0
+            case 0x1100...0x115F, 0x231A...0x231B, 0x23E9...0x23F3, 0x2600...0x27BF, 0x2B1B...0x2B55, 0x2E80...0xA4CF,
+                0xAC00...0xD7A3, 0xF900...0xFAFF, 0xFE30...0xFE4F, 0xFF00...0xFF60, 0xFFE0...0xFFE6:
+                return 2
+            default:
+                return 1
+            }
+        case 0xF0...:
+            return 2
+        default:
+            // A continuation byte: its character counted at its lead byte.
+            return 0
         }
     }
 
