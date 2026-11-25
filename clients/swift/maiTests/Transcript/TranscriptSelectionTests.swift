@@ -121,6 +121,26 @@ struct TranscriptSelectionTests {
         }
     }
 
+    /// Word and character ranges never cross a line terminator onto the line
+    /// before (bare combining mark starting a line), and clicking past a line
+    /// ending in a Unicode line separator stays before that break.
+    @Test func lineTerminatorsEndClustersAndClampLineEndClicks() {
+        let controller = TranscriptController(configuration: .testing)
+        for sample in ["abc\n\u{0301}def", "abc\u{2028}\u{0301}def"] {
+            let row = TranscriptRow(id: "p", kind: .markdownBlock(.paragraph([MarkdownInline(text: sample)]), .single))
+            controller.setRows([row], measuredHeights: ["p": 60])
+            let atMark = TextPosition(rowID: "p", offset: 4)
+            let charRange = controller.characterRange(around: atMark)
+            #expect(charRange?.anchor.offset == 4 && charRange?.focus.offset == 5, "\(sample): char \(String(describing: charRange))")
+            let wordRange = controller.wordRange(around: atMark)
+            #expect((wordRange?.anchor.offset ?? 0) >= 4, "\(sample): word \(String(describing: wordRange)) crossed break")
+        }
+        let laid = RowLayoutBuilder.prose([.paragraph([MarkdownInline(text: "abc\u{2028}def")])], width: 400, style: style)
+        #expect(laid.lines.count == 2)
+        #expect(laid.lines[0].endsWithNewline)
+        #expect(laid.offset(closestTo: CGPoint(x: 390, y: laid.lines[0].top + 1)) == 3)
+    }
+
     /// Rows far from the viewport have no layout: their text, built from
     /// their content, must match what their layout would select.
     @Test func textWithoutALayoutMatchesTheLayoutsText() {

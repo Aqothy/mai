@@ -99,6 +99,28 @@ nonisolated enum TextLayoutEngine {
             || CFStringGetRangeOfComposedCharactersAtIndex(string, index).location == index
     }
 
+    /// The cluster containing `index` (Apple's composed character sequence,
+    /// clipped at line terminators so it agrees with `startsCluster`).
+    static func clusterRange(in string: NSString, at index: Int) -> NSRange {
+        guard index >= 0, index < string.length else { return NSRange(location: index, length: 0) }
+        if endsLine(string.character(at: index)) { return NSRange(location: index, length: 1) }
+        var range = string.rangeOfComposedCharacterSequence(at: index)
+        while range.location < index, endsLine(string.character(at: range.location)) {
+            range.location += 1
+            range.length -= 1
+        }
+        return range
+    }
+
+    /// The smallest cluster-aligned range covering `range` (never crossing a
+    /// line terminator before `range`).
+    static func clusterRange(in string: NSString, for range: NSRange) -> NSRange {
+        guard range.length > 0 else { return range }
+        let start = clusterRange(in: string, at: range.location).location
+        let end = NSMaxRange(clusterRange(in: string, at: NSMaxRange(range) - 1))
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
     /// Mandatory line breaks (UAX #14 BK, CR, LF, NL).
     static func endsLine(_ unit: unichar) -> Bool {
         switch unit {
@@ -122,7 +144,7 @@ nonisolated enum TextLayoutEngine {
     /// Conservative UTF-16 check covering Hebrew, Arabic, Syriac, Thaana, NKo,
     /// Samaritan, Mandaic, BiDi control marks, Arabic Presentation Forms, and
     /// astral RTL script high surrogates (U+10800..U+10FFF, U+1E800..U+1EFFF).
-    private static func isBiDiCodeUnit(_ u: unichar) -> Bool {
+    static func isBiDiCodeUnit(_ u: unichar) -> Bool {
         if u <= 0x08FF { return true }
         if u >= 0x200E && u <= 0x200F { return true }
         if u >= 0x202A && u <= 0x202E { return true }
@@ -188,9 +210,11 @@ nonisolated enum TextLayoutEngine {
                     break
                 }
                 let line = CTTypesetterCreateLine(typesetter, CFRange(location: localStart, length: count))
+                let lastUnit = windowNS.character(at: localEnd - 1)
+                let endsWithBreak = wraps ? Self.endsLine(lastUnit) : lastUnit == 0x0A
                 builder.add(
                     line, range: localStart..<localEnd, indent: indent, paragraph: paragraph,
-                    isParagraphStart: isParagraphStart, endsWithNewline: windowNS.character(at: localEnd - 1) == 0x0A,
+                    isParagraphStart: isParagraphStart, endsWithNewline: endsWithBreak,
                     windowNSString: windowNS, windowOffset: window.lowerBound)
                 lastLineStart = localStart
                 localStart = localEnd
@@ -242,6 +266,8 @@ nonisolated enum TextLayoutEngine {
             return
         }
         var buffer = [unichar](repeating: 0, count: 4_096)
+        var bufferStart = 0
+        var bufferEnd = 0
         var groupStart = 0
         var lineStart = 0
         while lineStart < length {
@@ -251,17 +277,21 @@ nonisolated enum TextLayoutEngine {
             var isBiDi = false
             var position = lineStart
             scan: while position < length {
-                let count = min(buffer.count, length - position)
-                nsString.getCharacters(&buffer, range: NSRange(location: position, length: count))
-                for index in 0..<count {
+                if position >= bufferEnd {
+                    bufferStart = position
+                    let count = min(buffer.count, length - bufferStart)
+                    nsString.getCharacters(&buffer, range: NSRange(location: bufferStart, length: count))
+                    bufferEnd = bufferStart + count
+                }
+                for index in (position - bufferStart)..<(bufferEnd - bufferStart) {
                     let unit = buffer[index]
                     if unit == 0x0A {
-                        lineEnd = position + index + 1
+                        lineEnd = bufferStart + index + 1
                         break scan
                     }
                     if unit >= 0x0590, !isBiDi, isBiDiCodeUnit(unit) { isBiDi = true }
                 }
-                position += count
+                position = bufferEnd
             }
             let slides = wraps && !isBiDi && lineEnd - lineStart > slidingWindowThreshold
             if slides || lineEnd - groupStart > maxTypesetterLength {
@@ -639,12 +669,11 @@ nonisolated enum TextLayoutEngine {
 
     /// Core Text's own caret offsets, for right-to-left and reordered lines
     /// (and to check the glyph-based ones against). It reports both edges of
-    /// every character in visual order; the leading edge is the caret before
-    /// it, the trailing edge the caret after its whole cluster (with
-    /// `string`), so an emoji's second UTF-16 unit never gets a caret. With
-    /// `string`, a leading edge inside a cluster is dropped: Core Text breaks
+    /// every character in visual order; with `string`, edges inside a cluster
+    /// are dropped so only cluster boundaries get carets (Core Text breaks
     /// Myanmar and Devanagari syllables finer than composed character
-    /// sequences (`န်မာ`, `क्‍ष`).
+    /// sequences, and a mid-cluster trailing edge would otherwise pin the
+    /// cluster's end caret short of its visual edge).
     static func enumeratedCaretOffsets(
         of line: CTLine, range: Range<Int>, string: NSString? = nil, indent: CGFloat, width: CGFloat
     ) -> [CGFloat] {
@@ -655,11 +684,10 @@ nonisolated enum TextLayoutEngine {
             if leadingEdge {
                 if let string, !startsCluster(string, at: index) { return }
                 position = index - start
-            } else if let string, index < string.length, !endsLine(string.character(at: index)) {
-                position = NSMaxRange(string.rangeOfComposedCharacterSequence(at: index)) - start
             } else {
-                // A line terminator ends its cluster (`startsCluster`).
-                position = index - start + 1
+                let next = index + 1
+                if let string, next < string.length, !startsCluster(string, at: next) { return }
+                position = next - start
             }
             guard offsets.indices.contains(position) else { return }
             if leadingEdge || offsets[position].isNaN { offsets[position] = indent + CGFloat(offset) }

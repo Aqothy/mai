@@ -329,4 +329,32 @@ struct TextLayoutEngineTests {
             #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 0.01 }, "\(name): \(actual) vs \(expected)")
         }
     }
+
+    /// Reordered and BiDi lines place their end-of-cluster carets at the
+    /// cluster's full visual edge, not at a mid-cluster Core Text sub-caret
+    /// (Myanmar syllables like "ကျွန်တော်"/"မြန်မာ", and ZWJ before a letter).
+    @Test func reorderedEndOfLineCaretsCoverTheFullLine() {
+        for sample in ["ကျွန်တော်", "မြန်မာ", "မြန်မာ\u{200D}a"] {
+            let laid = layout([.paragraph([MarkdownInline(text: sample)])], width: 400)
+            guard let line = laid.lines.first else {
+                Issue.record("expected line for \(sample)")
+                continue
+            }
+            #expect(
+                abs((line.caretOffsets.last ?? 0) - (line.x + line.width)) < 0.5,
+                "\(sample): end caret \(line.caretOffsets.last ?? -1) vs width \(line.width)")
+            let rects = laid.selectionRects(for: line.range)
+            #expect(rects.count == 1 && abs(rects[0].width - line.width) < 0.5, "\(sample): rect \(rects) vs width \(line.width)")
+        }
+        // In "مرحبا a\u{200D}b", 'b' must keep a non-zero caret span after the ZWJ.
+        let mixed = "مرحبا a\u{200D}b"
+        let laidMixed = layout([.paragraph([MarkdownInline(text: mixed)])], width: 400)
+        guard let line = laidMixed.lines.first else {
+            Issue.record("expected line for mixed BiDi")
+            return
+        }
+        let bStart = (mixed as NSString).range(of: "b").location
+        let span = abs(line.caretOffsets[bStart + 1] - line.caretOffsets[bStart])
+        #expect(span > 1, "expected non-zero caret span for 'b', got \(span)")
+    }
 }

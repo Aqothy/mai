@@ -298,8 +298,8 @@ extension TranscriptController {
         }
         // Whole clusters, as browsers snap words: the tokenizer can cut a
         // letter from its combining marks (`n` + U+0308 next to kana).
-        let range = found.map(string.rangeOfComposedCharacterSequences(for:))
-            ?? string.rangeOfComposedCharacterSequence(at: offset)
+        let range = found.map { TextLayoutEngine.clusterRange(in: string, for: $0) }
+            ?? TextLayoutEngine.clusterRange(in: string, at: offset)
         return TranscriptSelection(
             anchor: TextPosition(rowID: position.rowID, offset: range.location),
             focus: TextPosition(rowID: position.rowID, offset: NSMaxRange(range)))
@@ -314,7 +314,7 @@ extension TranscriptController {
         let string = text as NSString
         guard string.length > 0 else { return TranscriptSelection(caret: position) }
         let offset = min(position.offset, string.length - 1)
-        let range = string.rangeOfComposedCharacterSequence(at: offset)
+        let range = TextLayoutEngine.clusterRange(in: string, at: offset)
         return TranscriptSelection(
             anchor: TextPosition(rowID: position.rowID, offset: range.location),
             focus: TextPosition(rowID: position.rowID, offset: NSMaxRange(range)))
