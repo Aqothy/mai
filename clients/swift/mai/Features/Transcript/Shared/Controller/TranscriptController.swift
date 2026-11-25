@@ -60,9 +60,12 @@ final class TranscriptController {
     /// An animated jump to the end (rule 7, iOS): when it started and how
     /// far from the end the viewport was.
     @ObservationIgnored private(set) var endJump: (start: ContinuousClock.Instant, distance: CGFloat)?
-    /// Bands the stream worker drew with a streamed row's new layout, for
+    /// Bands pre-drawn off the main thread with a streamed or cold layout, for
     /// the row's next placement; cleared by it.
-    @ObservationIgnored var streamedBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
+    @ObservationIgnored var preDrawnBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
+    /// Cached selectable UTF-16 lengths for rows without a layout or
+    /// precomputed `TextMetrics.selectableUTF16` (such as `.pendingMessage`).
+    @ObservationIgnored var selectableLengths: [String: (version: Int, length: Int)] = [:]
     #if DEBUG
         @ObservationIgnored var debugReaderMoves: [ScrollFollowPolicy.ReaderScroll] = []
     #endif
@@ -205,7 +208,12 @@ final class TranscriptController {
             } else if isAwaitingInitialEnd {
                 move(to: initialTargetTop(viewport).top)
             } else {
-                move(to: isFollowingEnd ? endTop(viewport) : baselineTop)
+                // Keep the end pinned when the keyboard opens/closes while the
+                // reader is already within the near-bottom zone (even if a tiny
+                // finger-lift wiggle flipped `isFollowing` off).
+                let pinsToEnd =
+                    isFollowingEnd || (viewport.bottomInset != last.bottomInset && isNearEnd(top: baselineTop, last))
+                move(to: pinsToEnd ? endTop(viewport) : baselineTop)
             }
             alignInitialEndIfPossible()
             viewportDidMove()
@@ -251,6 +259,7 @@ final class TranscriptController {
     /// height unless `measuredHeights` has one; a new row takes an estimate.
     func setRows(_ newRows: [TranscriptRow], measuredHeights: [String: CGFloat] = [:]) {
         let versioned = versioned(newRows)
+        selectableLengths.removeAll(keepingCapacity: true)
         changeGeometry {
             rows = versioned
             let width = columnWidth > 0 ? columnWidth : 600
@@ -309,6 +318,7 @@ final class TranscriptController {
             for id in old.keys where !kept.contains(id) {
                 removeLayout(for: id)
                 measuredRowHeights.removeValue(forKey: id)
+                selectableLengths.removeValue(forKey: id)
             }
         }
         changeGeometry(replacingRange: range) {

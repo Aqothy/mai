@@ -332,6 +332,11 @@
 
         private func placeRows() {
             guard let palette, controller.columnWidth > 0 else { return }
+            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
+            let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
+            if deadline > 0 {
+                controller.prepareVisibleSynchronously(in: visibleRect, deadline: deadline)
+            }
             matchContentWidth()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -339,7 +344,7 @@
             UIView.performWithoutAnimation {
                 mounter.place(
                     controller, visible: visibleRect, documentWidth: bounds.width, palette: palette, scale: scale,
-                    colorSpace: colorSpace, showsContent: isContentVisible)
+                    colorSpace: colorSpace, showsContent: isContentVisible, syncDeadline: deadline)
             }
             // Notify UIKit only when the selection's highlight rects actually
             // moved or changed layout, not unconditionally on every scroll placement.
@@ -358,7 +363,7 @@
 
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?
+            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScroller()
             if wideBlocks[rowID] == nil {
@@ -381,7 +386,7 @@
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
-                streamed: streamed)
+                streamed: streamed, syncDeadline: syncDeadline)
         }
 
         /// The reader scrolled a wide block: keep its sideways offset across

@@ -15,17 +15,20 @@ actor LayoutQueue {
     static let eagerParseLayoutBlockLimit = 32
 
     enum Work: Sendable {
-        case layout(RowLayoutRequest)
+        case layout(RowLayoutRequest, drawing: DrawnBands.Drawing? = nil)
         /// Parses a `.pendingMessage` entering the viewport window and, for
-        /// small messages, lays out its rows in one worker task.
-        case parseAndLayout(message: TranscriptMessage, source: String, width: CGFloat, style: TextStyle)
+        /// small messages, lays out (and optionally pre-rasters) its rows in
+        /// one worker task.
+        case parseAndLayout(
+            message: TranscriptMessage, source: String, width: CGFloat, style: TextStyle,
+            drawing: DrawnBands.Drawing? = nil)
     }
 
     enum Result: Sendable {
-        case layout(RowLayout)
+        case layout(RowLayout, drawn: DrawnBands?)
         case parsedAndLaidOut(
             message: TranscriptMessage, source: String, blocks: [MarkdownBlock], metrics: [TextMetrics],
-            layouts: [RowLayout])
+            layouts: [RowLayout], drawn: [DrawnBands?])
     }
 
     struct Job: Sendable {
@@ -89,9 +92,11 @@ actor LayoutQueue {
 
     private nonisolated static func perform(_ work: Work) -> Result {
         switch work {
-        case .layout(let request):
-            return .layout(RowLayoutBuilder.layout(request))
-        case .parseAndLayout(let message, let source, let width, let style):
+        case .layout(let request, let drawing):
+            let layout = RowLayoutBuilder.layout(request)
+            let drawn = drawing.flatMap { DrawnBands.drawInitial(layout, drawing: $0, maxBands: 2) }
+            return .layout(layout, drawn: drawn)
+        case .parseAndLayout(let message, let source, let width, let style, let drawing):
             let blocks = MarkdownPlanner.blocks(from: source)
             let rows = message.rows(from: blocks)
             let metrics = rows.map(\.metrics)
@@ -99,15 +104,30 @@ actor LayoutQueue {
                 rows.count <= eagerParseLayoutBlockLimit
             else {
                 return .parsedAndLaidOut(
-                    message: message, source: source, blocks: blocks, metrics: metrics, layouts: [])
+                    message: message, source: source, blocks: blocks, metrics: metrics, layouts: [], drawn: [])
             }
             let key = RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version)
             let layouts = rows.map { row in
                 RowLayoutBuilder.layout(
                     RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
             }
+            var preDrawn: [DrawnBands?] = []
+            if let drawing {
+                preDrawn.reserveCapacity(layouts.count)
+                var remainingBands = 4
+                for layout in layouts {
+                    if remainingBands > 0,
+                        let bands = DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 1)
+                    {
+                        remainingBands -= bands.bands.count + bands.wideBands.count
+                        preDrawn.append(bands)
+                    } else {
+                        preDrawn.append(nil)
+                    }
+                }
+            }
             return .parsedAndLaidOut(
-                message: message, source: source, blocks: blocks, metrics: metrics, layouts: layouts)
+                message: message, source: source, blocks: blocks, metrics: metrics, layouts: layouts, drawn: preDrawn)
         }
     }
 }

@@ -49,7 +49,7 @@ nonisolated struct TranscriptInvariantFuzzTests {
                 row.show(
                     rowID: "r", layout: RowLayout(rowID: "r", key: key, height: size.height, content: content),
                     palette: palette, drawsWideBody: true, scale: 1)
-                let bounds = CGRect(origin: .zero, size: size)
+                let bounds = content.paintedBounds(drawsWideBody: true, rowWidth: size.width, rowHeight: size.height)
                 for step in 0..<12 {
                     let rect = CGRect(
                         x: CGFloat(rng.int(in: -500..<Int(size.width) + 500)), y: CGFloat(rng.int(in: -500..<Int(size.height) + 500)),
@@ -58,11 +58,15 @@ nonisolated struct TranscriptInvariantFuzzTests {
                     let bands = row.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
                     let context = "iteration \(iteration) step \(step) wide \(wide)"
                     for band in bands {
-                        #expect(bounds.contains(band.frame), "\(context): band \(band.frame) outside \(size)")
-                        #expect(band.frame.minX.truncatingRemainder(dividingBy: RowLayer.bandWidth) == 0, "\(context)")
-                        #expect(band.frame.minY.truncatingRemainder(dividingBy: RowLayer.bandHeight) == 0, "\(context)")
+                        #expect(bounds.contains(band.frame), "\(context): band \(band.frame) outside \(bounds)")
+                        #expect(
+                            (band.frame.minX - bounds.minX).truncatingRemainder(dividingBy: RowLayer.bandWidth) == 0,
+                            "\(context)")
+                        #expect(
+                            (band.frame.minY - bounds.minY).truncatingRemainder(dividingBy: RowLayer.bandHeight) == 0,
+                            "\(context)")
                     }
-                    // Every point of the request inside the row has a current band.
+                    // Every point of the request inside the painted bounds has a current band.
                     let covered = rect.intersection(bounds)
                     if !covered.isNull, !covered.isEmpty {
                         for probe in [CGPoint(x: covered.minX, y: covered.minY), CGPoint(x: covered.midX, y: covered.midY),

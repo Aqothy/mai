@@ -309,7 +309,7 @@ extension TranscriptController {
             let key = currentKey(rows[rowIndex])
             let layout = RowLayout(rowID: id, key: key, height: row.layout.height, content: row.layout.content)
             storeLayout(layout)
-            if let drawn = row.drawn { streamedBands[id] = (layout, drawn) }
+            if let drawn = row.drawn { preDrawnBands[id] = (layout, drawn) }
         }
         if isAwaitingInitialEnd { alignInitialEndIfPossible() }
         if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),

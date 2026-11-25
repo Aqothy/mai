@@ -258,24 +258,30 @@
             placeRows()
         }
 
-        /// Places rows using cached layouts only (pure async + blanking:
-        /// layout and raster never run synchronously on the main thread).
+        /// Places rows using cached layouts and pre-drawn bands, spending up to
+        /// `syncFallbackBudget` on normal-sized visible blank rows when rapid
+        /// scrolling or scrollbar scrubbing outruns off-main prefetch.
         private func placeRows() {
             guard let clip, let palette, controller.columnWidth > 0 else { return }
+            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
+            let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
+            if deadline > 0 {
+                controller.prepareVisibleSynchronously(in: clip.documentVisibleRect, deadline: deadline)
+            }
             attachRowsLayer()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             defer { CATransaction.commit() }
             mounter.place(
                 controller, visible: clip.documentVisibleRect, documentWidth: bounds.width, palette: palette,
-                scale: scale, colorSpace: colorSpace, showsContent: isContentVisible)
+                scale: scale, colorSpace: colorSpace, showsContent: isContentVisible, syncDeadline: deadline)
         }
 
         // MARK: TranscriptRowMounterDelegate
 
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?
+            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScrollView()
             if wideBlocks[rowID] == nil {
@@ -294,7 +300,7 @@
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
-                streamed: streamed)
+                streamed: streamed, syncDeadline: syncDeadline)
         }
 
         /// The reader scrolled a wide block: keep its sideways offset across

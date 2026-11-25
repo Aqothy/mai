@@ -1,16 +1,25 @@
 import CoreGraphics
 import Foundation
+import QuartzCore
 import Synchronization
 
 /// Layout near the viewport, ahead of the scroll (PLAN 4.2): the viewport,
-/// plus screens biased in the scroll direction, laid out strictly off the main
-/// thread. Results land in batches and change geometry through `changeGeometry`,
-/// so the reader's place holds.
+/// plus screens biased in the scroll direction, laid out and pre-rastered off
+/// the main thread (1-hop raster), with a strict per-frame sync budget for
+/// normal-sized visible blank rows on rapid scrollbar scrubbing. Results land
+/// in batches and change geometry through `changeGeometry`, so the reader's
+/// place holds.
 extension TranscriptController {
     private static let maxCachedLayoutRows = 64
     /// What 4,000 lines of prose hold (`RowContentLayout.retainedBytes`).
     private static let maxCachedLayoutBytes = 12 << 20
     private static let maxParsedMessageBytes = 16 * 1024 * 1024
+    /// Maximum UTF-8 bytes (or selectable UTF-16 units) of a visible blank row
+    /// eligible for bounded-budget synchronous layout/parse fallback (keeps
+    /// dense/giant blocks strictly off-main).
+    static let syncFallbackByteLimit = 4_096
+    /// Maximum cells in a Markdown table eligible for synchronous fallback.
+    private static let syncFallbackTableCellLimit = 64
 
     /// The key a row's layout must have to be current.
     func currentKey(_ row: TranscriptRow) -> RowLayoutKey {
@@ -87,6 +96,94 @@ extension TranscriptController {
         layouts[rows[index].id]
     }
 
+    /// Synchronously parses/lays out normal-sized visible rows (`<= 8 KB`) that
+    /// have no cached layout yet, stopping immediately once `deadline` elapses.
+    /// Runs before `mounter.place` so rapid scrollbar scrubbing never shows
+    /// white flashes while giant blocks stay strictly off-main.
+    func prepareVisibleSynchronously(in visible: CGRect, deadline: CFTimeInterval) {
+        guard configuration.laysOutRows, columnWidth > 0, !isAwaitingInitialEnd,
+            let range = geometry.indices(overlapping: max(0, visible.minY), visible.maxY)
+        else { return }
+        // Fast path: 99% of frames already have every visible row laid out.
+        var hasMissing = false
+        for index in range {
+            let row = rows[index]
+            if case .pendingMessage = row.kind {
+                hasMissing = true
+                break
+            }
+            if layouts[row.id] == nil {
+                hasMissing = true
+                break
+            }
+        }
+        guard hasMissing, CACurrentMediaTime() < deadline else { return }
+
+        // 1. Parse and lay out small visible `.pendingMessage` rows first so
+        // they splice cleanly before mounting begins.
+        var parsedBatch: [ParsedBatchItem] = []
+        for index in range {
+            guard CACurrentMediaTime() < deadline else { break }
+            guard case .pendingMessage(let message, let source) = rows[index].kind,
+                source.utf8.count <= Self.syncFallbackByteLimit
+            else { continue }
+            let blocks = MarkdownPlanner.blocks(from: source)
+            let builtRows = message.rows(from: blocks)
+            let metrics = builtRows.map(\.metrics)
+            cacheParsedMessage(id: message.id, source: source, blocks: blocks, metrics: metrics)
+            var blockLayouts: [RowLayout]?
+            if builtRows.count <= 16 {
+                let key = RowLayoutKey(contentVersion: 0, width: columnWidth, styleVersion: style.version)
+                var laid: [RowLayout] = []
+                laid.reserveCapacity(builtRows.count)
+                for blockRow in builtRows {
+                    if CACurrentMediaTime() >= deadline { break }
+                    laid.append(
+                        RowLayoutBuilder.layout(
+                            RowLayoutRequest(rowID: blockRow.id, kind: blockRow.kind, key: key, style: style)))
+                }
+                if !laid.isEmpty { blockLayouts = laid }
+            }
+            parsedBatch.append(
+                ParsedBatchItem(
+                    message: message, source: source, blocks: blocks, metrics: metrics,
+                    layouts: blockLayouts, drawn: []))
+        }
+        if !parsedBatch.isEmpty {
+            applyParsedMessages(parsedBatch)
+        }
+
+        // 2. Lay out any remaining small visible rows missing a layout.
+        // Convert `host.viewportTop` (uncovered top, includes `topInset`) back
+        // to raw document rect coordinates matching `visible.minY`.
+        guard CACurrentMediaTime() < deadline else { return }
+        let currentMinY = host.map { $0.viewportTop - ($0.viewport?.topInset ?? 0) } ?? visible.minY
+        guard let visibleRange = geometry.indices(overlapping: max(0, currentMinY), currentMinY + visible.height) else {
+            return
+        }
+        var syncHeights: [String: CGFloat] = [:]
+        for index in visibleRange {
+            guard CACurrentMediaTime() < deadline else { break }
+            let row = rows[index]
+            if case .pendingMessage = row.kind { continue }
+            if case .markdownBlock(.table(let table), _) = row.kind,
+                (table.rows.count + 1) * table.columnCount > Self.syncFallbackTableCellLimit
+            {
+                continue
+            }
+            guard layouts[row.id] == nil,
+                max(row.metrics.bytes, row.metrics.selectableUTF16 ?? 0) <= Self.syncFallbackByteLimit
+            else { continue }
+            let layout = RowLayoutBuilder.layout(request(row))
+            storeLayout(layout)
+            syncHeights[row.id] = layout.height
+            measuredRowHeights[row.id] = layout.height
+        }
+        if !syncHeights.isEmpty {
+            setHeights(syncHeights)
+        }
+    }
+
     /// The host is about to draw rows `indices`, which have no layout at
     /// all: lay them out first. Rows with an older layout show it meanwhile
     /// and are queued already (a new width or style schedules them), so a
@@ -94,8 +191,11 @@ extension TranscriptController {
     func prefetch(_ indices: [Int]) {
         guard configuration.laysOutRows, columnWidth > 0 else { return }
         let top = viewportTop
-        let jobs = indices.compactMap { index in
-            job(for: index, priority: Int(abs(geometry.offset(at: index) - top)))
+        let drawing = currentDrawing
+        let nearLimit = Int(max(1, (host?.viewport ?? lastViewport)?.visibleHeight ?? 800))
+        let jobs = indices.compactMap { index -> LayoutQueue.Job? in
+            let distance = Int(abs(geometry.offset(at: index) - top))
+            return job(for: index, priority: distance, drawing: distance <= nearLimit ? drawing : nil)
         }
         guard !jobs.isEmpty else { return }
         let generation = urgentGeneration
@@ -159,11 +259,15 @@ extension TranscriptController {
         lastScheduledTop = top
         let minY = top - (downward ? 1 : 2) * screen
         let maxY = top + screen + (downward ? 2 : 1) * screen
+        let drawing = currentDrawing
+        let nearLimit = Int(screen)
         var jobs: [LayoutQueue.Job] = []
         if let range = geometry.indices(overlapping: max(0, minY), maxY) {
             for index in range {
                 let distance = Int(abs(geometry.offset(at: index) - top))
-                if let job = job(for: index, priority: distance) { jobs.append(job) }
+                if let job = job(for: index, priority: distance, drawing: distance <= nearLimit ? drawing : nil) {
+                    jobs.append(job)
+                }
             }
         }
         dropLayouts(outside: (top - 2 * screen)...(top + 3 * screen))
@@ -173,16 +277,28 @@ extension TranscriptController {
         if jobs.isEmpty { checkWarm() }
     }
 
-    private func job(for index: Int, priority: Int) -> LayoutQueue.Job? {
+    private var currentDrawing: DrawnBands.Drawing? {
+        guard configuration.drawsOffMain, let palette else { return nil }
+        return DrawnBands.Drawing(
+            palette: palette, scale: host?.scale ?? 2, colorSpace: host?.colorSpace ?? RowLayer.colorSpace)
+    }
+
+    private func job(for index: Int, priority: Int, drawing: DrawnBands.Drawing?) -> LayoutQueue.Job? {
         let row = rows[index]
         if case .pendingMessage(let message, let source) = row.kind {
             return LayoutQueue.Job(
                 id: "parse|\(message.pendingRowID)",
-                work: .parseAndLayout(message: message, source: source, width: columnWidth, style: style),
+                work: .parseAndLayout(
+                    message: message, source: source, width: columnWidth, style: style, drawing: drawing),
                 priority: priority)
         }
         guard layouts[row.id]?.key != currentKey(row) else { return nil }
-        return LayoutQueue.Job(id: "layout|\(row.id)", work: .layout(request(row)), priority: priority)
+        // Only pre-raster 1-hop bitmaps for cold rows with no layout yet; rows
+        // already on screen (such as live-resize reflows) keep their old pixels
+        // while reflowing and let `RasterQueue` cancel stale widths cleanly.
+        let coldDrawing = layouts[row.id] == nil ? drawing : nil
+        return LayoutQueue.Job(
+            id: "layout|\(row.id)", work: .layout(request(row), drawing: coldDrawing), priority: priority)
     }
 
     /// Layouts are state only near the viewport; the rest are dropped by row
@@ -217,6 +333,7 @@ extension TranscriptController {
         let blocks: [MarkdownBlock]
         let metrics: [TextMetrics]
         let layouts: [RowLayout]?
+        let drawn: [DrawnBands?]
     }
 
     private func drainResults() {
@@ -232,7 +349,7 @@ extension TranscriptController {
         let keep = keptWindow()
         for result in results {
             switch result {
-            case .parsedAndLaidOut(let message, let source, let blocks, let metrics, let blockLayouts):
+            case .parsedAndLaidOut(let message, let source, let blocks, let metrics, let blockLayouts, let blockDrawn):
                 guard isCurrentParseSource(source, for: message), parsedMessages[message.id]?.source != source else {
                     continue
                 }
@@ -244,8 +361,9 @@ extension TranscriptController {
                 newlyParsed.append(
                     ParsedBatchItem(
                         message: message, source: source, blocks: blocks, metrics: metrics,
-                        layouts: matchingLayouts ? blockLayouts : nil))
-            case .layout(let layout):
+                        layouts: matchingLayouts ? blockLayouts : nil,
+                        drawn: matchingLayouts ? blockDrawn : []))
+            case .layout(let layout, let drawn):
                 guard let index = geometry.index(for: layout.rowID), layout.key == currentKey(rows[index]) else {
                     continue
                 }
@@ -255,6 +373,7 @@ extension TranscriptController {
                 let frame = geometry.frame(at: index)
                 if keep.map({ frame.minY < $0.upperBound && frame.minY + frame.height > $0.lowerBound }) ?? true {
                     storeLayout(layout)
+                    if let drawn { preDrawnBands[layout.rowID] = (layout, drawn) }
                 }
             }
         }
@@ -297,7 +416,7 @@ extension TranscriptController {
     /// ready layouts and exact heights, avoiding a second layout round-trip and
     /// double `setFrameSize` bounce.
     private func applyParsedMessages(_ parsed: [ParsedBatchItem]) {
-        var byIndex: [Int: (rows: [TranscriptRow], layouts: [RowLayout]?)] = [:]
+        var byIndex: [Int: (rows: [TranscriptRow], layouts: [RowLayout]?, drawn: [DrawnBands?])] = [:]
         var needsFullRebuild = false
         for item in parsed {
             guard let index = geometry.index(for: item.message.pendingRowID),
@@ -308,7 +427,7 @@ extension TranscriptController {
                 if geometry.index(for: item.message.firstParsedRowID) == nil { needsFullRebuild = true }
                 continue
             }
-            byIndex[index] = (item.message.rows(from: item.blocks, metrics: item.metrics), item.layouts)
+            byIndex[index] = (item.message.rows(from: item.blocks, metrics: item.metrics), item.layouts, item.drawn)
         }
         if needsFullRebuild {
             rebuildRows()
@@ -330,6 +449,9 @@ extension TranscriptController {
                         replacementHeights[blockRow.id] = layout.height
                         measuredRowHeights[blockRow.id] = layout.height
                         storeLayout(layout)
+                        if offset < replacement.drawn.count, let drawn = replacement.drawn[offset] {
+                            preDrawnBands[blockRow.id] = (layout, drawn)
+                        }
                     }
                     replacementRows.append(blockRow)
                 }

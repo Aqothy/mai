@@ -62,7 +62,7 @@
         func show(
             rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?
+            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval = 0
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID
@@ -84,7 +84,7 @@
             lastVisibleY = visible
             lastContentWidth = wide.contentWidth
             lastDrawsOffMain = drawsOffMain
-            updateTiles()
+            updateTiles(syncDeadline: syncDeadline)
             CATransaction.commit()
         }
 
@@ -103,11 +103,11 @@
             guard needsUpdate else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            updateTiles()
+            updateTiles(syncDeadline: 0)
             CATransaction.commit()
         }
 
-        private func updateTiles() {
+        private func updateTiles(syncDeadline: CFTimeInterval) {
             let visMinX = max(0, contentOffset.x)
             let visWidth = max(bounds.width, frame.width)
             let overscan = RowLayer.bandWidth
@@ -121,7 +121,8 @@
                 lastVisibleY.isNull
                 ? .null
                 : CGRect(x: visMinX, y: lastVisibleY.minY, width: visWidth, height: lastVisibleY.height)
-            row.drawBands(in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain)
+            row.drawBands(
+                in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain, syncDeadline: syncDeadline)
             let releaseMarginY = lastVisibleY.isNull ? 512 : max(512, lastVisibleY.height)
             row.releaseBands(outside: drawRect.insetBy(dx: -RowLayer.bandWidth, dy: -releaseMarginY))
         }

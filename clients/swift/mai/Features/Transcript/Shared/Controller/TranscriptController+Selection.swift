@@ -504,6 +504,12 @@ extension TranscriptController {
         if let layout = layouts[row.id], layout.key.contentVersion == row.contentVersion {
             return layout.content.selectableLength
         }
-        return selectableText(ofRowAt: index)?.utf16.count
+        if let precomputed = row.metrics.selectableUTF16 { return precomputed }
+        if let cached = selectableLengths[row.id], cached.version == row.contentVersion {
+            return cached.length
+        }
+        guard let length = RowSelectableText.utf16Length(for: row.kind) else { return nil }
+        selectableLengths[row.id] = (row.contentVersion, length)
+        return length
     }
 }

@@ -1,9 +1,15 @@
 import CoreGraphics
 
 /// Bands of a row drawn off the main thread together with its layout (a
-/// streamed block, `TranscriptStreamWorker`), so the row shows its new
-/// text in the same frame as its new size, never an older bitmap in it.
+/// streamed block in `TranscriptStreamWorker` or a cold viewport row in
+/// `LayoutQueue`), so layout and pixels land on the main thread in one hop.
 nonisolated struct DrawnBands: Sendable {
+    struct Drawing: Sendable {
+        let palette: TextPalette
+        let scale: CGFloat
+        let colorSpace: CGColorSpace
+    }
+
     /// What they were drawn with; a row showing another palette, scale or
     /// color space draws its bands itself.
     let palette: TextPalette
@@ -25,6 +31,54 @@ nonisolated struct DrawnBands: Sendable {
     /// right rasterize lazily via `RasterQueue`.
     private static let maxPreDrawnWideColumns = 2
 
+    /// Pre-draws the leading bands of a freshly laid-out cold row inside the
+    /// same `LayoutQueue` worker hop (1-hop raster), skipping giant blocks so
+    /// workers stay responsive and `RasterQueue` draws only visible tiles.
+    static func drawInitial(
+        _ layout: RowLayout, drawing: Drawing, maxBands: Int = 2
+    ) -> DrawnBands? {
+        guard maxBands > 0, layout.content.retainedBytes <= RowLayer.syncFallbackMaxRetainedBytes else {
+            return nil
+        }
+        let drawsWideBody = layout.content.wideBody == nil
+        let bounds = layout.content.paintedBounds(
+            drawsWideBody: drawsWideBody, rowWidth: layout.key.width, rowHeight: layout.height)
+        let frames = RowLayer.bandFrames(in: bounds)
+        var bands: [(frame: CGRect, bitmap: BandBitmap?)] = []
+        for frame in frames.prefix(maxBands) {
+            let raster = BandRaster(
+                content: layout.content, palette: drawing.palette, drawsWideBody: drawsWideBody, rect: frame,
+                scale: drawing.scale, colorSpace: drawing.colorSpace)
+            bands.append((frame, BandRasterizer.bitmap(raster)))
+        }
+        var wideBands: [(frame: CGRect, bitmap: BandBitmap?)] = []
+        if let wide = layout.content.wideBody {
+            let wideBounds = wide.content.paintedBounds(
+                drawsWideBody: true, rowWidth: wide.contentWidth, rowHeight: wide.frame.height)
+            if !wideBounds.isEmpty {
+                let rowCount = min(maxBands, Int(ceil(wideBounds.height / RowLayer.bandHeight)))
+                let colCount = min(maxPreDrawnWideColumns, Int(ceil(wideBounds.width / RowLayer.bandWidth)))
+                for row in 0..<rowCount {
+                    let top = wideBounds.minY + CGFloat(row) * RowLayer.bandHeight
+                    let h = min(RowLayer.bandHeight, wideBounds.maxY - top)
+                    for col in 0..<colCount {
+                        let left = wideBounds.minX + CGFloat(col) * RowLayer.bandWidth
+                        let frame = CGRect(
+                            x: left, y: top, width: min(RowLayer.bandWidth, wideBounds.maxX - left), height: h)
+                        let raster = BandRaster(
+                            content: wide.content, palette: drawing.palette, drawsWideBody: true, rect: frame,
+                            scale: drawing.scale, colorSpace: drawing.colorSpace)
+                        wideBands.append((frame, BandRasterizer.bitmap(raster)))
+                    }
+                }
+            }
+        }
+        guard !bands.isEmpty || !wideBands.isEmpty else { return nil }
+        return DrawnBands(
+            palette: drawing.palette, scale: drawing.scale, colorSpace: drawing.colorSpace,
+            bands: bands, wideBands: wideBands)
+    }
+
     /// Draws the bands of `layout` that do not draw as they did in
     /// `previous`, the layout the row showed before.
     static func draw(
@@ -32,13 +86,15 @@ nonisolated struct DrawnBands: Sendable {
         colorSpace: CGColorSpace
     ) -> DrawnBands {
         let drawsWideBody = layout.content.wideBody == nil
-        let painted = layout.content.paintedHeight(drawsWideBody: drawsWideBody, rowHeight: layout.height)
+        let bounds = layout.content.paintedBounds(
+            drawsWideBody: drawsWideBody, rowWidth: layout.key.width, rowHeight: layout.height)
         let unchanged = previous.map { RowContentDiff.unchangedHeight($0.content, layout.content) } ?? 0
-        let oldPainted = previous.map {
-            $0.content.paintedHeight(drawsWideBody: $0.content.wideBody == nil, rowHeight: $0.height)
-        } ?? 0
-        let oldFrames = previous.map { RowLayer.bandFrames(height: oldPainted, width: $0.key.width) } ?? []
-        let frames = RowLayer.bandFrames(height: painted, width: layout.key.width)
+        let oldFrames: [CGRect] = previous.map {
+            let oldBounds = $0.content.paintedBounds(
+                drawsWideBody: $0.content.wideBody == nil, rowWidth: $0.key.width, rowHeight: $0.height)
+            return RowLayer.bandFrames(in: oldBounds)
+        } ?? []
+        let frames = RowLayer.bandFrames(in: bounds)
         let firstTailIndex = max(0, frames.count - maxPreDrawnTailBands)
         var bands: [(frame: CGRect, bitmap: BandBitmap?)] = []
         for index in firstTailIndex..<frames.count {
@@ -50,33 +106,42 @@ nonisolated struct DrawnBands: Sendable {
             bands.append((frame, BandRasterizer.bitmap(raster)))
         }
         var wideBands: [(frame: CGRect, bitmap: BandBitmap?)] = []
-        if let wide = layout.content.wideBody, wide.frame.height > 0, wide.contentWidth > 0 {
-            let previousWide = previous?.content.wideBody
-            let wideUnchanged =
-                previousWide.map { RowContentDiff.unchangedHeight($0.content, wide.content) } ?? 0
-            let rowCount = Int(ceil(wide.frame.height / RowLayer.bandHeight))
-            let colCount = Int(ceil(wide.contentWidth / RowLayer.bandWidth))
-            let firstRow = max(0, rowCount - maxPreDrawnTailBands)
-            let preDrawnCols = min(colCount, maxPreDrawnWideColumns)
-            for row in firstRow..<rowCount {
-                let top = CGFloat(row) * RowLayer.bandHeight
-                let h = min(RowLayer.bandHeight, wide.frame.height - top)
-                for col in 0..<preDrawnCols {
-                    let left = CGFloat(col) * RowLayer.bandWidth
-                    let frame = CGRect(x: left, y: top, width: min(RowLayer.bandWidth, wide.contentWidth - left), height: h)
-                    if let previousWide,
-                        top < previousWide.frame.height,
-                        left < previousWide.contentWidth,
-                        min(RowLayer.bandHeight, previousWide.frame.height - top) == frame.height,
-                        min(RowLayer.bandWidth, previousWide.contentWidth - left) == frame.width,
-                        frame.maxY <= wideUnchanged
-                    {
-                        continue
+        if let wide = layout.content.wideBody {
+            let wideBounds = wide.content.paintedBounds(
+                drawsWideBody: true, rowWidth: wide.contentWidth, rowHeight: wide.frame.height)
+            if !wideBounds.isEmpty {
+                let previousWide = previous?.content.wideBody
+                let previousWideBounds = previousWide.map {
+                    $0.content.paintedBounds(drawsWideBody: true, rowWidth: $0.contentWidth, rowHeight: $0.frame.height)
+                }
+                let wideUnchanged =
+                    previousWide.map { RowContentDiff.unchangedHeight($0.content, wide.content) } ?? 0
+                let rowCount = Int(ceil(wideBounds.height / RowLayer.bandHeight))
+                let colCount = Int(ceil(wideBounds.width / RowLayer.bandWidth))
+                let firstRow = max(0, rowCount - maxPreDrawnTailBands)
+                let preDrawnCols = min(colCount, maxPreDrawnWideColumns)
+                for row in firstRow..<rowCount {
+                    let top = wideBounds.minY + CGFloat(row) * RowLayer.bandHeight
+                    let h = min(RowLayer.bandHeight, wideBounds.maxY - top)
+                    for col in 0..<preDrawnCols {
+                        let left = wideBounds.minX + CGFloat(col) * RowLayer.bandWidth
+                        let frame = CGRect(
+                            x: left, y: top, width: min(RowLayer.bandWidth, wideBounds.maxX - left), height: h)
+                        if let previousWideBounds,
+                            previousWideBounds.origin == wideBounds.origin,
+                            top < previousWideBounds.maxY,
+                            left < previousWideBounds.maxX,
+                            min(RowLayer.bandHeight, previousWideBounds.maxY - top) == frame.height,
+                            min(RowLayer.bandWidth, previousWideBounds.maxX - left) == frame.width,
+                            frame.maxY <= wideUnchanged
+                        {
+                            continue
+                        }
+                        let raster = BandRaster(
+                            content: wide.content, palette: palette, drawsWideBody: true, rect: frame, scale: scale,
+                            colorSpace: colorSpace)
+                        wideBands.append((frame, BandRasterizer.bitmap(raster)))
                     }
-                    let raster = BandRaster(
-                        content: wide.content, palette: palette, drawsWideBody: true, rect: frame, scale: scale,
-                        colorSpace: colorSpace)
-                    wideBands.append((frame, BandRasterizer.bitmap(raster)))
                 }
             }
         }

@@ -12,11 +12,17 @@ nonisolated struct TextMetrics: Hashable, Sendable {
     var lines = 0
     /// Top-level blocks.
     var blocks = 0
+    /// Exact selectable UTF-16 length, precomputed off-main for parsed rows so
+    /// `TranscriptController.offset(from:to:)` stays O(1) per row without
+    /// rebuilding `NSAttributedString`s for off-screen rows. Nil for unparsed
+    /// `.pendingMessage` (computed lazily once if queried) and non-selectable rows.
+    var selectableUTF16: Int?
 
-    init(bytes: Int = 0, lines: Int = 0, blocks: Int = 0) {
+    init(bytes: Int = 0, lines: Int = 0, blocks: Int = 0, selectableUTF16: Int? = nil) {
         self.bytes = bytes
         self.lines = lines
         self.blocks = blocks
+        self.selectableUTF16 = selectableUTF16
     }
 
     init(_ kind: TranscriptRowKind) {
@@ -24,13 +30,16 @@ nonisolated struct TextMetrics: Hashable, Sendable {
         case .markdownBlock(let block, _):
             add(block)
             blocks = 1
+            selectableUTF16 = RowSelectableText.utf16Length(for: kind)
         case .userMessage(let blocks), .thought(let blocks):
             for block in blocks { add(block) }
             self.blocks = blocks.count
+            selectableUTF16 = RowSelectableText.utf16Length(for: kind)
         case .pendingMessage(_, let source):
             bytes = source.utf8.count
         case .notice(let title, let text):
             bytes = title.utf8.count + (text?.utf8.count ?? 0)
+            selectableUTF16 = RowSelectableText.utf16Length(for: kind)
         case .activity, .turnHeader, .turnActions, .working:
             break
         }

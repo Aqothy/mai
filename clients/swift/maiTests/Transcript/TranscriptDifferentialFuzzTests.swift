@@ -78,15 +78,18 @@ nonisolated struct TranscriptDifferentialFuzzTests {
         ) {
             let unchanged = RowContentDiff.unchangedHeight(before, after)
             guard unchanged > 0 else { return }
-            let oldFrames = Set(RowLayer.bandFrames(height: height.0, width: width.0).map { "\($0)" })
+            let oldBounds = before.paintedBounds(drawsWideBody: drawsWideBody, rowWidth: width.0, rowHeight: height.0)
+            let newBounds = after.paintedBounds(drawsWideBody: drawsWideBody, rowWidth: width.1, rowHeight: height.1)
+            let oldFrames = Set(RowLayer.bandFrames(in: oldBounds).map { "\($0)" })
             // A stale band sits immediately above where the change starts.
-            let kept = RowLayer.bandFrames(height: height.1, width: width.1)
+            let kept = RowLayer.bandFrames(in: newBounds)
                 .filter { $0.maxY <= unchanged && oldFrames.contains("\($0)") }
             guard let maxY = kept.map(\.maxY).max() else { return }
             for frame in kept where frame.maxY == maxY {
                 let keptPixels = TranscriptFuzz.pixels(before, rect: frame, drawsWideBody: drawsWideBody, palette: palette)
                 let fresh = TranscriptFuzz.pixels(after, rect: frame, drawsWideBody: drawsWideBody, palette: palette)
-                #expect(keptPixels == fresh, "\(context): kept band \(frame) is stale (unchanged \(unchanged))")
+                let matches = keptPixels == fresh
+                #expect(matches, "\(context): kept band \(frame) is stale (unchanged \(unchanged))")
             }
         }
         let oldWide = old.content.wideBody
@@ -96,10 +99,7 @@ nonisolated struct TranscriptDifferentialFuzzTests {
         if (oldWide == nil) == (newWide == nil) {
             check(
                 old.content, new.content,
-                height: (
-                    old.content.paintedHeight(drawsWideBody: oldWide == nil, rowHeight: old.height),
-                    new.content.paintedHeight(drawsWideBody: newWide == nil, rowHeight: new.height)
-                ),
+                height: (old.height, new.height),
                 width: (old.key.width, new.key.width), drawsWideBody: newWide == nil)
         }
         if let oldWide, let newWide {

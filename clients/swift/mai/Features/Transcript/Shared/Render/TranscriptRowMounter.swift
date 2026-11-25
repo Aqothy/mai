@@ -13,7 +13,7 @@ protocol TranscriptRowMounterDelegate: AnyObject {
     /// layout so wide blocks update size and pixels in the same frame.
     func showWideBlock(
         rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-        visible: CGRect, streamed: DrawnBands?)
+        visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval)
     func removeWideBlock(rowID: String)
     /// Highlights `range` of a wide block's text in its scroller.
     func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor)
@@ -115,7 +115,7 @@ final class TranscriptRowMounter {
     /// while the transcript waits for its first rows (PLAN 3.9 rule 9).
     func place(
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
-        scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool
+        scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool, syncDeadline: CFTimeInterval = 0
     ) {
         let space = colorSpace ?? RowLayer.colorSpace
         hasSelection = drawsSelection && controller.selection != nil
@@ -179,7 +179,7 @@ final class TranscriptRowMounter {
                 mount(
                     controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
-                    colorSpace: space, showsContent: showsContent)
+                    colorSpace: space, showsContent: showsContent, syncDeadline: syncDeadline)
             }
         }
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
@@ -210,7 +210,8 @@ final class TranscriptRowMounter {
                         {
                             delegate?.showWideBlock(
                                 rowID: id, body: wideBody,
-                                key: layout.key, origin: origin, drawn: drawn, visible: visible, streamed: nil)
+                                key: layout.key, origin: origin, drawn: drawn, visible: visible, streamed: nil,
+                                syncDeadline: 0)
                         }
                     }
                     continue
@@ -218,7 +219,7 @@ final class TranscriptRowMounter {
             }
             unmount(id, layer)
         }
-        controller.streamedBands.removeAll()
+        controller.preDrawnBands.removeAll()
     }
 
     /// Redraws the selection highlight on every mounted row, and the code
@@ -238,7 +239,7 @@ final class TranscriptRowMounter {
     private func mount(
         _ row: TranscriptRow, index: Int, frame: CGRect, layout: RowLayout, controller: TranscriptController,
         documentWidth: CGFloat, visible: CGRect, drawn: CGRect, palette: TextPalette, scale: CGFloat,
-        colorSpace: CGColorSpace, showsContent: Bool
+        colorSpace: CGColorSpace, showsContent: Bool, syncDeadline: CFTimeInterval
     ) {
         let width = layout.key.width
         let x = max(0, ((documentWidth - width) / 2).rounded(.down))
@@ -257,19 +258,21 @@ final class TranscriptRowMounter {
             layer.frame = target
         }
         let wideBody = layout.content.wideBody
-        // Bands drawn with a streamed layout, if this is the layout shown
-        // (not one that replaced it since, such as its colors).
-        let streamed = controller.streamedBands[row.id].flatMap { streamed in
-            streamed.layout.key == layout.key && streamed.layout.content.isHighlighted == layout.content.isHighlighted
-                ? streamed.drawn : nil
+        // Bands pre-drawn with a streamed or cold layout, if this is the layout
+        // shown (not one that replaced it since, such as its colors).
+        let preDrawn = controller.preDrawnBands[row.id].flatMap { entry in
+            entry.layout.key == layout.key && entry.layout.content.isHighlighted == layout.content.isHighlighted
+                ? entry.drawn : nil
         }
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
-            colorSpace: colorSpace, drawn: streamed)
+            colorSpace: colorSpace, drawn: preDrawn)
         layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
-        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
+        layer.drawBands(
+            in: local, visible: localVisible, offMain: drawsOffMain,
+            syncDeadline: showsContent ? syncDeadline : 0)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.
@@ -290,7 +293,8 @@ final class TranscriptRowMounter {
             layer.hasWideBlock = true
             delegate?.showWideBlock(
                 rowID: row.id, body: wideBody, key: layout.key,
-                origin: origin, drawn: drawn, visible: showsContent ? visible : .null, streamed: streamed?.wideBodyDrawn)
+                origin: origin, drawn: drawn, visible: showsContent ? visible : .null,
+                streamed: preDrawn?.wideBodyDrawn, syncDeadline: showsContent ? syncDeadline : 0)
             delegate?.showWideBlockSelection(
                 rowID: row.id, range: hasSelection ? controller.selectedRange(inRowAt: index) : nil,
                 color: selectionColor)

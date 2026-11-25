@@ -12,24 +12,29 @@ nonisolated final class RowLayer: CALayer {
     static let bandWidth: CGFloat = 768
     static let bandHeight: CGFloat = 512
 
-    /// The frames of a row's tiles, in row coordinates (row-major): none for a
-    /// row that paints nothing, so it holds no `IOSurface`.
-    static func bandFrames(height: CGFloat, width: CGFloat) -> [CGRect] {
-        guard height > 0, width > 0 else { return [] }
-        let rows = Int(ceil(height / bandHeight))
-        let cols = Int(ceil(width / bandWidth))
+    /// The frames of a row's tiles covering `bounds` (in row coordinates,
+    /// row-major): none when `bounds` is empty, so non-painting rows hold no
+    /// `IOSurface`.
+    static func bandFrames(in bounds: CGRect) -> [CGRect] {
+        guard !bounds.isNull, bounds.width > 0, bounds.height > 0 else { return [] }
+        let rows = Int(ceil(bounds.height / bandHeight))
+        let cols = Int(ceil(bounds.width / bandWidth))
         var frames: [CGRect] = []
         frames.reserveCapacity(rows * cols)
         for row in 0..<rows {
-            let top = CGFloat(row) * bandHeight
-            let h = min(bandHeight, height - top)
+            let top = bounds.minY + CGFloat(row) * bandHeight
+            let h = min(bandHeight, bounds.maxY - top)
             for col in 0..<cols {
-                let left = CGFloat(col) * bandWidth
-                frames.append(CGRect(x: left, y: top, width: min(bandWidth, width - left), height: h))
+                let left = bounds.minX + CGFloat(col) * bandWidth
+                frames.append(CGRect(x: left, y: top, width: min(bandWidth, bounds.maxX - left), height: h))
             }
         }
         return frames
     }
+
+    /// Maximum `RowContentLayout.retainedBytes` eligible for bounded-budget
+    /// synchronous drawing of a visible blank band (keeps giant blocks off-main).
+    static let syncFallbackMaxRetainedBytes = 256_000
 
     private struct TileKey: Hashable {
         let col: Int
@@ -51,8 +56,7 @@ nonisolated final class RowLayer: CALayer {
     private var isSparseGrid = false
     private var tiles: [TileKey: RowBandLayer] = [:]
     private var tilePool: [RowBandLayer] = []
-    private var paintedWidth: CGFloat = 0
-    private var paintedHeight: CGFloat = 0
+    private var paintedRect: CGRect = .zero
     private var colCount = 0
     private var rowCount = 0
     private let shape = CALayer()
@@ -131,8 +135,9 @@ nonisolated final class RowLayer: CALayer {
                 $0.palette === palette && $0.scale == scale && $0.colorSpace == colorSpace ? $0.bands : nil
             } ?? []
         configureBands(
-            height: layout.content.paintedHeight(drawsWideBody: drawsWideBody, rowHeight: layout.height),
-            width: bounds.width, scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
+            bounds: layout.content.paintedBounds(
+                drawsWideBody: drawsWideBody, rowWidth: bounds.width, rowHeight: layout.height),
+            scale: scale, unchangedHeight: unchanged, drawn: bitmaps)
         if selectedRange != nil { drawSelection() }
     }
 
@@ -165,44 +170,55 @@ nonisolated final class RowLayer: CALayer {
     nonisolated static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     /// Draws the tiles crossing `rect` (row coordinates) that do not show
-    /// their current bitmap: always off the main thread when `offMain` is on,
-    /// nearest to `visible` first, each keeping what it shows until its new
-    /// bitmap lands. Only `!offMain` (debug benchmark flag) draws
-    /// synchronously.
+    /// their current bitmap: off the main thread when `offMain` is on, nearest
+    /// to `visible` first, each keeping what it shows until its new bitmap
+    /// lands. When `syncDeadline > 0`, blank visible bands of normal-sized rows
+    /// draw synchronously until the per-frame deadline so rapid scrubbing never
+    /// shows white flashes while giant blocks stay off-main.
     @MainActor
-    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool) {
+    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool, syncDeadline: CFTimeInterval = 0) {
         guard let palette, colCount > 0, rowCount > 0, !rect.isNull, !rect.isEmpty else { return }
         let drawsNow = !offMain
         if !isSparseGrid {
             for band in linearBands where !band.isCurrent && band.frame.intersects(rect) {
-                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false)
+                submitBand(
+                    band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false,
+                    syncDeadline: syncDeadline)
             }
             return
         }
-        let minCol = max(0, Int(floor(rect.minX / Self.bandWidth)))
-        let maxCol = min(colCount - 1, Int(floor((rect.maxX - 0.001) / Self.bandWidth)))
-        let minRow = max(0, Int(floor(rect.minY / Self.bandHeight)))
-        let maxRow = min(rowCount - 1, Int(floor((rect.maxY - 0.001) / Self.bandHeight)))
+        let minCol = max(0, Int(floor((rect.minX - paintedRect.minX) / Self.bandWidth)))
+        let maxCol = min(colCount - 1, Int(floor((rect.maxX - paintedRect.minX - 0.001) / Self.bandWidth)))
+        let minRow = max(0, Int(floor((rect.minY - paintedRect.minY) / Self.bandHeight)))
+        let maxRow = min(rowCount - 1, Int(floor((rect.maxY - paintedRect.minY - 0.001) / Self.bandHeight)))
         guard minCol <= maxCol, minRow <= maxRow else { return }
         for row in minRow...maxRow {
             for col in minCol...maxCol {
                 let frame = tileFrame(col: col, row: row)
                 guard frame.intersects(rect) else { continue }
                 let band = acquireTile(for: TileKey(col: col, row: row), frame: frame, scale: contentsScale)
-                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true)
+                submitBand(
+                    band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true,
+                    syncDeadline: syncDeadline)
             }
         }
     }
 
     @MainActor
     private func submitBand(
-        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool
+        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool,
+        syncDeadline: CFTimeInterval
     ) {
-        guard !band.isCurrent, drawsNow || !band.isPending else { return }
+        guard !band.isCurrent else { return }
+        let syncForVisibleBlank =
+            !drawsNow && syncDeadline > 0 && band.contents == nil && !visible.isNull
+            && band.frame.intersects(visible) && content.retainedBytes <= Self.syncFallbackMaxRetainedBytes
+            && CACurrentMediaTime() < syncDeadline
+        guard drawsNow || syncForVisibleBlank || !band.isPending else { return }
         let raster = BandRaster(
             content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
             scale: contentsScale, colorSpace: bandColorSpace ?? Self.colorSpace)
-        if drawsNow {
+        if drawsNow || syncForVisibleBlank {
             band.show(BandRasterizer.bitmap(raster), generation: band.generation)
             return
         }
@@ -248,8 +264,7 @@ nonisolated final class RowLayer: CALayer {
         selectedRange = nil
         selectionLayer.isHidden = true
         selectionLayer.path = nil
-        paintedWidth = 0
-        paintedHeight = 0
+        paintedRect = .zero
         colCount = 0
         rowCount = 0
         for band in linearBands { band.release() }
@@ -263,12 +278,12 @@ nonisolated final class RowLayer: CALayer {
     }
 
     private func tileFrame(col: Int, row: Int) -> CGRect {
-        let left = CGFloat(col) * Self.bandWidth
-        let top = CGFloat(row) * Self.bandHeight
+        let left = paintedRect.minX + CGFloat(col) * Self.bandWidth
+        let top = paintedRect.minY + CGFloat(row) * Self.bandHeight
         return CGRect(
             x: left, y: top,
-            width: min(Self.bandWidth, paintedWidth - left),
-            height: min(Self.bandHeight, paintedHeight - top))
+            width: min(Self.bandWidth, paintedRect.maxX - left),
+            height: min(Self.bandHeight, paintedRect.maxY - top))
     }
 
     @MainActor
@@ -293,15 +308,15 @@ nonisolated final class RowLayer: CALayer {
 
     @MainActor
     private func configureBands(
-        height: CGFloat, width: CGFloat, scale: CGFloat, unchangedHeight: CGFloat,
+        bounds: CGRect, scale: CGFloat, unchangedHeight: CGFloat,
         drawn: [(frame: CGRect, bitmap: BandBitmap?)]
     ) {
-        paintedHeight = max(0, height)
-        paintedWidth = max(0, width)
-        if paintedHeight > 0 && paintedWidth > 0 {
-            rowCount = Int(ceil(paintedHeight / Self.bandHeight))
-            colCount = Int(ceil(paintedWidth / Self.bandWidth))
+        if !bounds.isNull, bounds.width > 0, bounds.height > 0 {
+            paintedRect = bounds
+            rowCount = Int(ceil(bounds.height / Self.bandHeight))
+            colCount = Int(ceil(bounds.width / Self.bandWidth))
         } else {
+            paintedRect = .zero
             rowCount = 0
             colCount = 0
         }
@@ -356,8 +371,8 @@ nonisolated final class RowLayer: CALayer {
         // size and new pixels land in the same transaction.
         for item in drawn {
             guard let bitmap = item.bitmap else { continue }
-            let col = Int((item.frame.minX / Self.bandWidth).rounded())
-            let row = Int((item.frame.minY / Self.bandHeight).rounded())
+            let col = Int(((item.frame.minX - paintedRect.minX) / Self.bandWidth).rounded())
+            let row = Int(((item.frame.minY - paintedRect.minY) / Self.bandHeight).rounded())
             guard col >= 0, col < colCount, row >= 0, row < rowCount else { continue }
             let expected = tileFrame(col: col, row: row)
             guard expected == item.frame else { continue }

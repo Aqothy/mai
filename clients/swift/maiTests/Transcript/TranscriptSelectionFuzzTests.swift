@@ -71,6 +71,9 @@ struct TranscriptSelectionFuzzTests {
                     #expect(
                         layout.content.selectableString == RowSelectableText.string(for: request.kind, style: style),
                         "seed \(seed) iteration \(iteration): \(layout.rowID) text differs without its layout")
+                    #expect(
+                        RowSelectableText.utf16Length(for: request.kind) == layout.content.selectableLength,
+                        "seed \(seed) iteration \(iteration): \(layout.rowID) utf16Length differs from layout")
                 }
             }
             controller.setHeights(heights)

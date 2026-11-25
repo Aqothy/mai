@@ -11,8 +11,13 @@ nonisolated struct TranscriptConfiguration: Sendable {
     var drawsOffMain = true
     /// Layout tasks running at once.
     var concurrency = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount - 2))
+    /// Per-frame time budget (seconds) for synchronously preparing visible
+    /// blank rows of normal size when fast scrolling or scrollbar scrubbing
+    /// outruns off-main prefetch. Giant blocks always stay off-main; 0 disables
+    /// synchronous fallback.
+    var syncFallbackBudget: CFTimeInterval = 0.004
 
-    static let testing = TranscriptConfiguration(laysOutRows: false)
+    static let testing = TranscriptConfiguration(laysOutRows: false, syncFallbackBudget: 0)
 
     static var launch: TranscriptConfiguration {
         var configuration = TranscriptConfiguration()

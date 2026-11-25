@@ -202,6 +202,84 @@ struct TranscriptControllerScrollTests {
         #expect(controller.isFollowing)
     }
 
+    /// Opening the keyboard while within the 24 pt near-bottom zone pushes the
+    /// chat up even if a tiny upward finger-lift wiggle stopped `isFollowing`;
+    /// scrolled further up in history, the keyboard overlays without jumping.
+    @Test func keyboardOpeningPinsNearBottomEvenAfterTinyLiftWiggle() {
+        let (controller, host) = make()
+        controller.setRows(rows(tenRows), measuredHeights: uniform(tenRows, 100))
+        // Tiny 2 pt upward wiggle inside the 24 pt near-bottom zone flips
+        // `isFollowing` off while `isEndVisible` stays true.
+        host.readerScroll(toTop: 798)
+        #expect(!controller.isFollowing)
+        #expect(controller.isEndVisible)
+        host.setInsets(top: 0, bottom: 100)
+        #expect(host.viewportTop == 900)
+
+        // Reset insets and scroll well into history (> 24 pt away from end):
+        // opening the keyboard must keep the reader's position instead of jumping.
+        host.setInsets(top: 0, bottom: 0)
+        host.readerScroll(toTop: 300)
+        host.setInsets(top: 0, bottom: 100)
+        #expect(host.viewportTop == 300)
+    }
+
+    /// Bounded-budget sync fallback prepares normal-sized visible blank rows
+    /// synchronously within the deadline while leaving giant (> 8 KB) rows
+    /// strictly off the main thread.
+    @Test func syncFallbackPreparesNormalVisibleRowsAndSkipsGiantRows() {
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 400, height: 300)
+        host.controller = controller
+        controller.attach(host)
+
+        let smallMessage = TranscriptMessage(kind: .assistant, turnID: "t", ref: "small")
+        let giantMessage = TranscriptMessage(kind: .assistant, turnID: "t", ref: "giant")
+        let smallPending = smallMessage.pendingRow(source: "Short reply paragraph.")
+        let giantPending = giantMessage.pendingRow(source: String(repeating: "word ", count: 2_500))
+        let tail = TranscriptRow(
+            id: "tail", sourceID: "tail", kind: .userMessage([.paragraph([MarkdownInline(text: "End")])]))
+        controller.setRows(
+            [smallPending, giantPending, tail],
+            measuredHeights: [smallPending.id: 40, giantPending.id: 100, "tail": 40])
+        controller.storeLayout(RowLayoutBuilder.layout(controller.request(controller.rows[2])))
+        // Simulate already-revealed state at top of transcript.
+        controller.openStarted = ContinuousClock.now.advanced(by: .seconds(-5))
+        controller.alignInitialEndIfPossible()
+        #expect(!controller.isAwaitingInitialEnd)
+        host.readerScroll(toTop: 0)
+
+        controller.prepareVisibleSynchronously(
+            in: CGRect(x: 0, y: 0, width: 400, height: 300), deadline: CACurrentMediaTime() + 0.05)
+        // Small visible pending row parsed and laid out synchronously.
+        #expect(controller.rows.contains { $0.id == "\(smallMessage.id)#0" })
+        #expect(controller.layouts["\(smallMessage.id)#0"] != nil)
+        // Giant > 4 KB pending row stayed untouched for off-main LayoutQueue.
+        #expect(controller.rows.contains { $0.id == giantPending.id })
+
+        // A large Markdown table (metrics.bytes == 0, > 64 cells) must also be
+        // skipped by synchronous fallback, and rows under `topInset` must not
+        // be skipped by step 2's raw-rect conversion.
+        let header = (0..<4).map { [MarkdownInline(text: "H\($0)")] }
+        let tableRows = (0..<40).map { r in (0..<4).map { c in [MarkdownInline(text: "r\(r)c\(c)")] } }
+        let bigTable = TranscriptRow(
+            id: "big-table", sourceID: "big-table",
+            kind: .markdownBlock(
+                .table(MarkdownTable(alignments: [.leading, .leading, .leading, .leading], header: header, rows: tableRows)),
+                .single))
+        let underNav = TranscriptRow(
+            id: "under-nav", sourceID: "under-nav",
+            kind: .markdownBlock(.paragraph([MarkdownInline(text: "Visible under nav bar")]), .single))
+        host.setInsets(top: 60, bottom: 0)
+        controller.setRows([underNav, bigTable], measuredHeights: ["under-nav": 40, "big-table": 400])
+        host.readerScroll(toOffset: 0)
+        controller.prepareVisibleSynchronously(
+            in: CGRect(x: 0, y: 0, width: 400, height: 300), deadline: CACurrentMediaTime() + 0.05)
+        #expect(controller.layouts["under-nav"] != nil)
+        #expect(controller.layouts["big-table"] == nil)
+    }
+
     // MARK: Rule 5: end visibility from the same pass
 
     @Test func endVisibilityIsCurrentAfterEveryPass() {
@@ -622,7 +700,7 @@ struct TranscriptControllerScrollTests {
     @Test func staleNonReplacingSubmitDoesNotOverwriteNewerGeneration() async throws {
         let delivered = Mutex<[RowLayoutKey]>([])
         let queue = LayoutQueue(concurrency: 1) { result in
-            if case .layout(let layout) = result {
+            if case .layout(let layout, _) = result {
                 delivered.withLock { $0.append(layout.key) }
             }
         }

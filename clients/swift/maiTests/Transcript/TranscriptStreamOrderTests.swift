@@ -48,7 +48,8 @@ struct TranscriptStreamOrderTests {
         let bands = layer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
         #expect(!bands.isEmpty)
         #expect(bands.allSatisfy { $0.isCurrent && $0.contents != nil })
-        #expect(bands.map(\.frame) == RowLayer.bandFrames(height: after.height, width: 400))
+        let expectedBounds = after.content.paintedBounds(drawsWideBody: true, rowWidth: 400, rowHeight: after.height)
+        #expect(bands.map(\.frame) == RowLayer.bandFrames(in: expectedBounds))
     }
 
     @Test func bandsDrawnWithAnotherPaletteAreNotShown() {
@@ -199,7 +200,7 @@ struct TranscriptStreamOrderTests {
         var accessoryOrigins: [String: CGPoint] = [:]
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?
+            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
         ) { wideOrigins[rowID] = origin }
         func removeWideBlock(rowID: String) { wideOrigins[rowID] = nil }
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {}

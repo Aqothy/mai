@@ -35,7 +35,7 @@
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
             colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect,
-            horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?
+            horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?, syncDeadline: CFTimeInterval = 0
         ) {
             let height = body.frame.height
             let layout = RowLayout(rowID: rowID, key: key, height: height, content: body.content)
@@ -48,7 +48,7 @@
             lastVisibleY = visible
             lastContentWidth = body.contentWidth
             lastDrawsOffMain = drawsOffMain
-            updateTiles(horizontalVisible: horizontalVisible)
+            updateTiles(horizontalVisible: horizontalVisible, syncDeadline: syncDeadline)
         }
 
         /// Rasterizes newly exposed horizontal tiles and releases far ones as
@@ -65,10 +65,10 @@
                 needsUpdate = true
             }
             guard needsUpdate else { return }
-            updateTiles(horizontalVisible: horizontalVisible)
+            updateTiles(horizontalVisible: horizontalVisible, syncDeadline: 0)
         }
 
-        private func updateTiles(horizontalVisible: ClosedRange<CGFloat>) {
+        private func updateTiles(horizontalVisible: ClosedRange<CGFloat>, syncDeadline: CFTimeInterval) {
             let overscan = RowLayer.bandWidth
             let drawMinX = max(0, horizontalVisible.lowerBound - overscan)
             let drawMaxX = min(lastContentWidth, horizontalVisible.upperBound + overscan)
@@ -85,7 +85,8 @@
                     x: horizontalVisible.lowerBound, y: lastVisibleY.minY,
                     width: max(0, horizontalVisible.upperBound - horizontalVisible.lowerBound),
                     height: lastVisibleY.height)
-            row.drawBands(in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain)
+            row.drawBands(
+                in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain, syncDeadline: syncDeadline)
             let releaseMarginY = lastVisibleY.isNull ? 512 : max(512, lastVisibleY.height)
             row.releaseBands(outside: drawRect.insetBy(dx: -RowLayer.bandWidth, dy: -releaseMarginY))
         }
