@@ -62,8 +62,7 @@ nonisolated struct CodeLayout: Sendable {
             let utf16 = code.utf16
             if resumeUTF16 > 0, resumeUTF16 < utf16.count {
                 let startIdx = utf16.index(utf16.startIndex, offsetBy: resumeUTF16)
-                let suffixText = AttributedTextBuilder.plain(
-                    String(code[startIdx...]), role: .code, color: .primary, style: style)
+                let suffixText = buildStyledCode(String(code[startIdx...]), colors: nil, style: style)
                 incremental = TextLayoutEngine.layoutSuffix(
                     fullString: code, suffix: suffixText, width: .greatestFiniteMagnitude,
                     options: bodyOptions, appendingTo: previous.body, keepCount: keepCount)
@@ -110,26 +109,27 @@ nonisolated struct CodeLayout: Sendable {
         var text = StyledText()
         text.paragraphs = [StyledParagraph(start: 0, firstLineIndent: 0, headIndent: 0, spacingBefore: 0, quoteBars: [])]
         let font = style.font(.code)
-        guard let runs = colors?.runs, !runs.isEmpty else {
+        if let runs = colors?.runs, !runs.isEmpty {
+            let utf16 = code.utf16
+            let total = utf16.count
+            var cursorOffset = 0
+            var cursorIndex = utf16.startIndex
+            func appendSlice(upTo target: Int, style runStyle: TextRunStyle) {
+                guard target > cursorOffset else { return }
+                let end = utf16.index(cursorIndex, offsetBy: target - cursorOffset)
+                text.append(String(code[cursorIndex..<end]), font: font, style: runStyle)
+                cursorOffset = target
+                cursorIndex = end
+            }
+            for run in runs where run.range.lowerBound >= cursorOffset && run.range.upperBound <= total {
+                appendSlice(upTo: run.range.lowerBound, style: TextRunStyle())
+                appendSlice(upTo: run.range.upperBound, style: TextRunStyle(color: run.color))
+            }
+            appendSlice(upTo: total, style: TextRunStyle())
+        } else {
             text.append(code, font: font, style: TextRunStyle())
-            return text
         }
-        let utf16 = code.utf16
-        let total = utf16.count
-        var cursorOffset = 0
-        var cursorIndex = utf16.startIndex
-        func appendSlice(upTo target: Int, style runStyle: TextRunStyle) {
-            guard target > cursorOffset else { return }
-            let end = utf16.index(cursorIndex, offsetBy: target - cursorOffset)
-            text.append(String(code[cursorIndex..<end]), font: font, style: runStyle)
-            cursorOffset = target
-            cursorIndex = end
-        }
-        for run in runs where run.range.lowerBound >= cursorOffset && run.range.upperBound <= total {
-            appendSlice(upTo: run.range.lowerBound, style: TextRunStyle())
-            appendSlice(upTo: run.range.upperBound, style: TextRunStyle(color: run.color))
-        }
-        appendSlice(upTo: total, style: TextRunStyle())
+        text.setTabInterval(style.codeTabInterval, in: NSRange(location: 0, length: text.length))
         return text
     }
 

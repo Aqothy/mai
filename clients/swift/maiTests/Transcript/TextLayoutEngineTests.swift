@@ -303,4 +303,30 @@ struct TextLayoutEngineTests {
             Issue.record("expected text layouts")
         }
     }
+
+    /// Tabs in code stop every 4 columns, on the code font's grid, so
+    /// tab-indented code lines up with space-indented code, in a code block
+    /// (streamed or whole) and in one nested in a list.
+    @Test func codeTabsStopEveryFourColumns() {
+        let column = style.codeColumnWidth
+        let code = "\tx\n    x\nab\tx\nabcd\tx\nabcde\t\tx\nlast"
+        let whole = CodeLayout.make(code: code, language: nil, colors: nil, width: 600, style: style)
+        let streamed = CodeLayout.make(
+            code: code + " line", language: nil, colors: nil, width: 600, style: style, previous: whole)
+        let nested = layout(
+            [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.code(language: nil, code: code)])]))],
+            width: 600)
+        let nestedStart = (nested.string as NSString).range(of: "\tx").location
+        for (name, body, start) in [("whole", whole.body, 0), ("streamed", streamed.body, 0), ("nested", nested, nestedStart)] {
+            let lines = body.lines.filter { $0.range.lowerBound >= start }
+            // The caret before each line's `x`, from the line's first caret.
+            func xCaret(_ line: TextLine) -> CGFloat {
+                let offset = ((body.string as NSString).range(of: "x", range: NSRange(line.range)).location) - line.range.lowerBound
+                return line.caretOffsets[offset] - line.caretOffsets[0]
+            }
+            let expected: [CGFloat] = [4, 4, 4, 8, 12].map { $0 * column }
+            let actual = lines.prefix(5).map(xCaret)
+            #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 0.01 }, "\(name): \(actual) vs \(expected)")
+        }
+    }
 }

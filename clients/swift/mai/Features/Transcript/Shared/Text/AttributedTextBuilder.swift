@@ -109,7 +109,9 @@ nonisolated struct AttributedTextBuilder {
             append(inlines, Inline(role: style.headingRole(level: level), bold: true))
         case .code(_, let code):
             beginParagraph(environment)
+            let start = text.length
             appendRun(code, font: style.font(.code), style: TextRunStyle())
+            text.setTabInterval(style.codeTabInterval, in: NSRange(location: start, length: text.length - start))
         case .table(let table):
             appendNested(table, environment: environment)
         case .rule(let spelling):

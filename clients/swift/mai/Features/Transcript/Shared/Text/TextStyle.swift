@@ -68,6 +68,12 @@ nonisolated struct TextStyle: Sendable {
     /// per character.
     let codeColumnWidth: CGFloat
 
+    /// Code's tab stops: every 4 columns (VS Code's default; browsers use
+    /// 8), on the column grid. Core Text's default, twelve stops 28 pt apart,
+    /// is off the grid (3.77 columns at 13 pt) and gives a tab past 336 pt
+    /// no width.
+    var codeTabInterval: CGFloat { 4 * codeColumnWidth }
+
     init(version: Int, baseFont: (FontRole) -> CTFont) {
         self.version = version
         var fonts: [TranscriptFont] = []

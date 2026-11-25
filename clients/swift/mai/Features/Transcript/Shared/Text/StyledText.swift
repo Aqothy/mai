@@ -46,6 +46,25 @@ nonisolated struct StyledText {
                 ]))
     }
 
+    /// Tab stops every `interval` points across `range`, in place of Core
+    /// Text's default twelve stops 28 pt apart.
+    mutating func setTabInterval(_ interval: CGFloat, in range: NSRange) {
+        guard range.length > 0 else { return }
+        let stops = [] as CFArray
+        let paragraphStyle = withUnsafePointer(to: stops) { stops in
+            withUnsafePointer(to: interval) { interval in
+                let settings = [
+                    CTParagraphStyleSetting(spec: .tabStops, valueSize: MemoryLayout<CFArray>.size, value: stops),
+                    CTParagraphStyleSetting(
+                        spec: .defaultTabInterval, valueSize: MemoryLayout<CGFloat>.size, value: interval),
+                ]
+                return CTParagraphStyleCreate(settings, settings.count)
+            }
+        }
+        string.addAttribute(
+            NSAttributedString.Key(kCTParagraphStyleAttributeName as String), value: paragraphStyle, range: range)
+    }
+
     mutating func link(_ url: URL) -> Int {
         if let existing = linkIndices[url] { return existing }
         let index = links.count

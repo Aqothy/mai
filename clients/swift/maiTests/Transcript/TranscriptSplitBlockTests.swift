@@ -25,12 +25,13 @@ struct TranscriptSplitBlockTests {
 
     /// Every chunk scrolls over one width, so all are wide or none: exactly
     /// the unsplit block's when its widest line is in the code font's own
-    /// glyphs (ASCII, box drawing, arrows, quotes), and not narrower when it
-    /// is CJK (counted two columns an ideograph).
+    /// glyphs (ASCII, box drawing, arrows, quotes, tabs), and not narrower
+    /// when it is CJK (counted two columns an ideograph).
     @Test func chunksOfASplitCodeBlockShareItsWidth() {
         for (widest, isCodeFont) in [
             ("let wide = \"" + String(repeating: "w", count: 300) + "\"", true),
             ("│   ├── “" + String(repeating: "→", count: 40) + "” — …", true),
+            ("\t\tlet value = compute(input)\t// tabbed", true),
             (String(repeating: "漢字", count: 60), false),
         ] {
             var lines = (0..<450).map { "let value\($0) = compute(\($0))" }
