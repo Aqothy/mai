@@ -168,46 +168,43 @@ nonisolated final class RowLayer: CALayer {
     /// their current bitmap: always off the main thread when `offMain` is on,
     /// nearest to `visible` first, each keeping what it shows until its new
     /// bitmap lands. Only `!offMain` (debug benchmark flag) draws
-    /// synchronously. Returns how many were drawn now.
+    /// synchronously.
     @MainActor
-    @discardableResult
-    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool) -> Int {
-        guard let palette, colCount > 0, rowCount > 0, !rect.isNull, !rect.isEmpty else { return 0 }
+    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool) {
+        guard let palette, colCount > 0, rowCount > 0, !rect.isNull, !rect.isEmpty else { return }
         let drawsNow = !offMain
-        var drawnNow = 0
         if !isSparseGrid {
             for band in linearBands where !band.isCurrent && band.frame.intersects(rect) {
-                drawnNow += submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false)
+                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false)
             }
-            return drawnNow
+            return
         }
         let minCol = max(0, Int(floor(rect.minX / Self.bandWidth)))
         let maxCol = min(colCount - 1, Int(floor((rect.maxX - 0.001) / Self.bandWidth)))
         let minRow = max(0, Int(floor(rect.minY / Self.bandHeight)))
         let maxRow = min(rowCount - 1, Int(floor((rect.maxY - 0.001) / Self.bandHeight)))
-        guard minCol <= maxCol, minRow <= maxRow else { return 0 }
+        guard minCol <= maxCol, minRow <= maxRow else { return }
         for row in minRow...maxRow {
             for col in minCol...maxCol {
                 let frame = tileFrame(col: col, row: row)
                 guard frame.intersects(rect) else { continue }
                 let band = acquireTile(for: TileKey(col: col, row: row), frame: frame, scale: contentsScale)
-                drawnNow += submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true)
+                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true)
             }
         }
-        return drawnNow
     }
 
     @MainActor
     private func submitBand(
         _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool
-    ) -> Int {
-        guard !band.isCurrent, drawsNow || !band.isPending else { return 0 }
+    ) {
+        guard !band.isCurrent, drawsNow || !band.isPending else { return }
         let raster = BandRaster(
             content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
             scale: contentsScale, colorSpace: bandColorSpace ?? Self.colorSpace)
         if drawsNow {
             band.show(BandRasterizer.bitmap(raster), generation: band.generation)
-            return 1
+            return
         }
         let distance: CGFloat
         if visible.isNull {
@@ -218,7 +215,6 @@ nonisolated final class RowLayer: CALayer {
             distance = dx + dy
         }
         RasterQueue.shared.submit(band, raster: raster, priority: distance)
-        return 0
     }
 
     /// Releases bitmaps of bands far from `rect` (row coordinates), and

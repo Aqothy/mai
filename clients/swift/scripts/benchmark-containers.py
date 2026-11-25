@@ -59,12 +59,8 @@ def print_summary(root: pathlib.Path):
         kind = sample.get("measurementKind", "")
         if "averageFPS" in sample:
             extra = ""
-            if "syncFallbackDraws" in sample:
-                extra += f" | syncDraws {med(reports, 'syncFallbackDraws'):.0f}"
-            if "syncLayouts" in sample:
-                extra += f" syncLayouts {med(reports, 'syncLayouts'):.0f}"
             if "misplacedRows" in sample:
-                extra += f" misplaced {max(r.get('misplacedRows', 0) for r in reports)}"
+                extra += f" | misplaced {max(r.get('misplacedRows', 0) for r in reports)}"
             print(
                 f"  {label:24s} n={len(reports)} fps {med(reports, 'averageFPS'):5.1f}"
                 f" hitches {med(reports, 'hitchCount'):3.0f}"

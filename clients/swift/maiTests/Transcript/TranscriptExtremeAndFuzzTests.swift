@@ -220,11 +220,9 @@ struct TranscriptExtremeAndFuzzTests {
 
         // Draw only a viewport window at x = 50,000 (simulating scrolled-right wide code).
         let drawRect = CGRect(x: 50_000, y: 0, width: 1_400, height: wide.frame.height)
-        let drawnNow = rowLayer.drawBands(in: drawRect, visible: drawRect, offMain: false)
-        #expect(drawnNow >= 2 && drawnNow <= 4)
-
+        rowLayer.drawBands(in: drawRect, visible: drawRect, offMain: false)
         let mountedBands = rowLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
-        #expect(mountedBands.count == drawnNow)
+        #expect((2...4).contains(mountedBands.count))
         for band in mountedBands {
             #expect(band.frame.width <= RowLayer.bandWidth)
             #expect(band.frame.height <= RowLayer.bandHeight)

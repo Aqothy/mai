@@ -50,14 +50,8 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     let framesOver120HzBudget: Int
     /// Frames whose main-thread work alone exceeds one 60 Hz refresh.
     let framesOver60HzBudget: Int
-    /// The new transcript's rows drawn on screen instead of ahead of it, and
-    /// visible rows laid out on the main thread, during the pass (PLAN D3).
-    /// Nil for the old transcript.
-    var syncFallbackDraws: Int?
-    var syncLayouts: Int?
-    var arrivalDraws: Int?
     /// Visible rows placed at another height than their layout's (overlap or
-    /// gap); 0 when correct.
+    /// gap); 0 when correct. Nil for the old transcript.
     var misplacedRows: Int?
 
     var summary: String {
@@ -302,15 +296,9 @@ final class ChatBenchmarkModel {
     )
 
     private(set) var isRunning = false
-    @ObservationIgnored private var fallbackDrawsAtStart = 0
-    @ObservationIgnored private var syncLayoutsAtStart = 0
-    @ObservationIgnored private var arrivalDrawsAtStart = 0
     @ObservationIgnored private var misplacedRowsAtStart = 0
 
     private func noteStart(_ label: String) {
-        fallbackDrawsAtStart = TranscriptDebugCounters.syncFallbackDraws
-        syncLayoutsAtStart = TranscriptDebugCounters.syncLayouts
-        arrivalDrawsAtStart = TranscriptDebugCounters.arrivalDraws
         misplacedRowsAtStart = TranscriptDebugCounters.misplacedRows
         Self.note("benchmark start: \(label)")
     }
@@ -577,9 +565,6 @@ final class ChatBenchmarkModel {
     ) -> ChatFramePacingReport? {
         guard var report = monitor.stop(label: label) else { return nil }
         if TranscriptEngine.isNewEngineEnabled {
-            report.syncFallbackDraws = TranscriptDebugCounters.syncFallbackDraws - fallbackDrawsAtStart
-            report.syncLayouts = TranscriptDebugCounters.syncLayouts - syncLayoutsAtStart
-            report.arrivalDraws = TranscriptDebugCounters.arrivalDraws - arrivalDrawsAtStart
             report.misplacedRows = TranscriptDebugCounters.misplacedRows - misplacedRowsAtStart
         }
         Self.logger.notice("\(report.summary, privacy: .public)")
