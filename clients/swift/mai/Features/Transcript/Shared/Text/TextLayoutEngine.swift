@@ -67,6 +67,22 @@ nonisolated enum TextLayoutEngine {
         }
         let resumeLine = previous.lines[keepCount]
         let resumeUTF16 = resumeLine.range.lowerBound
+        // `paragraphIsRTL` (UAX #9 P2/P3) depends on the paragraph's start, not
+        // the suffix slice. Keep incremental layout only when the kept prefix
+        // already settled LTR; neutral or RTL prefixes fall back to one-shot.
+        var decidedLTR = false
+        var scanned = 0
+        for unit in previous.string.utf16 {
+            if scanned >= resumeUTF16 { break }
+            scanned += 1
+            if let direction = strongDirection(of: unit) {
+                guard direction == .ltr else { return nil }
+                decidedLTR = true
+                break
+            }
+        }
+        guard decidedLTR else { return nil }
+
         let suffixNS = suffix.string.mutableString
         let paragraph = suffix.paragraphs.first
         let lastKept = previous.lines[keepCount - 1]
@@ -82,7 +98,8 @@ nonisolated enum TextLayoutEngine {
             initialY: keptY,
             initialWidth: previous.lines[..<keepCount].reduce(CGFloat(0)) { max($0, $1.x + $1.width) },
             previousQuoteBars: paragraph?.quoteBars ?? [],
-            utf16BaseOffset: resumeUTF16)
+            utf16BaseOffset: resumeUTF16,
+            overrideParagraphIsRTL: false)
 
         layoutWindows(
             attributedString: suffix.string, nsString: suffixNS, length: suffixLength,
@@ -94,22 +111,23 @@ nonisolated enum TextLayoutEngine {
 
     /// Whether `index` starts a cluster, as carets, hit tests and selection
     /// edges take them: Apple's composed character sequence there starts at
-    /// `index` (asked per offset, as `NSTextView` does), or a line ends just
-    /// before it. A cluster always ends at a line terminator (UAX #29 GB4),
-    /// where Apple's runs on into a combining mark starting the next line,
-    /// which a typesetter window starting there cannot see.
+    /// `index` (asked per offset, as `NSTextView` does), or a control/line
+    /// break ends just before it. A cluster always ends at UAX #29 GB4
+    /// (`Control | CR | LF`), where Apple's runs on into a following combining
+    /// mark or ZWJ (for example `\t` + U+0301 or `\n` + combining mark), while
+    /// Core Text breaks there.
     static func startsCluster(_ string: NSString, at index: Int) -> Bool {
-        index == 0 || endsLine(string.character(at: index - 1))
+        index == 0 || endsCluster(string.character(at: index - 1))
             || CFStringGetRangeOfComposedCharactersAtIndex(string, index).location == index
     }
 
     /// The cluster containing `index` (Apple's composed character sequence,
-    /// clipped at line terminators so it agrees with `startsCluster`).
+    /// clipped at GB4 cluster-ending controls so it agrees with `startsCluster`).
     static func clusterRange(in string: NSString, at index: Int) -> NSRange {
         guard index >= 0, index < string.length else { return NSRange(location: index, length: 0) }
-        if endsLine(string.character(at: index)) { return NSRange(location: index, length: 1) }
+        if endsCluster(string.character(at: index)) { return NSRange(location: index, length: 1) }
         var range = string.rangeOfComposedCharacterSequence(at: index)
-        while range.location < index, endsLine(string.character(at: range.location)) {
+        while range.location < index, endsCluster(string.character(at: range.location)) {
             range.location += 1
             range.length -= 1
         }
@@ -117,7 +135,7 @@ nonisolated enum TextLayoutEngine {
     }
 
     /// The smallest cluster-aligned range covering `range` (never crossing a
-    /// line terminator before `range`).
+    /// line terminator or control character before `range`).
     static func clusterRange(in string: NSString, for range: NSRange) -> NSRange {
         guard range.length > 0 else { return range }
         let start = clusterRange(in: string, at: range.location).location
@@ -131,6 +149,12 @@ nonisolated enum TextLayoutEngine {
         case 0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029: true
         default: false
         }
+    }
+
+    /// Characters that always end a grapheme cluster (UAX #29 GB4: C0/C1
+    /// controls including `\t`, CR, LF, and line/paragraph separators).
+    static func endsCluster(_ unit: unichar) -> Bool {
+        unit < 0x20 || (unit >= 0x7F && unit <= 0x9F) || unit == 0x2028 || unit == 0x2029
     }
 
     /// Letters ICU breaks lines between by dictionary (UAX #14 class SA):
@@ -160,6 +184,38 @@ nonisolated enum TextLayoutEngine {
         return false
     }
 
+    private enum StrongDirection { case ltr, rtl }
+
+    /// Classifies a UTF-16 code unit for UAX #9 P2/P3 (`dir="auto"`): returns
+    /// `.ltr` on line breaks or strong LTR characters, `.rtl` on strong RTL
+    /// letters/marks/astral surrogates, and `nil` on weak/neutral units.
+    @inline(__always)
+    private static func strongDirection(of unit: unichar) -> StrongDirection? {
+        if endsLine(unit) { return .ltr }
+        if (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A) { return .ltr }
+        if unit >= 0x0590 {
+            if unit == 0x061C || unit == 0x200F
+                || unit == 0xD802 || unit == 0xD803 || unit == 0xD83A || unit == 0xD83B
+                || (unit >= 0xFB1D && unit <= 0xFDFF) || (unit >= 0xFE70 && unit <= 0xFEFC)
+            {
+                return .rtl
+            }
+            if unit <= 0x08FF {
+                // Excludes weak Arabic-Indic digits (0660..0669, 06F0..06F9),
+                // punctuation, and combining marks while catching all strong
+                // Hebrew/Arabic/Syriac/Thaana/NKo/Mandaic letters.
+                if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return .rtl }
+            } else if unit == 0x200E {
+                return .ltr
+            } else if !isBiDiCodeUnit(unit) {
+                if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return .ltr }
+            }
+        } else if unit >= 0x00C0, let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
+            return .ltr
+        }
+        return nil
+    }
+
     /// UAX #9 P2/P3 (`dir="auto"`): true when the paragraph starting at
     /// `start` has a strong right-to-left character before any strong
     /// left-to-right character. O(1) on normal LTR text (first ASCII letter
@@ -168,28 +224,8 @@ nonisolated enum TextLayoutEngine {
         let length = string.length
         var index = max(0, start)
         while index < length {
-            let unit = string.character(at: index)
-            if endsLine(unit) { return false }
-            if (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A) { return false }
-            if unit >= 0x0590 {
-                if unit == 0x061C || unit == 0x200F
-                    || unit == 0xD802 || unit == 0xD803 || unit == 0xD83A || unit == 0xD83B
-                    || (unit >= 0xFB1D && unit <= 0xFDFF) || (unit >= 0xFE70 && unit <= 0xFEFC)
-                {
-                    return true
-                }
-                if unit <= 0x08FF {
-                    // Excludes weak Arabic-Indic digits (0660..0669, 06F0..06F9),
-                    // punctuation, and combining marks while catching all strong
-                    // Hebrew/Arabic/Syriac/Thaana/NKo/Mandaic letters.
-                    if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return true }
-                } else if unit == 0x200E {
-                    return false
-                } else if !isBiDiCodeUnit(unit) {
-                    if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return false }
-                }
-            } else if unit >= 0x00C0, let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
-                return false
+            if let direction = strongDirection(of: string.character(at: index)) {
+                return direction == .rtl
             }
             index += 1
         }
@@ -380,6 +416,9 @@ nonisolated enum TextLayoutEngine {
         /// Where `nsString` starts in the layout's text: a suffix laid out
         /// after kept lines (incremental layout) ranges from there.
         let utf16BaseOffset: Int
+        /// Fixed paragraph direction for incremental suffix layout, where
+        /// `nsString` starts mid-paragraph.
+        let overrideParagraphIsRTL: Bool?
         var lines: [TextLine]
         var runs: [TextGlyphRun]
         var decorations: [TextDecoration]
@@ -392,13 +431,14 @@ nonisolated enum TextLayoutEngine {
             text: StyledText, nsString: NSString, options: Options, availableWidth: CGFloat,
             initialLines: [TextLine] = [], initialRuns: [TextGlyphRun] = [],
             initialDecorations: [TextDecoration] = [], initialY: CGFloat = 0, initialWidth: CGFloat = 0,
-            previousQuoteBars: [CGFloat] = [], utf16BaseOffset: Int = 0
+            previousQuoteBars: [CGFloat] = [], utf16BaseOffset: Int = 0, overrideParagraphIsRTL: Bool? = nil
         ) {
             self.text = text
             self.nsString = nsString
             self.options = options
             self.availableWidth = availableWidth
             self.utf16BaseOffset = utf16BaseOffset
+            self.overrideParagraphIsRTL = overrideParagraphIsRTL
             lines = initialLines
             runs = initialRuns
             decorations = initialDecorations
@@ -430,8 +470,9 @@ nonisolated enum TextLayoutEngine {
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let paragraphStart = paragraph?.start ?? 0
             let isRTL =
-                options.wraps && options.alignsRTLToWidth && availableWidth.isFinite
-                && TextLayoutEngine.paragraphIsRTL(nsString, startingAt: paragraphStart)
+                overrideParagraphIsRTL
+                ?? (options.wraps && options.alignsRTLToWidth && availableWidth.isFinite
+                    && TextLayoutEngine.paragraphIsRTL(nsString, startingAt: paragraphStart))
             let lineX = TextLayoutEngine.lineOriginX(
                 indent: indent, lineWidth: lineWidth, availableWidth: availableWidth, isRTL: isRTL)
             let firstRun = runs.count

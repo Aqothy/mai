@@ -15,14 +15,21 @@ nonisolated enum RowContentDiff {
             return oldOrigin.y + unchangedHeight(before, after)
         case (.code(let before, let oldFrame), .code(let after, let newFrame))
         where oldFrame.origin == newFrame.origin
+            && before.bodyOrigin == after.bodyOrigin
+            && (oldFrame.width == newFrame.width
+                || (before.bodyOrigin.x + before.body.size.width <= min(oldFrame.width, newFrame.width)
+                    && before.bodyOrigin.x + before.label.size.width <= min(oldFrame.width, newFrame.width)))
             && before.colorsAreDark == after.colorsAreDark && before.headerHeight == after.headerHeight
             && before.labelTop == after.labelTop && unchangedHeight(before.label, after.label) == .infinity:
-            return oldFrame.minY + before.bodyOrigin.y + unchangedHeight(before.body, after.body)
+            let bodyY = oldFrame.minY + before.bodyOrigin.y + unchangedHeight(before.body, after.body)
+            return oldFrame.height == newFrame.height ? bodyY : min(bodyY, min(oldFrame.maxY, newFrame.maxY))
         case (.codeBody(let before), .codeBody(let after))
         where before.bodyOrigin == after.bodyOrigin && before.colorsAreDark == after.colorsAreDark:
             return unchangedHeight(before.body, after.body)
         case (.table(let before, let oldFrame), .table(let after, let newFrame))
-        where oldFrame.origin == newFrame.origin && before.toolbarHeight == after.toolbarHeight:
+        where oldFrame.origin == newFrame.origin
+            && (oldFrame.width == newFrame.width || before.gridSize.width <= min(oldFrame.width, newFrame.width))
+            && before.toolbarHeight == after.toolbarHeight:
             return oldFrame.minY + before.toolbarHeight + unchangedTableHeight(before, after)
         case (.tableBody(let before), .tableBody(let after)):
             return unchangedTableHeight(before, after)
@@ -42,8 +49,8 @@ nonisolated enum RowContentDiff {
         for index in 0..<shared {
             let old = before.lines[index]
             let new = after.lines[index]
-            guard old.top == new.top, old.height == new.height, old.range == new.range, old.x == new.x,
-                old.width == new.width, sameRuns(before, old.runs, after, new.runs)
+            guard old.top == new.top, old.baseline == new.baseline, old.height == new.height, old.range == new.range,
+                old.x == new.x, old.width == new.width, sameRuns(before, old.runs, after, new.runs)
             else { return min(old.top, new.top) }
         }
         if before.lines.count == after.lines.count { return .infinity }
@@ -52,36 +59,59 @@ nonisolated enum RowContentDiff {
 
     private static func unchangedDecorationsHeight(_ before: [TextDecoration], _ after: [TextDecoration]) -> CGFloat {
         let shared = min(before.count, after.count)
+        var diffIndex = shared
         for index in 0..<shared {
             let old = before[index]
             let new = after[index]
-            guard old.kind == new.kind, old.rect == new.rect, old.color == new.color else {
-                return max(0, min(old.rect.minY, new.rect.minY))
+            if old.kind != new.kind || old.rect != new.rect || old.color != new.color {
+                diffIndex = index
+                break
             }
         }
-        if before.count == after.count { return .infinity }
-        let extra = shared < before.count ? before[shared] : after[shared]
-        return max(0, extra.rect.minY)
+        if diffIndex == shared, before.count == after.count { return .infinity }
+        // Decorations on a line are not ordered by `rect.minY` (for example,
+        // an underline near the baseline precedes a later run's
+        // `inlineCodeBackground` or a paragraph `quoteBar` that extends above
+        // `line.top`). Take the earliest `minY` across all differing/extra ones.
+        var lowest = CGFloat.infinity
+        for index in diffIndex..<before.count { lowest = min(lowest, before[index].rect.minY) }
+        for index in diffIndex..<after.count { lowest = min(lowest, after[index].rect.minY) }
+        return max(0, lowest)
     }
 
     private static func unchangedTableHeight(_ before: TableLayout, _ after: TableLayout) -> CGFloat {
         guard before.gridSize.width == after.gridSize.width else { return 0 }
+        var lowest = CGFloat.infinity
         let shared = min(before.cells.count, after.cells.count)
         for index in 0..<shared {
             let old = before.cells[index]
             let new = after.cells[index]
-            guard old.row == new.row, old.column == new.column, old.origin == new.origin, old.box == new.box,
-                unchangedHeight(old.layout, new.layout) == .infinity
-            else { return min(old.box.minY, new.box.minY) }
+            if old.row != new.row || old.column != new.column || old.origin != new.origin || old.box != new.box
+                || unchangedHeight(old.layout, new.layout) != .infinity
+            {
+                lowest = min(lowest, min(old.box.minY, new.box.minY))
+                break
+            }
         }
-        if before.cells.count == after.cells.count, before.dividers == after.dividers { return .infinity }
-        let dividerIndex = min(before.dividers.count, after.dividers.count)
-        for index in 0..<dividerIndex where before.dividers[index] != after.dividers[index] {
-            return min(before.dividers[index].minY, after.dividers[index].minY)
+        if lowest == .infinity {
+            if shared < before.cells.count { lowest = min(lowest, before.cells[shared].box.minY) }
+            if shared < after.cells.count { lowest = min(lowest, after.cells[shared].box.minY) }
         }
-        if shared < before.cells.count { return before.cells[shared].box.minY }
-        if shared < after.cells.count { return after.cells[shared].box.minY }
-        return min(before.gridSize.height, after.gridSize.height)
+        let sharedDividers = min(before.dividers.count, after.dividers.count)
+        var dividerDiff = sharedDividers
+        for index in 0..<sharedDividers where before.dividers[index] != after.dividers[index] {
+            dividerDiff = index
+            break
+        }
+        if dividerDiff < sharedDividers || before.dividers.count != after.dividers.count {
+            // `RowPainter.drawGrid` rounds hairline divider y onto the pixel grid.
+            for index in dividerDiff..<before.dividers.count { lowest = min(lowest, before.dividers[index].minY - 1) }
+            for index in dividerDiff..<after.dividers.count { lowest = min(lowest, after.dividers[index].minY - 1) }
+        }
+        if before.gridSize.height != after.gridSize.height {
+            lowest = min(lowest, min(before.gridSize.height, after.gridSize.height))
+        }
+        return lowest == .infinity ? .infinity : max(0, lowest)
     }
 
     private static func sameRuns(_ a: TextLayout, _ aRuns: Range<Int>, _ b: TextLayout, _ bRuns: Range<Int>) -> Bool {

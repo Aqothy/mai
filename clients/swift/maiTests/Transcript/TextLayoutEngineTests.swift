@@ -467,4 +467,72 @@ struct TextLayoutEngineTests {
         #expect(TextLayoutEngine.paragraphIsRTL("\u{061C}hello" as NSString, startingAt: 0))
         #expect(TextLayoutEngine.paragraphIsRTL("123 مرحبا" as NSString, startingAt: 0))
     }
+
+    /// UAX #29 GB4: `\t` and other C0/C1 controls always end a grapheme cluster
+    /// even when followed by a combining mark or ZWJ (Apple's
+    /// `rangeOfComposedCharacterSequence` merges them, while Core Text breaks).
+    @Test func tabBeforeCombiningMarkOrZWJEndsCluster() {
+        for sample in ["a\t\u{0301}b", "a\t\u{200D}b"] {
+            let ns = sample as NSString
+            #expect(TextLayoutEngine.startsCluster(ns, at: 1))
+            #expect(TextLayoutEngine.startsCluster(ns, at: 2))
+            #expect(TextLayoutEngine.clusterRange(in: ns, at: 1) == NSRange(location: 1, length: 1))
+            #expect(TextLayoutEngine.clusterRange(in: ns, at: 2) == NSRange(location: 2, length: 1))
+            let laid = layout([.paragraph([MarkdownInline(text: sample)])], width: 200)
+            #expect(TranscriptFuzz.caretInsideCluster(laid) == nil)
+        }
+    }
+
+    /// Incremental suffix layout keeps the full paragraph's UAX #9 direction
+    /// when line 2 begins with an invisible RTL mark (`U+200F`/`U+061C`) or
+    /// when lines 0..1 were neutral before an RTL suffix.
+    @Test func incrementalParagraphSuffixPreservesParagraphDirection() {
+        let pos = TranscriptBlockPosition(isFirst: true, isLast: true)
+        let key = RowLayoutKey(contentVersion: 0, width: 260, styleVersion: style.version)
+        let prefix1 = "Line one of English text that wraps cleanly. Line two of English text that wraps cleanly too. "
+        let inlines1 = [MarkdownInline(text: prefix1 + "tail")]
+        let inlines2 = [MarkdownInline(text: prefix1 + "\u{200F}tail more words")]
+        let kind1 = TranscriptRowKind.markdownBlock(.paragraph(inlines1), pos)
+        let kind2 = TranscriptRowKind.markdownBlock(.paragraph(inlines2), pos)
+        let first = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: kind1, key: key, style: style))
+        var req = RowLayoutRequest(rowID: "p", kind: kind2, key: key, style: style)
+        req.previous = (kind1, first)
+        let incremental = RowLayoutBuilder.layout(req)
+        let full = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "p", kind: kind2, key: key, style: style))
+        #expect(TranscriptFuzz.difference(incremental.content, full.content) == nil)
+
+        // Neutral prefix (digits/punctuation) followed by RTL flips the whole
+        // paragraph and must fall back to one-shot layout.
+        let neutral = String(repeating: "12345 67890 ", count: 12)
+        let n1 = TranscriptRowKind.markdownBlock(.paragraph([MarkdownInline(text: neutral)]), pos)
+        let n2 = TranscriptRowKind.markdownBlock(.paragraph([MarkdownInline(text: neutral + "\u{200F}123")]), pos)
+        let firstNeutral = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "n", kind: n1, key: key, style: style))
+        var neutralReq = RowLayoutRequest(rowID: "n", kind: n2, key: key, style: style)
+        neutralReq.previous = (n1, firstNeutral)
+        let incNeutral = RowLayoutBuilder.layout(neutralReq)
+        let fullNeutral = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "n", kind: n2, key: key, style: style))
+        #expect(TranscriptFuzz.difference(incNeutral.content, fullNeutral.content) == nil)
+    }
+
+    /// When a newly appended line adds an underline before an inline-code
+    /// background (whose rect extends 1 pt above `line.top`), `RowContentDiff`
+    /// must report the smaller `minY` so the band above it is not kept stale.
+    @Test func unchangedHeightAccountsForProtrudingLaterDecorationsOnNewLine() throws {
+        let url = try #require(URL(string: "https://example.com"))
+        let base = MarkdownInline(text: "First line of text here.\n")
+        let before = layout([.paragraph([base])], width: 400)
+        let after = layout(
+            [
+                .paragraph([
+                    base,
+                    MarkdownInline(text: "link", link: url),
+                    MarkdownInline(text: " "),
+                    MarkdownInline(text: "code", style: .code),
+                ])
+            ], width: 400)
+        #expect(after.lines.count == 2)
+        let secondLineTop = after.lines[1].top
+        let unchanged = RowContentDiff.unchangedHeight(before, after)
+        #expect(unchanged < secondLineTop, "expected unchanged (\(unchanged)) < line 1 top (\(secondLineTop))")
+    }
 }
