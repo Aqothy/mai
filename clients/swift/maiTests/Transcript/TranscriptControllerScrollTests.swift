@@ -486,7 +486,7 @@ struct TranscriptControllerScrollTests {
         // offsetIntoSource (800) exceeds the estimated pending height (200);
         // target must remain strictly inside msg-1#pending, not skip onto tail.
         let saved = TranscriptSavedPlace(
-            anchorID: "msg-1#2", offsetIntoRow: 50, source: "msg-1", offsetIntoSource: 800,
+            anchorID: "t|msg-1#2", offsetIntoRow: 50, source: "t|msg-1", offsetIntoSource: 800,
             expandedTurnIDs: [])
         let controller = TranscriptController(configuration: .launch)
         let host = FakeTranscriptHost()
@@ -497,12 +497,10 @@ struct TranscriptControllerScrollTests {
         controller.setRows(
             [
                 TranscriptRow(id: "user-0", sourceID: "user-0", kind: .notice(title: "u", text: nil)),
-                TranscriptRow(
-                    id: "msg-1#pending", sourceID: "msg-1", kind: .pendingMessage(source: "hello"),
-                    messageID: "msg-1", role: .assistant),
+                TranscriptMessage(kind: .assistant, turnID: "t", ref: "msg-1").pendingRow(source: "hello"),
                 TranscriptRow(id: "tail", sourceID: "tail", kind: .notice(title: "t", text: nil)),
             ],
-            measuredHeights: ["user-0": 100, "msg-1#pending": 200, "tail": 400])
+            measuredHeights: ["user-0": 100, "t|msg-1#pending": 200, "tail": 400])
 
         let target = controller.initialTargetTop(TranscriptViewport(size: host.size, topInset: 0, bottomInset: 0))
         #expect(target.restored)
@@ -631,13 +629,14 @@ struct TranscriptControllerScrollTests {
         let style = TextStyle.current()
         let oldKey = RowLayoutKey(contentVersion: 0, width: 300, styleVersion: style.version)
         let newKey = RowLayoutKey(contentVersion: 0, width: 500, styleVersion: style.version)
+        let helloBlocks: [MarkdownBlock] = [.paragraph([MarkdownInline(text: "Hello")])]
         let oldJob = LayoutQueue.Job(
             id: "layout|row-0",
-            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(source: "Hello"), key: oldKey, style: style)),
+            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(helloBlocks), key: oldKey, style: style)),
             priority: 0)
         let newJob = LayoutQueue.Job(
             id: "layout|row-0",
-            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(source: "Hello"), key: newKey, style: style)),
+            work: .layout(RowLayoutRequest(rowID: "row-0", kind: .userMessage(helloBlocks), key: newKey, style: style)),
             priority: 0)
 
         await queue.submit(urgent: [newJob], generation: 2, replacingUrgent: true)
@@ -658,15 +657,17 @@ struct TranscriptControllerScrollTests {
         controller.attach(host)
 
         let source = "First paragraph.\n\nSecond paragraph."
-        let tallUser = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(source: "Hi"), messageID: "u0", role: .user)
-        let pendingRow = TranscriptRow(
-            id: "m1#pending", sourceID: "m1", kind: .pendingMessage(source: source), messageID: "m1", role: .assistant)
+        let hiBlocks: [MarkdownBlock] = [.paragraph([MarkdownInline(text: "Hi")])]
+        let tailBlocks: [MarkdownBlock] = [.paragraph([MarkdownInline(text: "Tail")])]
+        let tallUser = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(hiBlocks), messageID: "u0", role: .user)
+        let pendingMessage = TranscriptMessage(kind: .assistant, turnID: "t", ref: "m1")
+        let pendingRow = pendingMessage.pendingRow(source: source)
         let tailRows = (0..<30).map {
-            TranscriptRow(id: "t\($0)", sourceID: "t\($0)", kind: .userMessage(source: "Tail"), messageID: "t\($0)", role: .user)
+            TranscriptRow(id: "t\($0)", sourceID: "t\($0)", kind: .userMessage(tailBlocks), messageID: "t\($0)", role: .user)
         }
-        // Put m1#pending at y=3000, outside both the initial end window and the
+        // Put pending row at y=3000, outside both the initial end window and the
         // top window (-400..400), so scheduleWork() never queues it.
-        var initialHeights: [String: CGFloat] = ["u0": 3000, "m1#pending": 60]
+        var initialHeights: [String: CGFloat] = ["u0": 3000, pendingRow.id: 60]
         for row in tailRows { initialHeights[row.id] = 44 }
         controller.setRows([tallUser, pendingRow] + tailRows, measuredHeights: initialHeights)
         for _ in 0..<50 where controller.isAwaitingInitialEnd {
@@ -674,21 +675,21 @@ struct TranscriptControllerScrollTests {
         }
         host.readerScroll(toTop: 0)
         controller.setHeights(["u0": 40])
-        #expect(controller.rows.contains { $0.id == "m1#pending" })
+        #expect(controller.rows.contains { $0.id == pendingRow.id })
 
-        // Now m1#pending sits in the visible viewport without any reader scroll.
+        // Now pending row sits in the visible viewport without any reader scroll.
         // Mounting sees no cached layout and prefetches the parse off-main.
         let mounter = TranscriptRowMounter(container: CALayer())
         mounter.place(
             controller, visible: CGRect(x: 0, y: 0, width: 400, height: 200), documentWidth: 400,
             palette: TextPalette.resolveForTests, scale: 2, showsContent: true)
 
-        for _ in 0..<50 where controller.rows.contains(where: { $0.id == "m1#pending" }) {
+        for _ in 0..<50 where controller.rows.contains(where: { $0.id == pendingRow.id }) {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(!controller.rows.contains { $0.id == "m1#pending" })
-        #expect(controller.rows.contains { $0.id == "m1#0" })
-        #expect(controller.rows.contains { $0.id == "m1#1" })
+        #expect(!controller.rows.contains { $0.id == pendingRow.id })
+        #expect(controller.rows.contains { $0.id == "\(pendingMessage.id)#0" })
+        #expect(controller.rows.contains { $0.id == "\(pendingMessage.id)#1" })
     }
 
     @Test func removingAndReaddingRowWithSameIDDropsStaleCachedLayout() {
@@ -698,7 +699,9 @@ struct TranscriptControllerScrollTests {
         host.controller = controller
         controller.attach(host)
 
-        let user = TranscriptRow(id: "u0", sourceID: "u0", kind: .userMessage(source: "Hi"), messageID: "u0", role: .user)
+        let user = TranscriptRow(
+            id: "u0", sourceID: "u0", kind: .userMessage([.paragraph([MarkdownInline(text: "Hi")])]),
+            messageID: "u0", role: .user)
         let working1 = TranscriptRow(id: "working", kind: .working(phrase: "Pondering…"))
         controller.setRows([user, working1])
         let firstLayout = RowLayoutBuilder.layout(controller.request(controller.rows[1]))
@@ -751,5 +754,87 @@ struct TranscriptControllerScrollTests {
             #expect(panAcceptsButtonTouch)
             #expect(scrollView.touchesShouldCancel(in: button))
         }
+
+        /// `editMenu` places Comment… inline right after `.standardEdit`, and
+        /// `willMove(toWindow: nil)` clears selection to avoid UIKit preview
+        /// target crashes on detached views.
+        @Test func iosEditMenuPromotesCommentAndWindowDetachClearsSelection() throws {
+            let controller = TranscriptController(configuration: .testing)
+            let scrollView = TranscriptScrollView(controller: controller)
+            let row = TranscriptRow(
+                id: "r0", sourceID: "m",
+                kind: .markdownBlock(.paragraph([MarkdownInline(text: "Hello world")]), .single),
+                messageID: "m", role: .assistant)
+            controller.setRows([row], measuredHeights: ["r0": 40])
+            controller.setSelection(
+                TranscriptSelection(
+                    anchor: TextPosition(rowID: "r0", offset: 0),
+                    focus: TextPosition(rowID: "r0", offset: 5)))
+            scrollView.onComment = { _, _, _ in }
+
+            let standardEdit = UIMenu(identifier: .standardEdit, children: [])
+            let lookup = UIMenu(identifier: .lookup, children: [])
+            let textRange = try #require(scrollView.contentView.selectedTextRange)
+            let menu = try #require(
+                scrollView.contentView.editMenu(for: textRange, suggestedActions: [standardEdit, lookup]))
+            #expect(menu.children.count == 3)
+            #expect((menu.children[0] as? UIMenu)?.identifier == .standardEdit)
+            #expect((menu.children[1] as? UIAction)?.title == "Comment…")
+            #expect((menu.children[2] as? UIMenu)?.identifier == .lookup)
+
+            scrollView.contentView.willMove(toWindow: nil)
+            #expect(controller.selection == nil)
+        }
     #endif
+
+    /// Remembered measured heights keyed by `(columnWidth, styleVersion)` seed
+    /// both `.pendingMessage` (via summed `sourceHeights`) and parsed block
+    /// rows when reopening a thread at the same width, and are ignored if the
+    /// width or style changed.
+    @Test func rememberedHeightsEliminateRevisitDriftAtMatchingWidth() throws {
+        let first = TranscriptController(configuration: .testing)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 600, height: 400)
+        host.controller = first
+        first.attach(host)
+        let msg = TranscriptMessage(kind: .assistant, turnID: "t1", ref: "a1")
+        let blocks: [MarkdownBlock] = [
+            .paragraph([MarkdownInline(text: "Block one")]),
+            .paragraph([MarkdownInline(text: "Block two")]),
+        ]
+        let parsedRows = msg.rows(from: blocks)
+        first.setRows(parsedRows, measuredHeights: [parsedRows[0].id: 123, parsedRows[1].id: 234])
+        first.measuredRowHeights[parsedRows[0].id] = 123
+        first.measuredRowHeights[parsedRows[1].id] = 234
+        let snapshot = try #require(first.snapshotMeasuredHeights())
+        #expect(snapshot.width == first.columnWidth)
+        #expect(snapshot.rowHeights[parsedRows[0].id] == 123)
+        #expect(snapshot.rowHeights[parsedRows[1].id] == 234)
+        #expect(snapshot.sourceHeights[msg.id] == 357)
+
+        // Reopen at matching width: pending message immediately gets 357 pt
+        // instead of a rough estimate, and parsed blocks keep 123 + 234 pt.
+        let second = TranscriptController(configuration: .testing)
+        second.rememberedHeights = snapshot
+        let secondHost = FakeTranscriptHost()
+        secondHost.size = CGSize(width: 600, height: 400)
+        secondHost.controller = second
+        second.attach(secondHost)
+        second.setRows([msg.pendingRow(source: "Block one\n\nBlock two")])
+        #expect(second.geometry.totalHeight == 357)
+
+        second.replaceRows(0..<1, with: parsedRows, heights: [:])
+        #expect(second.geometry.height(at: 0) == 123)
+        #expect(second.geometry.height(at: 1) == 234)
+
+        // Reopen at a different width: remembered heights are ignored.
+        let third = TranscriptController(configuration: .testing)
+        third.rememberedHeights = snapshot
+        let thirdHost = FakeTranscriptHost()
+        thirdHost.size = CGSize(width: 400, height: 400)
+        thirdHost.controller = third
+        third.attach(thirdHost)
+        third.setRows([msg.pendingRow(source: "Block one\n\nBlock two")])
+        #expect(third.geometry.totalHeight != 357)
+    }
 }

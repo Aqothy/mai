@@ -28,7 +28,8 @@ struct TranscriptSelectionTests {
     private func rows() -> [TranscriptRow] {
         var rows = [
             TranscriptRow(
-                id: "user|t|u", sourceID: "t|u", kind: .userMessage(source: "Hello there"), messageID: "t|u",
+                id: "user|t|u", sourceID: "t|u",
+                kind: .userMessage([.paragraph([MarkdownInline(text: "Hello there")])]), messageID: "t|u",
                 role: .user)
         ]
         let blocks = blocks()
@@ -187,5 +188,71 @@ struct TranscriptSelectionTests {
         let offset = layout.content.textOffset(closestTo: point)
         // "Name\tValue\na\t" is 13 characters; the cell's text starts there.
         #expect(offset == 13 || offset == 14)
+    }
+
+    /// When a selection's start or end row has scrolled off-screen (no cached
+    /// layout), `taggedSelectionRects` must not attach `isStart` or `isEnd`
+    /// handles to mid-selection visible rows.
+    @Test func offscreenSelectionEndpointsNeverTagMiddleRowsAsHandles() {
+        let controller = make()
+        controller.columnWidth = 500
+        // Lay out only the middle row `t|a#0` (index 1); leave start `user|t|u`
+        // (index 0) and end `t|a#1` (index 2) without layouts (off-screen).
+        let middle = controller.rows[1]
+        controller.storeLayout(RowLayoutBuilder.layout(controller.request(middle)))
+        let tagged = controller.taggedSelectionRects(
+            from: TextPosition(rowID: "user|t|u", offset: 0),
+            to: TextPosition(rowID: "t|a#1", offset: 5),
+            columnX: 0, scrollX: { _ in 0 })
+        #expect(!tagged.isEmpty)
+        #expect(tagged.allSatisfy { !$0.isStart && !$0.isEnd })
+
+        // Lay out start row too: now only the first rect has `isStart`.
+        controller.storeLayout(RowLayoutBuilder.layout(controller.request(controller.rows[0])))
+        let withStart = controller.taggedSelectionRects(
+            from: TextPosition(rowID: "user|t|u", offset: 0),
+            to: TextPosition(rowID: "t|a#1", offset: 5),
+            columnX: 0, scrollX: { _ in 0 })
+        #expect(withStart.first?.isStart == true)
+        #expect(withStart.dropFirst().allSatisfy { !$0.isStart })
+        #expect(withStart.allSatisfy { !$0.isEnd })
+    }
+
+    /// `position(from:offset:)` never lands inside an Apple composed character
+    /// sequence (surrogate pair or combining mark), `positionVertically` moves
+    /// by visual lines, and `tokenBoundaryRange` clamps to row / table-cell bounds.
+    @Test func positionSnapsClustersMovesVerticallyAndClampsTokenBounds() throws {
+        let controller = TranscriptController(configuration: .testing)
+        controller.columnWidth = 400
+        let rows = [
+            TranscriptRow(
+                id: "r0", sourceID: "m",
+                kind: .markdownBlock(.paragraph([MarkdownInline(text: "👍n\u{0308}a\nSecond line")]), .single)),
+            TranscriptRow(
+                id: "r1", sourceID: "m",
+                kind: .markdownBlock(.table(table), .single)),
+        ]
+        controller.setRows(rows, measuredHeights: ["r0": 60, "r1": 100])
+        for row in controller.rows {
+            controller.storeLayout(RowLayoutBuilder.layout(controller.request(row)))
+        }
+        // Step +1 from 0 across 2-unit emoji "👍" snaps forward to offset 2.
+        let afterEmoji = try #require(controller.position(from: TextPosition(rowID: "r0", offset: 0), offset: 1))
+        #expect(afterEmoji == TextPosition(rowID: "r0", offset: 2))
+        // Step -1 from 2 back across "👍" snaps backward to offset 0.
+        let backEmoji = try #require(controller.position(from: afterEmoji, offset: -1))
+        #expect(backEmoji == TextPosition(rowID: "r0", offset: 0))
+        // Step +1 from 2 across "n\u{0308}" snaps forward to offset 4 ('a').
+        let afterCombined = try #require(controller.position(from: afterEmoji, offset: 1))
+        #expect(afterCombined == TextPosition(rowID: "r0", offset: 4))
+
+        // Vertical line movement from line 0 to line 1 in r0.
+        let down = try #require(
+            controller.positionVertically(from: TextPosition(rowID: "r0", offset: 0), lineOffset: 1, columnX: 0))
+        #expect(down.rowID == "r0" && down.offset >= 6)
+
+        // Table cell token boundary clamps strictly to cell 0 ("Name", 0..<4).
+        let cellBounds = try #require(controller.tokenBoundaryRange(for: TextPosition(rowID: "r1", offset: 2)))
+        #expect(cellBounds == 0..<4)
     }
 }

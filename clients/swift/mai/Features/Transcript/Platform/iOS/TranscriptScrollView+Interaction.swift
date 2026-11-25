@@ -21,10 +21,14 @@
         func installInteractions() {
             let selection = UITextInteraction(for: .nonEditable)
             selection.textInput = contentView
+            selection.delegate = contentView
             addInteraction(selection)
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.cancelsTouchesInView = false
             tap.delegate = tapDelegate
+            for gesture in selection.gesturesForFailureRequirements {
+                tap.require(toFail: gesture)
+            }
             addGestureRecognizer(tap)
         }
 

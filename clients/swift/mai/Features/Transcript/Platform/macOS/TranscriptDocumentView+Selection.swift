@@ -141,20 +141,146 @@
 
         override func menu(for event: NSEvent) -> NSMenu? {
             let point = convert(event.locationInWindow, from: nil)
-            // A right-click outside the selection selects the word under it,
-            // as text views do.
-            if let position = textPosition(at: point), !isSelected(position) {
-                controller.setSelection(controller.wordRange(around: position))
+            let linkURL = controller.link(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX)
+            // Strict hit-test: a right-click in the margin or over chrome
+            // never snaps to and selects text in an adjacent row.
+            let hit = controller.strictTextPosition(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX)
+            if let hit, !isSelected(hit) {
+                controller.setSelection(controller.wordRange(around: hit))
             }
-            guard controller.hasValidSelection else { return nil }
+            let hasSelection = controller.hasValidSelection && (hit != nil || linkURL == nil && isPointNearSelection(point))
+            guard linkURL != nil || hasSelection else { return nil }
             // Targets are explicit: a right-click over a code block's scroller
             // reaches here without making this view first responder.
             let menu = NSMenu()
-            menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "").target = self
-            if onComment != nil {
-                menu.addItem(withTitle: "Comment…", action: #selector(comment(_:)), keyEquivalent: "").target = self
+            if let linkURL {
+                let openAction = TranscriptMenuAction { NSWorkspace.shared.open(linkURL) }
+                let openItem = NSMenuItem(title: "Open Link", action: #selector(TranscriptMenuAction.run(_:)), keyEquivalent: "")
+                openItem.target = openAction
+                openItem.representedObject = openAction
+                menu.addItem(openItem)
+
+                let copyLinkAction = TranscriptMenuAction {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(linkURL.absoluteString, forType: .string)
+                }
+                let copyLinkItem = NSMenuItem(
+                    title: "Copy Link", action: #selector(TranscriptMenuAction.run(_:)), keyEquivalent: "")
+                copyLinkItem.target = copyLinkAction
+                copyLinkItem.representedObject = copyLinkAction
+                menu.addItem(copyLinkItem)
+                if hasSelection { menu.addItem(.separator()) }
+            }
+            if hasSelection {
+                let text = controller.selectedText()
+                let lookUpItem = NSMenuItem(title: "Look Up", action: #selector(lookUp(_:)), keyEquivalent: "")
+                lookUpItem.target = self
+                menu.addItem(lookUpItem)
+
+                let copyItem = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+                copyItem.target = self
+                menu.addItem(copyItem)
+                if onComment != nil {
+                    let commentItem = NSMenuItem(title: "Comment…", action: #selector(comment(_:)), keyEquivalent: "")
+                    commentItem.target = self
+                    menu.addItem(commentItem)
+                }
+                menu.addItem(.separator())
+                let sharePicker = NSSharingServicePicker(items: [text])
+                menu.addItem(sharePicker.standardShareMenuItem)
             }
             return menu
+        }
+
+        /// Force-Touch / three-finger tap / ⌃⌘D Look Up over a word or the
+        /// active selection.
+        override func quickLook(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            if let hit = controller.strictTextPosition(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX) {
+                if !isSelected(hit), let word = controller.wordRange(around: hit) {
+                    let text = controller.text(from: word.anchor, to: word.focus)
+                    guard !text.isEmpty else { return }
+                    let anchor =
+                        controller.selectionRects(from: word.anchor, to: word.focus, columnX: columnX, scrollX: wideScrollX)
+                        .first.map { NSPoint(x: $0.minX, y: $0.maxY) } ?? point
+                    showDefinition(for: NSAttributedString(string: text), at: anchor)
+                    return
+                }
+            }
+            lookUp(nil)
+        }
+
+        // MARK: Keyboard navigation
+
+        override func keyDown(with event: NSEvent) {
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let hasCommand = modifiers.contains(.command)
+            let hasControlOrOption = modifiers.contains(.control) || modifiers.contains(.option)
+            guard !hasControlOrOption else {
+                super.keyDown(with: event)
+                return
+            }
+            if let specialKey = event.specialKey {
+                switch specialKey {
+                case .upArrow:
+                    if hasCommand { scrollToTop() } else { scrollBy(deltaY: -40) }
+                    return
+                case .downArrow:
+                    if hasCommand { controller.jumpToEnd(animated: false) } else { scrollBy(deltaY: 40) }
+                    return
+                case .pageUp where !hasCommand:
+                    scrollBy(deltaY: -pageScrollDistance)
+                    return
+                case .pageDown where !hasCommand:
+                    scrollBy(deltaY: pageScrollDistance)
+                    return
+                case .home where !hasCommand:
+                    scrollToTop()
+                    return
+                case .end where !hasCommand:
+                    controller.jumpToEnd(animated: false)
+                    return
+                default:
+                    break
+                }
+            }
+            switch event.charactersIgnoringModifiers {
+            case "\u{1B}":  // Escape
+                if controller.selection != nil {
+                    controller.setSelection(nil)
+                } else {
+                    super.keyDown(with: event)
+                }
+            case " " where !hasCommand:
+                scrollBy(deltaY: pageScrollDistance * (modifiers.contains(.shift) ? -1 : 1))
+            default:
+                super.keyDown(with: event)
+            }
+        }
+
+        private var pageScrollDistance: CGFloat {
+            let visible = controller.lastViewport?.visibleHeight ?? enclosingScrollView?.contentView.bounds.height ?? 400
+            return max(40, (visible * 0.9).rounded(.down))
+        }
+
+        private func scrollBy(deltaY: CGFloat) {
+            guard let scrollView = enclosingScrollView else { return }
+            let clip = scrollView.contentView
+            var proposed = clip.bounds
+            proposed.origin.y += deltaY
+            let origin = clip.constrainBoundsRect(proposed).origin
+            clip.scroll(to: origin)
+            scrollView.reflectScrolledClipView(clip)
+        }
+
+        private func scrollToTop() {
+            guard let scrollView = enclosingScrollView else { return }
+            let clip = scrollView.contentView
+            let origin = clip.constrainBoundsRect(
+                NSRect(origin: NSPoint(x: 0, y: -clip.contentInsets.top), size: clip.bounds.size)
+            ).origin
+            clip.scroll(to: origin)
+            scrollView.reflectScrolledClipView(clip)
         }
 
         // MARK: Cursor
@@ -230,6 +356,32 @@
             onComment?(quote, target.messageID, target.role)
         }
 
+        @objc func lookUp(_ sender: Any?) {
+            let text = controller.selectedText()
+            guard !text.isEmpty else { return }
+            let rect = selectionAnchorRect
+            let origin = rect.isNull ? NSPoint(x: columnX, y: visibleRect.midY) : NSPoint(x: rect.minX, y: rect.maxY)
+            showDefinition(for: NSAttributedString(string: text), at: origin)
+        }
+
+        /// Exposes selected text to macOS Services (including legacy
+        /// `"NSStringPboardType"` checked by AppKit Services dispatch).
+        override func validRequestor(
+            forSendType sendType: NSPasteboard.PasteboardType?,
+            returnType: NSPasteboard.PasteboardType?
+        ) -> Any? {
+            if returnType == nil,
+                let sendType,
+                sendType == .string || sendType == Self.legacyStringPboardType,
+                controller.hasValidSelection
+            {
+                return self
+            }
+            return super.validRequestor(forSendType: sendType, returnType: returnType)
+        }
+
+        static let legacyStringPboardType = NSPasteboard.PasteboardType("NSStringPboardType")
+
         // MARK: Positions
 
         /// The column's left edge in the document.
@@ -253,12 +405,44 @@
             let end = anchorFirst ? selection.focus : selection.anchor
             return controller.isBefore(position, start) == false && controller.isBefore(position, end) == true
         }
+
+        /// True when `point` falls inside any current selection highlight rect
+        /// (also accepts AppKit's synthetic `showContextMenuForSelection` event
+        /// centered on `selectionAnchorRect`).
+        private func isPointNearSelection(_ point: CGPoint) -> Bool {
+            currentSelectionRects().contains { $0.insetBy(dx: -2, dy: -2).contains(point) }
+        }
+
+        func currentSelectionRects() -> [CGRect] {
+            guard let selection = controller.selection, !selection.isEmpty,
+                let anchorFirst = controller.isBefore(selection.anchor, selection.focus)
+            else { return [] }
+            let start = anchorFirst ? selection.anchor : selection.focus
+            let end = anchorFirst ? selection.focus : selection.anchor
+            return controller.selectionRects(from: start, to: end, columnX: columnX, scrollX: wideScrollX)
+        }
+    }
+
+    extension TranscriptDocumentView: NSViewContentSelectionInfo {
+        var selectionAnchorRect: NSRect {
+            currentSelectionRects().first ?? .null
+        }
+    }
+
+    extension TranscriptDocumentView: NSServicesMenuRequestor {
+        func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+            guard types.contains(.string) || types.contains(Self.legacyStringPboardType) else { return false }
+            let text = controller.selectedText()
+            guard !text.isEmpty else { return false }
+            pboard.declareTypes([.string], owner: nil)
+            return pboard.setString(text, forType: .string)
+        }
     }
 
     extension TranscriptDocumentView: NSMenuItemValidation {
         func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
             switch menuItem.action {
-            case #selector(copy(_:)), #selector(comment(_:)):
+            case #selector(copy(_:)), #selector(comment(_:)), #selector(lookUp(_:)):
                 controller.hasValidSelection
             case #selector(selectAll(_:)):
                 !controller.rows.isEmpty

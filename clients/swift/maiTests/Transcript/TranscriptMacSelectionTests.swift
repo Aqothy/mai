@@ -152,5 +152,85 @@
             fixture.document.layoutSubtreeIfNeeded()
             #expect(rowLayers().isEmpty)
         }
+
+        /// Right-clicking empty margin or chrome must not snap to an adjacent
+        /// row and select its word; right-clicking a link offers Open Link and
+        /// Copy Link alongside Copy/Look Up/Share.
+        @Test func rightClickUsesStrictHitTestAndOffersLinkActions() throws {
+            let fixture = make()
+            defer { fixture.close() }
+            let url = try #require(URL(string: "https://example.com/docs"))
+            let linkBlock = MarkdownBlock.paragraph([
+                MarkdownInline(text: "Visit "),
+                MarkdownInline(text: "docs", style: [], link: url),
+                MarkdownInline(text: " now"),
+            ])
+            let rows = [
+                TranscriptRow(
+                    id: "m#0", sourceID: "m", kind: .markdownBlock(linkBlock, .single),
+                    messageID: "m", role: .assistant),
+                TranscriptRow(id: "actions|t", kind: .turnActions(turnID: "t", hasReply: true)),
+            ]
+            fixture.controller.setRows(rows, measuredHeights: ["m#0": 60, "actions|t": 40])
+            for row in fixture.controller.rows {
+                fixture.controller.storeLayout(RowLayoutBuilder.layout(fixture.controller.request(row)))
+            }
+            fixture.controller.setHeights(
+                Dictionary(uniqueKeysWithValues: fixture.controller.layouts.map { ($0.key, $0.value.height) }))
+            fixture.document.layoutSubtreeIfNeeded()
+
+            // Right-click over the actions row (chrome below text): must not select text.
+            let chromePoint = fixture.document.convert(NSPoint(x: 100, y: fixture.controller.geometry.offset(at: 1) + 15), to: nil)
+            let chromeMenu = fixture.document.menu(for: event(.rightMouseDown, fixture.window, at: chromePoint))
+            #expect(chromeMenu == nil)
+            #expect(fixture.controller.selection == nil)
+
+            // Right-click directly over the link word "docs".
+            let linkPoint = point(fixture, row: 0, fraction: 0.52)
+            let linkMenu = try #require(fixture.document.menu(for: event(.rightMouseDown, fixture.window, at: linkPoint)))
+            let titles = linkMenu.items.map(\.title)
+            #expect(titles.contains("Open Link"))
+            #expect(titles.contains("Copy Link"))
+            #expect(titles.contains("Copy"))
+            #expect(titles.contains("Look Up"))
+        }
+
+        /// `NSViewContentSelectionInfo` exposes the selection's anchor rect,
+        /// `NSServicesMenuRequestor` writes plain text (including legacy
+        /// `NSStringPboardType`), and Escape clears the selection.
+        @Test func selectionInfoServicesAndKeyboardNavigation() throws {
+            let fixture = make()
+            defer { fixture.close() }
+            #expect(fixture.document.selectionAnchorRect.isNull)
+            #expect(
+                fixture.document.validRequestor(
+                    forSendType: TranscriptDocumentView.legacyStringPboardType, returnType: nil) == nil)
+
+            // Select text in row 0.
+            let word = point(fixture, row: 0, fraction: 0.1)
+            click(
+                fixture, down: event(.leftMouseDown, fixture.window, at: word, clicks: 2),
+                then: [event(.leftMouseUp, fixture.window, at: word, clicks: 2)])
+            #expect(!fixture.document.selectionAnchorRect.isNull)
+            #expect(
+                fixture.document.validRequestor(
+                    forSendType: TranscriptDocumentView.legacyStringPboardType, returnType: nil) != nil)
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            #expect(
+                fixture.document.writeSelection(
+                    to: pasteboard, types: [TranscriptDocumentView.legacyStringPboardType]))
+            #expect(pasteboard.string(forType: .string) == fixture.controller.selectedText())
+
+            // Escape clears selection.
+            let esc = try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: fixture.window.windowNumber,
+                    context: nil, characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}",
+                    isARepeat: false, keyCode: 53))
+            fixture.document.keyDown(with: esc)
+            #expect(fixture.controller.selection == nil)
+        }
     }
 #endif

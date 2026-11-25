@@ -24,10 +24,20 @@
         var rowElements: [String: TranscriptAccessibilityRow] = [:]
 
         weak var inputDelegate: (any UITextInputDelegate)?
-        lazy var tokenizer: any UITextInputTokenizer = UITextInputStringTokenizer(textInput: self)
+        private lazy var baseTokenizer = UITextInputStringTokenizer(textInput: self)
+        var tokenizer: any UITextInputTokenizer { self }
 
         override var canBecomeFirstResponder: Bool { true }
         var isEditable: Bool { false }
+
+        override func willMove(toWindow newWindow: UIWindow?) {
+            super.willMove(toWindow: newWindow)
+            // Clear selection before detaching so UIKit's edit menu or drag
+            // preview never creates a UIPreviewTarget on a windowless view.
+            if newWindow == nil, controller?.selection != nil {
+                controller?.setSelection(nil)
+            }
+        }
 
         /// Tells UIKit the selection's rects moved (rows laid out again,
         /// scrolled code, a new selection), so it redraws its highlight.
@@ -73,8 +83,22 @@
             from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int
         ) -> UITextPosition? {
             switch direction {
-            case .left, .up: self.position(from: position, offset: -offset)
-            default: self.position(from: position, offset: offset)
+            case .left:
+                return self.position(from: position, offset: -offset)
+            case .right:
+                return self.position(from: position, offset: offset)
+            case .up:
+                guard let start = self.position(position) else { return nil }
+                return controller?.positionVertically(
+                    from: start, lineOffset: -offset, columnX: columnX(), scrollX: scrollX
+                ).map(TranscriptTextPosition.init)
+            case .down:
+                guard let start = self.position(position) else { return nil }
+                return controller?.positionVertically(
+                    from: start, lineOffset: offset, columnX: columnX(), scrollX: scrollX
+                ).map(TranscriptTextPosition.init)
+            @unknown default:
+                return self.position(from: position, offset: offset)
             }
         }
 
@@ -150,11 +174,9 @@
 
         func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
             guard let range = range as? TranscriptTextRange, let controller else { return [] }
-            let rects = controller.selectionRects(
+            let items = controller.taggedSelectionRects(
                 from: range.from.position, to: range.to.position, columnX: columnX(), scrollX: scrollX)
-            return rects.enumerated().map { index, rect in
-                TranscriptSelectionRect(rect, isStart: index == 0, isEnd: index == rects.count - 1)
-            }
+            return items.map { TranscriptSelectionRect($0.rect, isStart: $0.isStart, isEnd: $0.isEnd) }
         }
 
         func closestPosition(to point: CGPoint) -> UITextPosition? {
@@ -206,7 +228,12 @@
                 let target = controller.selectionCommentTarget()
                 onComment(quote, target.messageID, target.role)
             }
-            return UIMenu(children: suggestedActions + [comment])
+            // Promote Comment… right after `.standardEdit` (Copy / Select All)
+            // so it stays visible inline instead of buried behind the overflow
+            // chevron (pattern from SwiftStreamingMarkdown).
+            let standardEdit = suggestedActions.filter { ($0 as? UIMenu)?.identifier == .standardEdit }
+            let otherSuggested = suggestedActions.filter { ($0 as? UIMenu)?.identifier != .standardEdit }
+            return UIMenu(children: standardEdit + [comment] + otherSuggested)
         }
 
         // MARK: Editing (read-only: nothing changes)
@@ -228,5 +255,93 @@
         ) -> NSWritingDirection { .natural }
 
         func setBaseWritingDirection(_ writingDirection: NSWritingDirection, for range: UITextRange) {}
+    }
+
+    extension TranscriptTextInputView: UITextInteractionDelegate {
+        func interactionShouldBegin(_ interaction: UITextInteraction, at point: CGPoint) -> Bool {
+            hasText
+        }
+
+        func interactionWillBegin(_ interaction: UITextInteraction) {
+            _ = becomeFirstResponder()
+        }
+    }
+
+    /// Clamps word and sentence tokenization to the current row (or single
+    /// table cell) so double-tap / long-press never bleeds across blocks
+    /// (pattern from gonzalezreal/textual).
+    extension TranscriptTextInputView: UITextInputTokenizer {
+        func rangeEnclosingPosition(
+            _ position: UITextPosition, with granularity: UITextGranularity, inDirection direction: UITextDirection
+        ) -> UITextRange? {
+            guard granularity == .word || granularity == .sentence else {
+                return baseTokenizer.rangeEnclosingPosition(position, with: granularity, inDirection: direction)
+            }
+            guard let raw = baseTokenizer.rangeEnclosingPosition(position, with: granularity, inDirection: direction),
+                let rawRange = raw as? TranscriptTextRange,
+                let anchor = self.position(position),
+                let bounds = controller?.tokenBoundaryRange(for: anchor)
+            else { return nil }
+            let startOffset = rawRange.from.position.rowID == anchor.rowID
+                ? max(rawRange.from.position.offset, bounds.lowerBound)
+                : bounds.lowerBound
+            let endOffset = rawRange.to.position.rowID == anchor.rowID
+                ? min(rawRange.to.position.offset, bounds.upperBound)
+                : bounds.upperBound
+            guard startOffset < endOffset else { return nil }
+            return TranscriptTextRange(
+                from: TextPosition(rowID: anchor.rowID, offset: startOffset),
+                to: TextPosition(rowID: anchor.rowID, offset: endOffset))
+        }
+
+        func isPosition(
+            _ position: UITextPosition, atBoundary granularity: UITextGranularity, inDirection direction: UITextDirection
+        ) -> Bool {
+            if granularity == .word || granularity == .sentence,
+                let pos = self.position(position),
+                let bounds = controller?.tokenBoundaryRange(for: pos),
+                pos.offset == bounds.lowerBound || pos.offset == bounds.upperBound
+            {
+                return true
+            }
+            return baseTokenizer.isPosition(position, atBoundary: granularity, inDirection: direction)
+        }
+
+        func position(
+            from position: UITextPosition, toBoundary granularity: UITextGranularity, inDirection direction: UITextDirection
+        ) -> UITextPosition? {
+            guard granularity == .word || granularity == .sentence else {
+                return baseTokenizer.position(from: position, toBoundary: granularity, inDirection: direction)
+            }
+            guard let moved = baseTokenizer.position(from: position, toBoundary: granularity, inDirection: direction),
+                let movedPos = self.position(moved),
+                let startPos = self.position(position),
+                let bounds = controller?.tokenBoundaryRange(for: startPos)
+            else { return nil }
+            if movedPos.rowID != startPos.rowID || movedPos.offset < bounds.lowerBound || movedPos.offset > bounds.upperBound {
+                let clamped =
+                    direction == UITextDirection(rawValue: UITextStorageDirection.backward.rawValue)
+                    || direction == UITextDirection(rawValue: UITextLayoutDirection.left.rawValue)
+                    ? bounds.lowerBound : bounds.upperBound
+                return TranscriptTextPosition(TextPosition(rowID: startPos.rowID, offset: clamped))
+            }
+            return moved
+        }
+
+        func isPosition(
+            _ position: UITextPosition, withinTextUnit granularity: UITextGranularity, inDirection direction: UITextDirection
+        ) -> Bool {
+            if granularity == .word || granularity == .sentence,
+                let pos = self.position(position),
+                let bounds = controller?.tokenBoundaryRange(for: pos)
+            {
+                let backward =
+                    direction == UITextDirection(rawValue: UITextStorageDirection.backward.rawValue)
+                    || direction == UITextDirection(rawValue: UITextLayoutDirection.left.rawValue)
+                if backward, pos.offset == bounds.lowerBound { return false }
+                if !backward, pos.offset == bounds.upperBound { return false }
+            }
+            return baseTokenizer.isPosition(position, withinTextUnit: granularity, inDirection: direction)
+        }
     }
 #endif
