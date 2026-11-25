@@ -194,4 +194,54 @@ nonisolated struct TranscriptGeometryTests {
             g3, matches: ["u0", "n", "m0#1", "tail"],
             sources: ["u0", "n", "m0", "tail"], heights: [40, 50, 40, 40])
     }
+
+    /// Many consecutive mid-history splices crossing the 64-edit compaction
+    /// boundary must match a full rebuild on every row ID, source start, and y offset.
+    @Test func manyMidHistorySplicesAcrossCompactionMatchRebuild() {
+        var ids = (0..<200).map { "m\($0)#pending" }
+        var sources = (0..<200).map { "m\($0)" }
+        var heights = Array(repeating: CGFloat(60), count: 200)
+        var incremental = geometry(ids, sources: sources, height: 60)
+
+        for step in 0..<80 {
+            let target = "m\(step * 2)#pending"
+            guard let idx = incremental.index(for: target) else {
+                Issue.record("missing \(target) at step \(step)")
+                return
+            }
+            let blockCount = (step % 4) + 1
+            let newIDs = (0..<blockCount).map { "m\(step * 2)#\($0)" }
+            let newSources = Array(repeating: "m\(step * 2)", count: blockCount)
+            let newHeights = (0..<blockCount).map { CGFloat(24 + $0 * 11) }
+            incremental.replaceRows(idx..<(idx + 1), ids: newIDs, sources: newSources, heights: newHeights)
+            ids.replaceSubrange(idx..<(idx + 1), with: newIDs)
+            sources.replaceSubrange(idx..<(idx + 1), with: newSources)
+            heights.replaceSubrange(idx..<(idx + 1), with: newHeights)
+        }
+
+        var rebuilt = TranscriptGeometry()
+        rebuilt.replace(ids: ids, sources: sources) { heights[$0] }
+        #expect(incremental.totalHeight == rebuilt.totalHeight)
+        for index in ids.indices {
+            #expect(incremental.index(for: ids[index]) == index)
+            #expect(incremental.offset(at: index) == rebuilt.offset(at: index))
+        }
+        for source in Set(sources) {
+            let saved = TranscriptSavedPlace(
+                anchorID: "missing", offsetIntoRow: 0, source: source, offsetIntoSource: 5, expandedTurnIDs: [])
+            #expect(incremental.offset(for: saved) == rebuilt.offset(for: saved), "source \(source)")
+        }
+    }
+
+    /// Splitting a contiguous source in the middle and later removing its first
+    /// half must still keep `sourceStarts` pointing at the surviving tail piece.
+    @Test func splittingASourceAndRemovingItsFirstRowKeepsTailSource() {
+        var g = geometry(["a0", "a1", "a2"], sources: ["s0", "s0", "s0"], height: 40)
+        g.replaceRows(1..<2, ids: ["x"], sources: ["s1"], heights: [20])
+        g.replaceRows(0..<1, ids: ["y"], sources: ["s2"], heights: [30])
+        let saved = TranscriptSavedPlace(
+            anchorID: "missing", offsetIntoRow: 0, source: "s0", offsetIntoSource: 5, expandedTurnIDs: [])
+        // "a2" is at index 2 (y = 30 + 20 = 50), +5 = 55.
+        #expect(g.offset(for: saved) == 55)
+    }
 }

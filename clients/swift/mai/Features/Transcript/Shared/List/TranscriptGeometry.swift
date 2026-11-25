@@ -16,16 +16,60 @@ nonisolated struct TranscriptGeometry {
     private(set) var sources: [String] = []
     private(set) var heights: [CGFloat] = []
     private(set) var totalHeight: CGFloat = 0
+    private struct Edit {
+        let at: Int
+        let oldEnd: Int
+        let delta: Int
+    }
+
+    private struct IndexEntry {
+        let index: Int
+        let epoch: Int
+    }
+
+    private static let maxPendingEdits = 64
+
     /// 1-based Fenwick tree over `heights`.
     private var tree: [CGFloat] = [0]
-    private var indices: [String: Int] = [:]
-    private var sourceStarts: [String: Int] = [:]
+    private var indices: [String: IndexEntry] = [:]
+    private var sourceStarts: [String: IndexEntry] = [:]
+    /// Pending structural splices applied on lookup so mid-history splices
+    /// (`replaceRows`) never rehash thousands of unchanged tail dictionary entries.
+    private var edits: [Edit] = []
+    private var hasDuplicateIDs = false
+    private var hasNonContiguousSources = false
 
     var count: Int { ids.count }
     var isEmpty: Bool { ids.isEmpty }
 
     func height(at index: Int) -> CGFloat { heights[index] }
-    func index(for id: String) -> Int? { indices[id] }
+
+    func index(for id: String) -> Int? {
+        guard let entry = indices[id] else { return nil }
+        return resolve(entry)
+    }
+
+    private func sourceStart(for source: String) -> Int? {
+        guard let entry = sourceStarts[source] else { return nil }
+        return resolve(entry)
+    }
+
+    @inline(__always)
+    private func resolve(_ entry: IndexEntry) -> Int? {
+        var idx = entry.index
+        var epoch = entry.epoch
+        let count = edits.count
+        while epoch < count {
+            let edit = edits[epoch]
+            if idx >= edit.oldEnd {
+                idx += edit.delta
+            } else if idx >= edit.at {
+                return nil
+            }
+            epoch += 1
+        }
+        return idx
+    }
 
     /// Replaces the rows. A row that stays keeps its height; a new one takes
     /// `estimate(index)` (an index into the new rows). IDs should be unique;
@@ -34,8 +78,12 @@ nonisolated struct TranscriptGeometry {
         ids: [String], sources: [String], measured: [String: CGFloat] = [:],
         estimate: (Int) -> CGFloat
     ) {
-        let previous = indices
         let oldHeights = heights
+        var previous: [String: Int] = [:]
+        previous.reserveCapacity(self.ids.count)
+        for (id, entry) in indices {
+            if let resolved = resolve(entry) { previous[id] = resolved }
+        }
         self.ids = ids
         self.sources = sources.count == ids.count ? sources : ids
         heights = []
@@ -53,87 +101,96 @@ nonisolated struct TranscriptGeometry {
         rebuildTree()
     }
 
-    /// Replaces the rows in `range` with new ones, in O(rows after
-    /// `range.lowerBound` × log n): a streamed message gaining a block near
-    /// the end touches only the rows from there on.
+    /// Replaces the rows in `range` with new ones: records one O(1) shift for
+    /// surviving tail entries (compacting once every `maxPendingEdits` splices)
+    /// instead of rehashing every row after `range.lowerBound`.
     mutating func replaceRows(
         _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat]
     ) {
         let start = range.lowerBound
+        let oldEnd = range.upperBound
         let delta = newIDs.count - range.count
-        // Forget only the removed rows instead of tearing down and rehashing
-        // every unchanged entry in the tail.
-        var clearedID = false
-        var clearedSource = false
+        let newEnd = start + newIDs.count
+        let clampedHeights = newHeights.map(Self.clamped)
+
+        if hasDuplicateIDs || hasNonContiguousSources || edits.count >= Self.maxPendingEdits {
+            ids.replaceSubrange(range, with: newIDs)
+            sources.replaceSubrange(range, with: newSources)
+            heights.replaceSubrange(range, with: clampedHeights)
+            rebuildIndex()
+            updateTreeAfterReplace(start: start)
+            return
+        }
+
+        // Remove entries belonging strictly to the replaced slice.
         for index in range {
-            if indices[ids[index]] == index {
-                indices[ids[index]] = nil
-                clearedID = true
-            }
-            if sourceStarts[sources[index]] == index {
-                sourceStarts[sources[index]] = nil
-                clearedSource = true
+            indices[ids[index]] = nil
+            let source = sources[index]
+            if let existing = sourceStart(for: source), range.contains(existing) {
+                sourceStarts[source] = nil
             }
         }
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
-        heights.replaceSubrange(range, with: newHeights.map(Self.clamped))
-        let newEnd = start + newIDs.count
-        @inline(__always)
-        func writeMinimum(_ table: inout [String: Int], key: String, index: Int) {
-            if let existing = table[key] {
-                if existing > index { table[key] = index }
-            } else {
-                table[key] = index
-            }
-        }
-        @inline(__always)
-        func writeShiftedUp(_ table: inout [String: Int], key: String, index: Int) {
-            if let existing = table[key] {
-                if existing == index - delta || existing > index { table[key] = index }
-            } else {
-                table[key] = index
-            }
-        }
-        // Shift/repair surviving tail entries into post-replacement coordinates
-        // first so writing `start..<newEnd` cannot collide with unshifted tail
-        // indices. Reverse order for `delta > 0` prevents cascading overwrites;
-        // for `delta <= 0`, every unshifted tail entry has `existing > index`.
-        if delta > 0 {
-            for index in (newEnd..<ids.count).reversed() {
-                writeShiftedUp(&indices, key: ids[index], index: index)
-                if index == newEnd || sources[index] != sources[index - 1] {
-                    writeShiftedUp(&sourceStarts, key: sources[index], index: index)
-                }
-            }
-        } else if delta < 0 || clearedID || clearedSource {
-            for index in newEnd..<ids.count {
-                if delta < 0 || clearedID {
-                    writeMinimum(&indices, key: ids[index], index: index)
-                }
-                if delta < 0 || clearedSource, index == newEnd || sources[index] != sources[index - 1] {
-                    writeMinimum(&sourceStarts, key: sources[index], index: index)
-                }
-            }
-        }
-        // Prefix entries are `< start` and tail entries are now `>= newEnd`, so
-        // forward writes in `start..<newEnd` keep the smallest index per key.
+        heights.replaceSubrange(range, with: clampedHeights)
+
+        edits.append(Edit(at: start, oldEnd: oldEnd, delta: delta))
+        let epoch = edits.count
+
         for index in start..<newEnd {
-            writeMinimum(&indices, key: ids[index], index: index)
-            writeMinimum(&sourceStarts, key: sources[index], index: index)
+            let id = ids[index]
+            if let existing = self.index(for: id) {
+                hasDuplicateIDs = true
+                if index < existing { indices[id] = IndexEntry(index: index, epoch: epoch) }
+            } else {
+                indices[id] = IndexEntry(index: index, epoch: epoch)
+            }
+            let source = sources[index]
+            if let existing = sourceStart(for: source) {
+                if index < existing {
+                    hasNonContiguousSources = true
+                    sourceStarts[source] = IndexEntry(index: index, epoch: epoch)
+                } else if index > 0, sources[index - 1] != source {
+                    hasNonContiguousSources = true
+                }
+            } else {
+                sourceStarts[source] = IndexEntry(index: index, epoch: epoch)
+            }
         }
-        // Nodes before the change cover only rows before it and stay valid.
+        // When sources are contiguous, only the row immediately after the splice
+        // can be the surviving tail of a source whose first row was removed; if
+        // that source still exists earlier with a gap before `newEnd`, mark
+        // sources non-contiguous so future removals rebuild cleanly.
+        if newEnd < sources.count {
+            let tailSource = sources[newEnd]
+            if sourceStart(for: tailSource) == nil {
+                sourceStarts[tailSource] = IndexEntry(index: newEnd, epoch: epoch)
+            } else if newEnd > 0, sources[newEnd - 1] != tailSource {
+                hasNonContiguousSources = true
+            }
+        }
+        updateTreeAfterReplace(start: start)
+    }
+
+    private mutating func updateTreeAfterReplace(start: Int) {
+        // Streaming tail appends touch only the last few nodes; mid-history
+        // splices run an allocation-free in-place Fenwick rebuild (~10 µs for
+        // 4,000 rows).
+        guard ids.count - start <= 64 else {
+            rebuildTree()
+            return
+        }
         tree.removeSubrange((start + 1)...)
         let base = prefix(start)
         var running = base
-        var prefixes: [CGFloat] = []
-        prefixes.reserveCapacity(ids.count - start)
+        var suffixPrefixes: [CGFloat] = []
+        suffixPrefixes.reserveCapacity(ids.count - start)
         for index in start..<ids.count {
             running += heights[index]
-            prefixes.append(running)
+            suffixPrefixes.append(running)
             let node = index + 1
             let from = node - (node & -node)
-            let before = from >= start ? (from == start ? base : prefixes[from - start - 1]) : prefix(from)
+            let before = from >= start ? (from == start ? base : suffixPrefixes[from - start - 1]) : prefix(from)
             tree.append(running - before)
         }
         totalHeight = running
@@ -143,7 +200,7 @@ nonisolated struct TranscriptGeometry {
     /// ignored.
     mutating func setHeights(_ updates: [String: CGFloat]) {
         for (id, height) in updates {
-            guard height.isFinite, let index = indices[id] else { continue }
+            guard height.isFinite, let index = index(for: id) else { continue }
             setHeight(height, at: index)
         }
     }
@@ -207,7 +264,7 @@ nonisolated struct TranscriptGeometry {
         guard let index = index(at: max(0, top)) else { return nil }
         let rowTop = prefix(index)
         let source = sources[index]
-        let sourceStart = sourceStarts[source] ?? index
+        let sourceStart = sourceStart(for: source) ?? index
         let idsAbove: [String]
         let sourcesAbove: [String]
         if let range = replacingRange {
@@ -242,16 +299,16 @@ nonisolated struct TranscriptGeometry {
     /// same distance into the rows now showing its content; else just below
     /// the nearest row above it that stayed. Nil if nothing it knew stayed.
     func offset(for place: ReadingPlace) -> CGFloat? {
-        if let index = indices[place.anchorID] {
+        if let index = index(for: place.anchorID) {
             return prefix(index) + min(place.offsetIntoRow, heights[index])
         }
-        if let start = sourceStarts[place.source] {
+        if let start = sourceStart(for: place.source) {
             let startY = prefix(start)
             return startY + min(place.offsetIntoSource, sourceEnd(from: start) - startY)
         }
         for index in place.idsAbove.indices.reversed() {
-            if let kept = indices[place.idsAbove[index]] { return prefix(kept + 1) }
-            if let start = sourceStarts[place.sourcesAbove[index]] { return sourceEnd(from: start) }
+            if let kept = self.index(for: place.idsAbove[index]) { return prefix(kept + 1) }
+            if let start = sourceStart(for: place.sourcesAbove[index]) { return sourceEnd(from: start) }
         }
         return nil
     }
@@ -261,10 +318,10 @@ nonisolated struct TranscriptGeometry {
     /// represented as `.pendingMessage` before initial parse). Nil if neither
     /// exists in the loaded rows.
     func offset(for saved: TranscriptSavedPlace) -> CGFloat? {
-        if let index = indices[saved.anchorID] {
+        if let index = index(for: saved.anchorID) {
             return prefix(index) + min(saved.offsetIntoRow, heights[index])
         }
-        if let start = sourceStarts[saved.source] {
+        if let start = sourceStart(for: saved.source) {
             let startY = prefix(start)
             // Stay strictly inside the source so an under-estimated `.pendingMessage`
             // still overlaps the initial viewport and gets parsed before reveal.
@@ -299,18 +356,45 @@ nonisolated struct TranscriptGeometry {
     }
 
     private mutating func rebuildIndex() {
-        indices = Dictionary(
-            ids.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
-        sourceStarts = Dictionary(
-            sources.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        edits.removeAll(keepingCapacity: true)
+        indices.removeAll(keepingCapacity: true)
+        indices.reserveCapacity(ids.count)
+        sourceStarts.removeAll(keepingCapacity: true)
+        sourceStarts.reserveCapacity(sources.count)
+        hasDuplicateIDs = false
+        hasNonContiguousSources = false
+        for index in ids.indices {
+            let id = ids[index]
+            if indices[id] == nil {
+                indices[id] = IndexEntry(index: index, epoch: 0)
+            } else {
+                hasDuplicateIDs = true
+            }
+            let source = sources[index]
+            if sourceStarts[source] == nil {
+                sourceStarts[source] = IndexEntry(index: index, epoch: 0)
+            } else if index > 0, sources[index - 1] != source {
+                hasNonContiguousSources = true
+            }
+        }
     }
 
     private mutating func rebuildTree() {
-        tree = [0] + heights
-        for node in 1..<max(1, tree.count) {
-            let parent = node + (node & -node)
-            if parent < tree.count { tree[parent] += tree[node] }
+        let count = heights.count
+        tree.removeAll(keepingCapacity: true)
+        tree.reserveCapacity(count + 1)
+        tree.append(0)
+        guard count > 0 else {
+            totalHeight = 0
+            return
         }
-        totalHeight = heights.reduce(0, +)
+        tree.append(contentsOf: heights)
+        var sum: CGFloat = 0
+        for node in 1...count {
+            sum += heights[node - 1]
+            let parent = node + (node & -node)
+            if parent <= count { tree[parent] += tree[node] }
+        }
+        totalHeight = sum
     }
 }
