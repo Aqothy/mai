@@ -107,7 +107,7 @@ def main():
     parser.add_argument("app", nargs="?", type=pathlib.Path)
     parser.add_argument("output", nargs="?", type=pathlib.Path)
     parser.add_argument("--compare", nargs="+", type=pathlib.Path, help="Print side-by-side summaries for result dirs and exit.")
-    parser.add_argument("--plan", choices=["suite", "stream", "markdown"], default="suite")
+    parser.add_argument("--plan", choices=["suite", "stream", "markdown", "giant", "bare-resize"], default="suite")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--turns", type=int, default=1000)
     parser.add_argument("--timeout", type=float, default=180)

@@ -49,6 +49,11 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             finish("CHAT_BENCHMARK_COMPLETE")
             return
         }
+        if plan == "export" {
+            exportSyntheticBenchmarks()
+            finish("CHAT_BENCHMARK_COMPLETE")
+            return
+        }
 
         // Prevent App Nap, timer coalescing, and background QoS throttling so
         // unfocused benchmark runs stay on full-speed cores.
@@ -77,10 +82,163 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         switch plan {
         case "stream":
             await runStandaloneStream()
+        case "giant":
+            await runGiantSuite()
+        case "bare-resize":
+            await runBareResizeIsolation(threadID: entry.id)
         default:
             await runSuite()
         }
         finish("CHAT_BENCHMARK_COMPLETE")
+    }
+
+    /// Isolates transcript live-resize cost in a bare AppKit `NSWindow`
+    /// (`NSScrollView` + `TranscriptDocumentView`, no SwiftUI chrome) and
+    /// compares it directly against the full SwiftUI chat window on the same
+    /// 1,000-turn transcript.
+    private func runBareResizeIsolation(threadID: String) async {
+        #if os(macOS)
+            guard let appWindow = ChatBenchmarkModel.appWindow() else { return }
+            let targetFrame = appWindow.frame
+            let targetContent = appWindow.contentRect(forFrameRect: targetFrame).size
+            let background = ChatBenchmarkAutoRun.runsInBackground
+
+            let bareController = TranscriptController(configuration: .launch)
+            let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: targetContent))
+            scrollView.hasVerticalScroller = true
+            scrollView.hasHorizontalScroller = false
+            scrollView.autohidesScrollers = true
+            scrollView.drawsBackground = false
+            let document = TranscriptDocumentView(controller: bareController)
+            scrollView.documentView = document
+            let bareWindow = NSWindow(
+                contentRect: NSRect(origin: .zero, size: targetContent),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            bareWindow.isReleasedWhenClosed = false
+            bareWindow.setAccessibilitySubrole(.dialog)
+            bareWindow.contentMinSize = targetContent
+            bareWindow.contentMaxSize = targetContent
+            bareWindow.setFrame(targetFrame, display: false)
+            bareWindow.contentView = scrollView
+            appWindow.orderOut(nil)
+            if background {
+                bareWindow.collectionBehavior.insert(.canJoinAllSpaces)
+                bareWindow.orderBack(nil)
+            } else {
+                bareWindow.makeKeyAndOrderFront(nil)
+            }
+            bareController.start(store: store, threadID: threadID)
+
+            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+            while bareController.isAwaitingInitialEnd || !bareWindow.occlusionState.contains(.visible),
+                ContinuousClock.now < deadline
+            {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            _ = await benchmark.runResizeBenchmark(
+                in: bareWindow, minimumWidth: 600, seconds: 2, label: "bare-resize-2s")
+            bareWindow.contentView = nil
+            bareWindow.orderOut(nil)
+            bareWindow.close()
+
+            if background { appWindow.orderBack(nil) } else { appWindow.makeKeyAndOrderFront(nil) }
+            let restoreDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while !appWindow.occlusionState.contains(.visible), ContinuousClock.now < restoreDeadline {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            _ = await benchmark.runResizeBenchmark(
+                in: appWindow, minimumWidth: 600, seconds: 2, label: "swiftui-resize-2s")
+        #endif
+    }
+
+    /// Exports the 1,000-turn and 5 MB synthetic benchmark transcripts to JSON
+    /// for the head-to-head browser harness (`-ChatAutoBenchmark export
+    /// -ChatBenchmarkExportDir <path>`).
+    private func exportSyntheticBenchmarks() {
+        let dir =
+            UserDefaults.standard.string(forKey: "ChatBenchmarkExportDir")
+            ?? ".scratch/chat-rewrite/bench/web/fixtures"
+        let baseURL = URL(fileURLWithPath: dir)
+        try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        let threads: [(file: String, detail: ThreadDetail)] = [
+            ("synthetic-1000.json", ChatSyntheticBenchmarkThread.thread(turnCount: 1_000, uniqueAnswers: true)),
+            ("synthetic-5mb.json", ChatSyntheticBenchmarkThread.largeThread()),
+        ]
+        for (file, detail) in threads {
+            let turns: [[String: Any]] = detail.turns.map { turn in
+                let entries: [[String: Any]] = turn.entries.map { entry in
+                    [
+                        "ref": entry.ref,
+                        "kind": entry.kind,
+                        "text": entry.text ?? "",
+                        "title": entry.title ?? "",
+                    ]
+                }
+                return ["id": turn.id, "entries": entries]
+            }
+            let payload: [String: Any] = ["id": detail.id, "title": detail.summary.title, "turns": turns]
+            if let data = try? JSONSerialization.data(withJSONObject: payload) {
+                let target = baseURL.appending(path: file)
+                if (try? data.write(to: target)) != nil {
+                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(target.path) bytes=\(data.count) turns=\(turns.count)")
+                } else {
+                    let fallback = FileManager.default.temporaryDirectory.appending(path: file)
+                    try? data.write(to: fallback)
+                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(fallback.path) bytes=\(data.count) turns=\(turns.count)")
+                }
+            }
+        }
+    }
+
+    /// Measures time to visible, footprint, scrolling frame pacing, and live
+    /// resize on the 4 giant single-block fixtures (Phase 2 Step 1).
+    private func runGiantSuite() async {
+        for (name, detail) in ChatSyntheticBenchmarkThread.giantFixtureThreads() {
+            let buildStarted = ContinuousClock.now
+            store.insertSyntheticBenchmarkThread(detail)
+            let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
+
+            ChatBenchmarkAutoRun.isTranscriptWarm = false
+            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+            let started = ContinuousClock.now
+            selectThread(detail.id)
+
+            guard await waitUntilAligned(timeoutSeconds: 30) else {
+                ChatBenchmarkAutoRun.trace("invalid measurement: open-\(name) initial alignment timed out")
+                return
+            }
+            let visibleMs = Self.milliseconds(started.duration(to: .now))
+            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+            let settledMs = Self.milliseconds(started.duration(to: .now))
+            let memory = ChatBenchmarkModel.processMemoryMB()
+            emitJSON([
+                "label": "open-\(name)",
+                "measurementKind": "openCheckpoint",
+                "visibleMilliseconds": visibleMs,
+                "settledMilliseconds": settledMs,
+                "threadBuildMilliseconds": buildMs,
+                "footprintMB": memory.footprint,
+                "peakFootprintMB": memory.peakFootprint,
+                "residentMB": memory.resident,
+                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+                "visible": isAppWindowVisible,
+            ])
+
+            try? await Task.sleep(for: .milliseconds(32))
+            _ = await benchmark.runScrollBenchmark(
+                pointsPerSecond: 3_000, maximumSweepSeconds: 3, label: "scroll-\(name)")
+            #if os(macOS)
+                if let window = ChatBenchmarkModel.appWindow() {
+                    _ = await benchmark.runResizeBenchmark(
+                        in: window, minimumWidth: 600, seconds: 2, label: "resize-\(name)")
+                    try? await Task.sleep(for: .milliseconds(100))
+                    await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 30)
+                }
+            #endif
+        }
+        emitMemoryCheckpoint(label: "memory-final")
     }
 
     /// Single-launch full benchmark covering every transcript hotspot:

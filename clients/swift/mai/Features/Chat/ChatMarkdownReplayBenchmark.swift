@@ -186,29 +186,30 @@
                 emit("code-100kb-line-tile-raster", ms: tileMs, extra: ["surfaceBytes": tileBytes])
             }
 
-            // 3. 20,000-line code block chunking + single visible chunk layout.
+            // 3. 20,000-line code block single-row layout.
             do {
                 let code = (0..<20_000).map { "let line\($0) = \($0) * 2" }.joined(separator: "\n")
                 let start = ContinuousClock.now
-                let rows = TranscriptRowChunker.assistantRows(
-                    messageID: "c", turnID: "t", blocks: [.code(language: "swift", code: code)])
+                let row = TranscriptRow(
+                    id: "c#0", sourceID: "c", kind: .markdownBlock(.code(language: "swift", code: code), .single),
+                    messageID: "c", role: .assistant, turnID: "t")
                 let key = RowLayoutKey(contentVersion: 0, width: 700, styleVersion: style.version)
-                _ = RowLayoutBuilder.layout(RowLayoutRequest(rowID: rows[0].id, kind: rows[0].kind, key: key, style: style))
+                _ = RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
                 let ms = milliseconds(start.duration(to: .now))
-                emit("code-20k-chunk-and-first-row", ms: ms, extra: ["chunks": rows.count])
+                emit("code-20k-chunk-and-first-row", ms: ms, extra: ["chunks": 1])
             }
 
-            // 4. 500 KB user message chunking + accessibility query.
+            // 4. 500 KB user message single row + accessibility query.
             do {
                 let line = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
                 let big = String(repeating: line, count: 500_000 / line.utf8.count)
                 let start = ContinuousClock.now
-                let rows = TranscriptRowChunker.userRows(messageID: "u", turnID: "t", source: big)
+                let row = TranscriptMessage(kind: .user, turnID: "t", ref: "u").pendingRow(source: big)
                 let controller = TranscriptController(configuration: .testing)
-                controller.setRows(rows)
+                controller.setRows([row])
                 let accessible = controller.accessibleRows(minY: 0, maxY: 900, columnX: 0)
                 let ms = milliseconds(start.duration(to: .now))
-                emit("user-500kb-chunk-and-a11y", ms: ms, extra: ["chunks": rows.count, "a11yRows": accessible.count])
+                emit("user-500kb-chunk-and-a11y", ms: ms, extra: ["chunks": 1, "a11yRows": accessible.count])
             }
 
             // 5. 5 MB 40-turn chat + 200 live tool events.
@@ -298,8 +299,9 @@
 
             // Pasted text and code chunks around Core Text's 10,240-unit switch.
             let pasted = String(repeating: "The quick brown fox, AVATAR office affluent Toyota; fi ffl.\n", count: 200)
+            let pastedBlocks = MarkdownPlanner.blocks(from: pasted)
             var pastedLayout: RowLayout?
-            let pastedMs = median { pastedLayout = layout(.thought(pasted)) }
+            let pastedMs = median { pastedLayout = layout(.thought(pastedBlocks)) }
             let firstLine = pastedLayout.flatMap { if case .text(let text, _) = $0.content { text.lines.first } else { nil } }
             emit("thought-12kb-200-lines", pastedMs, ["firstLineWidth": firstLine?.width ?? 0])
             let codeChunk = (0..<200).map { "    let value\($0) = compute(input[\($0)], \"step\") // " + String(repeating: "x", count: 110) }
@@ -394,6 +396,53 @@
             let prose = (0..<150_000).map { words[$0 % words.count] }.joined(separator: " ")
             let proseStream = await stream(prose, chunk: 16_384)
             emit("stream-paragraph-1mb", proseStream.median, ["lastTenthMedianMilliseconds": proseStream.tail])
+
+            // Giant unsplit blocks (Phase 2 Step 1): worker layout ms,
+            // retainedBytes, and a11y query time for one row per block.
+            func measureGiant(_ name: String, row: TranscriptRow) {
+                var built: RowLayout?
+                let layoutMs = median {
+                    built = RowLayoutBuilder.layout(
+                        RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
+                }
+                let controller = TranscriptController(configuration: .testing)
+                controller.setRows([row], measuredHeights: [row.id: built?.height ?? 1_000])
+                if let built { controller.storeLayout(built) }
+                var a11yCount = 0
+                let a11yMs = median {
+                    a11yCount = controller.accessibleRows(minY: 0, maxY: 900, columnX: 0).count
+                }
+                emit(
+                    name, layoutMs,
+                    [
+                        "retainedMB": Double(built?.content.retainedBytes ?? 0) / 1_048_576,
+                        "a11yMilliseconds": a11yMs,
+                        "a11yRows": a11yCount,
+                    ])
+            }
+            let paraUnit = "performance "
+            let para1MB = String(repeating: paraUnit, count: 1_048_576 / paraUnit.utf8.count)
+            measureGiant(
+                "giant-para-1mb",
+                row: TranscriptRow(
+                    id: "gp", kind: .markdownBlock(.paragraph([MarkdownInline(text: para1MB)]), .single)))
+            let code25k = (0..<25_000).map { "let value\($0) = compute(\($0), \"step\") // ok" }.joined(separator: "\n")
+            measureGiant(
+                "giant-code-25k",
+                row: TranscriptRow(
+                    id: "gc", kind: .markdownBlock(.code(language: "swift", code: code25k), .single)))
+            let listItems = (0..<5_000).map { i in
+                MarkdownList.Item(blocks: [.paragraph([MarkdownInline(text: "List item \(i) with details for rendering.")])])
+            }
+            measureGiant(
+                "giant-list-5000",
+                row: TranscriptRow(
+                    id: "gl", kind: .markdownBlock(.list(MarkdownList(startIndex: nil, items: listItems)), .single)))
+            let logLine = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
+            let user500KB = String(repeating: logLine, count: 500_000 / logLine.utf8.count)
+            measureGiant(
+                "giant-user-500kb",
+                row: TranscriptRow(id: "gu", kind: .userMessage(MarkdownPlanner.blocks(from: user500KB))))
         }
     }
 #endif
