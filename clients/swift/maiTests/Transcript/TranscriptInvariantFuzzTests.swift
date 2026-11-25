@@ -301,9 +301,12 @@ nonisolated struct TranscriptInvariantFuzzTests {
         host.size = CGSize(width: 800, height: 600)
         host.controller = controller
         controller.attach(host)
-        let line = String(repeating: #"{"k":"value","n":12345},"#, count: 200 * 1024 / 24)
+        // Four 200 KB materialized prose rows (~5.6 MB of glyph positions and
+        // carets each, > 12 MB budget). Only the rows near the viewport may stay.
+        let line = String(repeating: #"{"k":"value","n":12345}, "#, count: 200 * 1024 / 25)
         let rows = (0..<4).map { index in
-            TranscriptRow(id: "c\(index)", kind: .markdownBlock(.code(language: "json", code: line), .single))
+            TranscriptRow(
+                id: "c\(index)", kind: .markdownBlock(.paragraph([MarkdownInline(text: line)]), .single))
         }
         let heights = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, CGFloat(2_000)) })
         controller.setRows(rows, measuredHeights: heights)
@@ -312,8 +315,6 @@ nonisolated struct TranscriptInvariantFuzzTests {
             rows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
         for layout in built { controller.storeLayout(layout) }
-        // Four rows of a 200 KB line: ~5.6 MB of glyph positions and carets
-        // each (> 12 MB budget). Only the rows near the viewport may stay.
         controller.dropLayouts(outside: 0...2_000)
         #expect(controller.layouts.count <= 2, "kept \(controller.layouts.count) off-screen megabyte layouts")
     }

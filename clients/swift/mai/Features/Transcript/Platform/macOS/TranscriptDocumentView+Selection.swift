@@ -325,11 +325,7 @@
             }
             if layout.content.link(at: local) != nil {
                 NSCursor.pointingHand.set()
-            } else if row.kind.isSelectable,
-                layout.content.textSegments.contains(where: { segment in
-                    (segment.hitRect ?? CGRect(origin: segment.origin, size: segment.layout.size)).contains(local)
-                })
-            {
+            } else if row.kind.isSelectable, layout.content.containsSelectablePoint(local) {
                 NSCursor.iBeam.set()
             } else {
                 NSCursor.arrow.set()

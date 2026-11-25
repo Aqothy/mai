@@ -213,6 +213,7 @@ nonisolated final class RowLayer: CALayer {
         let syncForVisibleBlank =
             !drawsNow && syncDeadline > 0 && band.contents == nil && !visible.isNull
             && band.frame.intersects(visible) && content.retainedBytes <= Self.syncFallbackMaxRetainedBytes
+            && !(content.codeLayout?.hasLargeNonASCIILine ?? false)
             && CACurrentMediaTime() < syncDeadline
         guard drawsNow || syncForVisibleBlank || !band.isPending else { return }
         let raster = BandRaster(
@@ -410,12 +411,15 @@ nonisolated final class RowLayer: CALayer {
 
     private func configureShape(palette: TextPalette) {
         switch content {
-        case .bubble(_, let frame, _):
+        case .bubble(_, let frame, _, let topRounded, let bottomRounded):
             shape.isHidden = false
             shape.frame = frame
             shape.backgroundColor = palette.bubble
-            shape.cornerRadius = TextStyle.bubbleCornerRadius
-            shape.maskedCorners = Self.allCorners
+            var corners: CACornerMask = []
+            if topRounded { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
+            if bottomRounded { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
+            shape.cornerRadius = corners.isEmpty ? 0 : TextStyle.bubbleCornerRadius
+            shape.maskedCorners = corners
             shape.borderWidth = 0
             masksToBounds = false
         case .code(_, let frame):

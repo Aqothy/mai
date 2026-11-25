@@ -158,7 +158,7 @@ struct TranscriptBuilderTests {
 
         // User message resolved reference link whole and laid out as a bubble.
         let expectedURL = try #require(URL(string: "https://example.com/ref"))
-        if case .bubble(let userLayout, _, _) = controller.layout(forRowAt: 0)?.content {
+        if case .bubble(let userLayout, _, _, _, _) = controller.layout(forRowAt: 0)?.content {
             #expect(userLayout.string == "See ref and bold.")
             #expect(userLayout.links == [expectedURL])
         } else {

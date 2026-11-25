@@ -5,7 +5,7 @@ import Foundation
 nonisolated enum RowContentLayout: Sendable {
     case text(TextLayout, origin: CGPoint)
     /// A user message: its bubble and the text inside it.
-    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint)
+    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint, topRounded: Bool = true, bottomRounded: Bool = true)
     case code(CodeLayout, frame: CGRect)
     /// A wide code block's lines alone, in its horizontal scroller.
     case codeBody(CodeLayout)
@@ -27,10 +27,10 @@ nonisolated extension RowContentLayout {
     /// reason: one line of a minified file holds megabytes of glyphs).
     var retainedBytes: Int {
         switch self {
-        case .text(let layout, _), .bubble(let layout, _, _), .header(let layout, _, _), .notice(let layout, _, _):
+        case .text(let layout, _), .bubble(let layout, _, _, _, _), .header(let layout, _, _), .notice(let layout, _, _):
             layout.retainedBytes
         case .code(let code, _), .codeBody(let code):
-            code.body.retainedBytes + code.label.retainedBytes
+            code.retainedBytes
         case .table(let table, _), .tableBody(let table):
             table.cells.reduce(0) { $0 + $1.layout.retainedBytes }
         case .actions, .empty:
@@ -112,7 +112,7 @@ nonisolated extension RowContentLayout {
             return .zero
         case .text(let layout, let origin):
             return textRect(layout, at: origin)
-        case .bubble(let layout, _, let textOrigin):
+        case .bubble(let layout, _, let textOrigin, _, _):
             return textRect(layout, at: textOrigin)
         case .notice(let layout, let frame, let textOrigin):
             return textRect(layout, at: CGPoint(x: frame.minX + textOrigin.x, y: textOrigin.y))
@@ -128,7 +128,15 @@ nonisolated extension RowContentLayout {
                 x: frame.minX, y: frame.minY + code.headerHeight,
                 width: frame.width, height: max(0, frame.height - code.headerHeight))
             let bodyOrigin = CGPoint(x: frame.minX + code.bodyOrigin.x, y: frame.minY + code.bodyOrigin.y)
-            let bodyRect = textRect(code.body, at: bodyOrigin).intersection(bodyClip)
+            let bodyRect: CGRect =
+                if let body = code.materializedBody {
+                    textRect(body, at: bodyOrigin).intersection(bodyClip)
+                } else {
+                    CGRect(
+                        x: bodyOrigin.x - 4, y: bodyOrigin.y - 2,
+                        width: code.bodySize.width + 8, height: code.bodySize.height + 4
+                    ).intersection(bodyClip)
+                }
             if labelRect.isEmpty { return bodyRect.isNull ? .zero : clamp(bodyRect) }
             if bodyRect.isNull || bodyRect.isEmpty { return labelRect }
             return clamp(labelRect.union(bodyRect))

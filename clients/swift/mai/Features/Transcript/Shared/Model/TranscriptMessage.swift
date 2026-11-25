@@ -37,6 +37,18 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
         }
     }
 
+    /// Row ID for the `index`-th parsed row of this message. Preserves the
+    /// single-row IDs `"user|\(id)"` and `"thought|\(id)"` for row 0 so saved
+    /// places and pending-row lookups stay stable whether a message is 1 row
+    /// or flattened into bounded slices.
+    func parsedRowID(at index: Int) -> String {
+        switch kind {
+        case .assistant: "\(id)#\(index)"
+        case .user: index == 0 ? "user|\(id)" : "user|\(id)#\(index)"
+        case .thought: index == 0 ? "thought|\(id)" : "thought|\(id)#\(index)"
+        }
+    }
+
     /// The message a Comment on its text belongs to: thoughts are no one's.
     var messageID: String? { kind == .thought ? nil : id }
 
@@ -56,34 +68,17 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
             messageID: messageID, role: role, turnID: turnID)
     }
 
-    /// Turns parsed Markdown `blocks` into this message's rows: one row per
-    /// block for assistant messages; one bubble row for user messages; one
-    /// muted Markdown row for thoughts. Pass precomputed `metrics` (counted
+    /// Turns parsed Markdown `blocks` into this message's bounded rows via
+    /// `TranscriptBlockFlattener` (every prose unit `<= 8 KB` across user,
+    /// assistant, and thought messages). Pass precomputed `metrics` (counted
     /// off-main) so rebuilding rows on the main thread never scans text.
     func rows(from blocks: [MarkdownBlock], metrics: [TextMetrics]? = nil) -> [TranscriptRow] {
-        switch kind {
-        case .assistant:
-            return blocks.indices.map { index in
-                let rowMetrics = metrics.flatMap { index < $0.count ? $0[index] : nil }
-                return TranscriptRow(
-                    id: "\(id)#\(index)", sourceID: id,
-                    kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
-                    messageID: id, role: .assistant, turnID: turnID, metrics: rowMetrics)
-            }
-        case .user:
-            let rowMetrics = metrics?.first
-            return [
-                TranscriptRow(
-                    id: "user|\(id)", sourceID: id, kind: .userMessage(blocks),
-                    messageID: id, role: .user, turnID: turnID, metrics: rowMetrics)
-            ]
-        case .thought:
-            let rowMetrics = metrics?.first
-            return [
-                TranscriptRow(
-                    id: "thought|\(id)", sourceID: id, kind: .thought(blocks),
-                    messageID: nil, role: nil, turnID: turnID, metrics: rowMetrics)
-            ]
+        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: kind)
+        return kinds.indices.map { index in
+            let rowMetrics = metrics.flatMap { index < $0.count ? $0[index] : nil }
+            return TranscriptRow(
+                id: parsedRowID(at: index), sourceID: id, kind: kinds[index],
+                messageID: messageID, role: role, turnID: turnID, metrics: rowMetrics)
         }
     }
 }

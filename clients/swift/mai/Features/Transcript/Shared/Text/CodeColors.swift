@@ -3,9 +3,9 @@ import Foundation
 /// Syntax colors made for one code block's text, in one theme (colors are
 /// concrete per theme). Kept with the block's layout so a new width or text
 /// size lays it out colored again instead of plain then colored.
-nonisolated struct CodeColors: Sendable {
+nonisolated struct CodeColors: Equatable, Sendable {
     /// A run of syntax color over UTF-16 offsets of the code.
-    struct Run: Sendable {
+    struct Run: Equatable, Sendable {
         let range: Range<Int>
         let color: TextColor
     }

@@ -7,12 +7,12 @@ import Foundation
 nonisolated enum RowSelectableText {
     static func string(for kind: TranscriptRowKind, style: TextStyle) -> String? {
         switch kind {
-        case .markdownBlock(.code(_, let code), _):
+        case .markdownBlock(.code(_, let code), _, let context) where !context.isNestedInContainer:
             return code
-        case .markdownBlock(.table(let table), _):
+        case .markdownBlock(.table(let table), _, let context) where !context.isNestedInContainer:
             return TableLayout.tabSeparatedText(table)
-        case .markdownBlock(let block, _):
-            return AttributedTextBuilder.build([block], style: style).string.string
+        case .markdownBlock(let block, _, let context):
+            return AttributedTextBuilder.build([block], style: style, context: context).string.string
         case .userMessage(let blocks):
             return AttributedTextBuilder.build(blocks, style: style).string.string
         case .thought(let blocks):
@@ -32,12 +32,12 @@ nonisolated enum RowSelectableText {
     /// `RowContentLayout.selectableLength` for every selectable row kind.
     static func utf16Length(for kind: TranscriptRowKind) -> Int? {
         switch kind {
-        case .markdownBlock(.code(_, let code), _):
+        case .markdownBlock(.code(_, let code), _, let context) where !context.isNestedInContainer:
             return code.utf16.count
-        case .markdownBlock(.table(let table), _):
+        case .markdownBlock(.table(let table), _, let context) where !context.isNestedInContainer:
             return tableUTF16Length(table)
-        case .markdownBlock(let block, _):
-            return blocksUTF16Length([block])
+        case .markdownBlock(let block, _, let context):
+            return blocksUTF16Length([block], context: context)
         case .userMessage(let blocks), .thought(let blocks):
             return blocksUTF16Length(blocks)
         case .pendingMessage(_, let source):
@@ -65,7 +65,9 @@ nonisolated enum RowSelectableText {
         return total
     }
 
-    private static func blocksUTF16Length(_ blocks: [MarkdownBlock]) -> Int {
+    private static func blocksUTF16Length(
+        _ blocks: [MarkdownBlock], context: TranscriptBlockContext = .default
+    ) -> Int {
         var total = 0
         func beginParagraph() {
             if total > 0 { total += 1 }
@@ -131,6 +133,22 @@ nonisolated enum RowSelectableText {
                 beginParagraph()
                 total += spelling.utf16.count
             }
+        }
+        if let marker = context.listMarker, let first = blocks.first {
+            switch marker {
+            case .task: break
+            case .ordered(let number): total += decimalDigitCount(number) + 2
+            case .bullet: total += 3
+            }
+            let startIndex: Int
+            if case .paragraph(let inlines) = first {
+                appendInlines(inlines)
+                startIndex = 1
+            } else {
+                startIndex = 0
+            }
+            for block in blocks[startIndex...] { appendBlock(block) }
+            return total
         }
         for block in blocks { appendBlock(block) }
         return total

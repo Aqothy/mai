@@ -27,7 +27,7 @@ nonisolated struct TextMetrics: Hashable, Sendable {
 
     init(_ kind: TranscriptRowKind) {
         switch kind {
-        case .markdownBlock(let block, _):
+        case .markdownBlock(let block, _, _):
             add(block)
             blocks = 1
             selectableUTF16 = RowSelectableText.utf16Length(for: kind)

@@ -6,8 +6,8 @@ import Foundation
 nonisolated enum TranscriptRowKind: Hashable, Sendable {
     /// A user prompt: one bubble, its parsed Markdown blocks laid out inside.
     case userMessage([MarkdownBlock])
-    /// One top-level Markdown block of an assistant message.
-    case markdownBlock(MarkdownBlock, TranscriptBlockPosition)
+    /// One top-level Markdown block (or bounded prose slice) of a message.
+    case markdownBlock(MarkdownBlock, TranscriptBlockPosition, TranscriptBlockContext = .default)
     /// Reasoning, in muted text: parsed Markdown blocks laid out as one text.
     case thought([MarkdownBlock])
     /// A message (user, assistant, or reasoning) not parsed yet; shown by O(1)

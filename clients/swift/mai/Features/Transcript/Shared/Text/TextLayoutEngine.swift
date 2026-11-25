@@ -22,6 +22,9 @@ nonisolated enum TextLayoutEngine {
         /// disabled for shrink-wrapped user bubbles so short Arabic prompts
         /// stay compact.
         var alignsRTLToWidth = true
+        /// Leading vertical gap above line 0 across which continuing quote bars
+        /// extend seamlessly from the previous flattened slice.
+        var continuingQuoteGap: CGFloat = 0
     }
 
     /// Core Text lays a string longer than 10,240 UTF-16 units out another
@@ -173,14 +176,14 @@ nonisolated enum TextLayoutEngine {
     /// Samaritan, Mandaic, BiDi control marks, Arabic Presentation Forms, and
     /// astral RTL script high surrogates (U+10800..U+10FFF, U+1E800..U+1EFFF).
     static func isBiDiCodeUnit(_ u: unichar) -> Bool {
-        if u <= 0x08FF { return true }
+        if u >= 0x0590 && u <= 0x08FF { return true }
         if u >= 0x200E && u <= 0x200F { return true }
         if u >= 0x202A && u <= 0x202E { return true }
         if u >= 0x2066 && u <= 0x2069 { return true }
         if u >= 0xD802 && u <= 0xD803 { return true }
         if u >= 0xD83A && u <= 0xD83B { return true }
         if u >= 0xFB1D && u <= 0xFDFF { return true }
-        if u >= 0xFE70 && u <= 0xFEFF { return true }
+        if u >= 0xFE70 && u <= 0xFEFC { return true }
         return false
     }
 
@@ -444,7 +447,10 @@ nonisolated enum TextLayoutEngine {
             decorations = initialDecorations
             y = initialY
             width = initialWidth
-            self.previousQuoteBars = previousQuoteBars
+            self.previousQuoteBars =
+                !previousQuoteBars.isEmpty
+                ? previousQuoteBars
+                : (options.continuingQuoteGap > 0 ? (text.paragraphs.first?.quoteBars ?? []) : [])
         }
 
         mutating func add(
@@ -456,7 +462,7 @@ nonisolated enum TextLayoutEngine {
             let baseOffset = utf16BaseOffset + windowOffset
             let gapAbove: CGFloat
             if lines.isEmpty {
-                gapAbove = 0
+                gapAbove = options.continuingQuoteGap
             } else {
                 gapAbove = options.lineSpacing + (isParagraphStart ? paragraph?.spacingBefore ?? 0 : 0)
             }

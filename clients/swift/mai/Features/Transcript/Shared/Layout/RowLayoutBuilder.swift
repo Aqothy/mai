@@ -18,9 +18,37 @@ nonisolated enum RowLayoutBuilder {
     ) -> (CGFloat, RowContentLayout) {
         let sameStyle = previous?.layout.key.styleVersion == style.version
         switch kind {
-        case .markdownBlock(let block, let position):
-            let top = position.spacingAbove(style)
-            let bottom = position.spacingBelow(style)
+        case .markdownBlock(let block, let position, let context):
+            let top = context.spacingAbove(position, style: style)
+            let bottom = context.spacingBelow(position, style: style)
+            if context.presentation == .userBubble {
+                let inner = max(1, width - 2 * style.bubbleHorizontalPadding)
+                let quoteGap: CGFloat = context.joinsAbove && context.hasQuoteBars ? top : 0
+                let layout = prose(
+                    [block], width: inner, style: style, alignsRTLToWidth: false, context: context,
+                    continuingQuoteGap: quoteGap)
+                let topPad = context.joinsAbove ? 0 : style.bubbleVerticalPadding
+                let bottomPad = context.joinsBelow ? 0 : style.bubbleVerticalPadding
+                // Extend the bubble background up to `y = 0` on joined slices
+                // so paragraph spacing stays filled inside one continuous bubble.
+                let bubbleY: CGFloat = context.joinsAbove ? 0 : top
+                let textY: CGFloat = (quoteGap > 0 ? 0 : top) + topPad
+                let bubbleHeight = (context.joinsAbove ? (quoteGap > 0 ? 0 : top) : 0) + layout.size.height + topPad + bottomPad
+                let bubble = CGRect(x: 0, y: bubbleY, width: width, height: bubbleHeight)
+                return (
+                    bubbleY + bubble.height + bottom,
+                    .bubble(
+                        layout, frame: bubble,
+                        textOrigin: CGPoint(x: style.bubbleHorizontalPadding, y: textY),
+                        topRounded: !context.joinsAbove, bottomRounded: !context.joinsBelow)
+                )
+            }
+            if context.isNestedInContainer {
+                let quoteGap: CGFloat = context.joinsAbove && context.hasQuoteBars ? top : 0
+                let layout = prose([block], width: width, style: style, context: context, continuingQuoteGap: quoteGap)
+                let originY: CGFloat = quoteGap > 0 ? 0 : top
+                return (originY + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: originY)))
+            }
             switch block {
             case .code(let language, let code):
                 let prevCode = sameStyle ? previous?.layout.content.codeLayout : nil
@@ -59,7 +87,8 @@ nonisolated enum RowLayoutBuilder {
                 )
             case .paragraph(let inlines):
                 if sameStyle, let previous, previous.layout.key.width == width,
-                    case .markdownBlock(.paragraph(let oldInlines), _) = previous.kind,
+                    case .markdownBlock(.paragraph(let oldInlines), _, let oldContext) = previous.kind,
+                    oldContext == context,
                     case .text(let prevText, _) = previous.layout.content,
                     !prevText.hasComplexBiDi
                 {
@@ -92,10 +121,10 @@ nonisolated enum RowLayoutBuilder {
                         }
                     }
                 }
-                let layout = prose([block], width: width, style: style)
+                let layout = prose([block], width: width, style: style, context: context)
                 return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
             default:
-                let layout = prose([block], width: width, style: style)
+                let layout = prose([block], width: width, style: style, context: context)
                 return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
             }
         case .userMessage(let blocks):
@@ -149,13 +178,14 @@ nonisolated enum RowLayoutBuilder {
 
     static func prose(
         _ blocks: [MarkdownBlock], width: CGFloat, style: TextStyle, color: TextColor = .primary,
-        alignsRTLToWidth: Bool = true
+        alignsRTLToWidth: Bool = true, context: TranscriptBlockContext = .default,
+        continuingQuoteGap: CGFloat = 0
     ) -> TextLayout {
         TextLayoutEngine.layout(
-            AttributedTextBuilder.build(blocks, style: style, color: color), width: width,
+            AttributedTextBuilder.build(blocks, style: style, color: color, context: context), width: width,
             options: .init(
                 lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth,
-                alignsRTLToWidth: alignsRTLToWidth))
+                alignsRTLToWidth: alignsRTLToWidth, continuingQuoteGap: continuingQuoteGap))
     }
 
     private static func plain(

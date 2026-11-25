@@ -6,8 +6,21 @@ import Foundation
 /// line height + inset), so it never changes when colors arrive; the width
 /// is the longest line, scrolled horizontally when wider than the row.
 nonisolated struct CodeLayout: Sendable {
+    /// Materialized `TextLayout` for normal code blocks (`<= 16 KB`), or
+    /// 2D-virtualized on-demand index for extreme vertical or horizontal blocks.
+    enum Body: Sendable {
+        case materialized(TextLayout)
+        case virtualized(VirtualCodeBody)
+    }
+
+    /// Above this UTF-8 size (or if any single line exceeds `virtualizeLineLimit`),
+    /// code blocks use 2D-virtualized on-demand tile shaping instead of
+    /// materializing every glyph up front.
+    static let virtualizeByteLimit = 16_384
+    static let virtualizeLineLimit = 4_096
+
     let label: TextLayout
-    let body: TextLayout
+    let storage: Body
     let code: String
     let headerHeight: CGFloat
     /// The language label's top inside the block.
@@ -22,8 +35,46 @@ nonisolated struct CodeLayout: Sendable {
     /// The syntax colors drawn, kept so the same code laid out again (a new
     /// width or text size) keeps them; nil while plain.
     let colors: CodeColors?
+    /// True when `storage` was built by `MonospaceASCIIMetrics.materializeASCII`
+    /// rather than Core Text, so incremental Core Text suffix layout only runs
+    /// on Core Text prefixes.
+    let usedASCIIFastPath: Bool
+
+    /// Materialized body when non-virtualized (nil for 2D-virtualized code).
+    var materializedBody: TextLayout? {
+        if case .materialized(let layout) = storage { return layout }
+        return nil
+    }
+
+    var bodySize: CGSize {
+        switch storage {
+        case .materialized(let layout): layout.size
+        case .virtualized(let virtual): virtual.size
+        }
+    }
+
+    var utf16Length: Int {
+        switch storage {
+        case .materialized(let layout): layout.length
+        case .virtualized(let virtual): virtual.totalUTF16
+        }
+    }
+
+    var retainedBytes: Int {
+        let bodyBytes: Int =
+            switch storage {
+            case .materialized(let layout): layout.retainedBytes
+            case .virtualized(let virtual): virtual.retainedBytes
+            }
+        return bodyBytes + label.retainedBytes
+    }
 
     var isHighlighted: Bool { colors != nil }
+
+    var hasLargeNonASCIILine: Bool {
+        if case .virtualized(let virtual) = storage { return virtual.hasLargeNonASCIILine }
+        return false
+    }
 
     /// The theme its syntax colors are for (dark or not); nil while plain.
     var colorsAreDark: Bool? { colors?.isDark }
@@ -41,36 +92,71 @@ nonisolated struct CodeLayout: Sendable {
             ?? TextLayoutEngine.layout(
                 AttributedTextBuilder.plain(display, role: .callout, color: .secondary, style: style),
                 width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
-        let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
-        var incremental: TextLayout?
-        if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
-            code.hasPrefix(previous.code), previous.body.lines.count >= 3, !previous.body.hasComplexBiDi
-        {
-            // Streaming plain fence: keep all finished lines before the last
-            // line of `previous.code` and build/typeset ONLY the growing suffix.
-            let keepCount = previous.body.lines.count - 1
-            let resumeUTF16 = previous.body.lines[keepCount].range.lowerBound
-            let utf16 = code.utf16
-            if resumeUTF16 > 0, resumeUTF16 < utf16.count {
-                let startIdx = utf16.index(utf16.startIndex, offsetBy: resumeUTF16)
-                let suffixText = buildStyledCode(String(code[startIdx...]), colors: nil, style: style)
-                incremental = TextLayoutEngine.layoutSuffix(
-                    fullString: code, suffix: suffixText, width: .greatestFiniteMagnitude,
-                    options: bodyOptions, appendingTo: previous.body, keepCount: keepCount)
+        let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
+        let storage: Body
+        let bodyWidth: CGFloat
+        let usedASCIIFastPath: Bool
+        if shouldVirtualize(code) {
+            let virtual = VirtualCodeBody(code: code, style: style, colors: colors, ascii: ascii)
+            storage = .virtualized(virtual)
+            bodyWidth = virtual.size.width
+            usedASCIIFastPath = false
+        } else if colors == nil, let fast = ascii.materializeASCII(code: code, style: style) {
+            storage = .materialized(fast)
+            bodyWidth = fast.size.width
+            usedASCIIFastPath = true
+        } else {
+            let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
+            var incremental: TextLayout?
+            if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
+                case .materialized(let prevBody) = previous.storage,
+                !previous.usedASCIIFastPath,
+                code.hasPrefix(previous.code), prevBody.lines.count >= 3, !prevBody.hasComplexBiDi
+            {
+                let keepCount = prevBody.lines.count - 1
+                let resumeUTF16 = prevBody.lines[keepCount].range.lowerBound
+                let utf16 = code.utf16
+                if resumeUTF16 > 0, resumeUTF16 < utf16.count {
+                    let startIdx = utf16.index(utf16.startIndex, offsetBy: resumeUTF16)
+                    let suffixText = buildStyledCode(String(code[startIdx...]), colors: nil, style: style)
+                    incremental = TextLayoutEngine.layoutSuffix(
+                        fullString: code, suffix: suffixText, width: .greatestFiniteMagnitude,
+                        options: bodyOptions, appendingTo: prevBody, keepCount: keepCount)
+                }
             }
+            let body =
+                incremental
+                ?? TextLayoutEngine.layout(
+                    buildStyledCode(code, colors: colors, style: style), width: .greatestFiniteMagnitude,
+                    options: bodyOptions)
+            storage = .materialized(body)
+            bodyWidth = body.size.width
+            usedASCIIFastPath = false
         }
-        let body =
-            incremental
-            ?? TextLayoutEngine.layout(
-                buildStyledCode(code, colors: colors, style: style), width: .greatestFiniteMagnitude,
-                options: bodyOptions)
         let headerHeight = style.codeHeaderHeight
-        let contentWidth = ceil(body.size.width + 2 * style.codeHorizontalInset)
+        let contentWidth = ceil(bodyWidth + 2 * style.codeHorizontalInset)
         let height = Self.height(for: code, style: style)
         return CodeLayout(
-            label: label, body: body, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
+            label: label, storage: storage, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
             bodyOrigin: CGPoint(x: style.codeHorizontalInset, y: headerHeight),
-            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors)
+            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors,
+            usedASCIIFastPath: usedASCIIFastPath)
+    }
+
+    private static func shouldVirtualize(_ code: String) -> Bool {
+        let count = code.utf8.count
+        if count > virtualizeByteLimit { return true }
+        guard count > virtualizeLineLimit else { return false }
+        var run = 0
+        for byte in code.utf8 {
+            if byte == 0x0A {
+                run = 0
+            } else {
+                run += 1
+                if run > virtualizeLineLimit { return true }
+            }
+        }
+        return false
     }
 
     /// Analytic height (independent of width and syntax colors).
@@ -88,12 +174,73 @@ nonisolated struct CodeLayout: Sendable {
     /// layout is the same and only the block's width changes.
     func resized(toWidth width: CGFloat) -> CodeLayout {
         CodeLayout(
-            label: label, body: body, code: code, headerHeight: headerHeight, labelTop: labelTop,
+            label: label, storage: storage, code: code, headerHeight: headerHeight, labelTop: labelTop,
             bodyOrigin: bodyOrigin, size: CGSize(width: width, height: size.height), contentWidth: contentWidth,
-            colors: colors)
+            colors: colors, usedASCIIFastPath: usedASCIIFastPath)
     }
 
-    private static func buildStyledCode(_ code: String, colors: CodeColors?, style: TextStyle) -> StyledText {
+    func drawBody(at origin: CGPoint, clip: CGRect, palette: TextPalette, in context: CGContext) {
+        switch storage {
+        case .materialized(let layout):
+            TextRenderer.draw(layout, at: origin, clip: clip, palette: palette, in: context)
+        case .virtualized(let virtual):
+            virtual.draw(at: origin, clip: clip, palette: palette, in: context)
+        }
+    }
+
+    func offset(closestTo local: CGPoint) -> Int {
+        switch storage {
+        case .materialized(let layout): layout.offset(closestTo: local)
+        case .virtualized(let virtual): virtual.offset(closestTo: local)
+        }
+    }
+
+    func strictOffset(at local: CGPoint) -> Int? {
+        switch storage {
+        case .materialized(let layout):
+            guard CGRect(origin: .zero, size: layout.size).contains(local),
+                let lineIdx = layout.lineIndex(nearestY: local.y)
+            else { return nil }
+            let line = layout.lines[lineIdx]
+            guard local.y >= line.top, local.y <= line.bottom,
+                local.x >= line.x, local.x <= line.x + line.width
+            else { return nil }
+            return layout.offset(closestTo: local)
+        case .virtualized(let virtual):
+            return virtual.strictOffset(at: local)
+        }
+    }
+
+    func selectionRects(for range: Range<Int>) -> [CGRect] {
+        switch storage {
+        case .materialized(let layout): layout.selectionRects(for: range)
+        case .virtualized(let virtual): virtual.selectionRects(for: range)
+        }
+    }
+
+    func caretRect(for utf16Offset: Int) -> CGRect? {
+        switch storage {
+        case .materialized(let layout):
+            guard let line = layout.lines.last(where: { $0.range.lowerBound <= utf16Offset }) else { return nil }
+            let x = line.caretOffsets[min(utf16Offset - line.range.lowerBound, line.caretOffsets.count - 1)]
+            return CGRect(x: x, y: line.top, width: 2, height: line.height)
+        case .virtualized(let virtual):
+            return virtual.caretRect(for: utf16Offset)
+        }
+    }
+
+    func unchangedBodyHeight(comparedTo other: CodeLayout) -> CGFloat {
+        switch (storage, other.storage) {
+        case (.materialized(let a), .materialized(let b)):
+            return RowContentDiff.unchangedHeight(a, b)
+        case (.virtualized(let a), .virtualized(let b)):
+            return a.unchangedHeight(comparedTo: b)
+        default:
+            return 0
+        }
+    }
+
+    static func buildStyledCode(_ code: String, colors: CodeColors?, style: TextStyle) -> StyledText {
         var text = StyledText()
         text.paragraphs = [StyledParagraph(start: 0, firstLineIndent: 0, headIndent: 0, spacingBefore: 0, quoteBars: [])]
         let font = style.font(.code)

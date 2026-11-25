@@ -21,17 +21,26 @@ nonisolated enum HeightEstimator {
         let metrics = metrics ?? TextMetrics(kind)
         let height: CGFloat
         switch kind {
-        case .markdownBlock(let block, let position):
-            let spacing = position.spacingAbove(style) + position.spacingBelow(style)
-            switch block {
-            case .code:
-                height = spacing + CodeLayout.height(lines: metrics.lines, style: style)
-            case .table(let table):
-                let rows = CGFloat(table.rows.count + 1)
-                height =
-                    spacing + style.tableToolbarHeight
-                    + rows * (lineHeight + 2 * style.tableCellVerticalPadding + 1)
-            default:
+        case .markdownBlock(let block, let position, let context):
+            let spacing = context.spacingAbove(position, style: style) + context.spacingBelow(position, style: style)
+            if context.presentation == .userBubble {
+                let inner = Double(max(12, (width - 2 * style.bubbleHorizontalPadding) / characterWidth))
+                let topPad = context.joinsAbove ? 0 : style.bubbleVerticalPadding
+                let bottomPad = context.joinsBelow ? 0 : style.bubbleVerticalPadding
+                height = spacing + topPad + bottomPad + CGFloat(metrics.wrappedLines(perLine: inner)) * lineHeight
+            } else if !context.isNestedInContainer {
+                switch block {
+                case .code:
+                    height = spacing + CodeLayout.height(lines: metrics.lines, style: style)
+                case .table(let table):
+                    let rows = CGFloat(table.rows.count + 1)
+                    height =
+                        spacing + style.tableToolbarHeight
+                        + rows * (lineHeight + 2 * style.tableCellVerticalPadding + 1)
+                default:
+                    height = spacing + CGFloat(metrics.wrappedLines(perLine: perLine)) * lineHeight
+                }
+            } else {
                 height = spacing + CGFloat(metrics.wrappedLines(perLine: perLine)) * lineHeight
             }
         case .userMessage:

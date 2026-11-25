@@ -55,10 +55,6 @@ actor TranscriptStreamWorker {
     private struct ShownState {
         let width: CGFloat
         let styleVersion: Int
-        /// Committed blocks whose `isLast` position is already settled (never
-        /// change on later appends at the same width/style).
-        let stableCount: Int
-        let parserResetCount: Int
         let rows: [(kind: TranscriptRowKind, layout: RowLayout)]
     }
 
@@ -68,36 +64,24 @@ actor TranscriptStreamWorker {
     func run(_ update: Update) -> Result {
         var parser = parsers[update.messageID] ?? StreamingMarkdownParser()
         let blocks: [MarkdownBlock]
-        let committedCount: Int
         if update.isFinished {
             blocks = parser.finish(update.text)
-            committedCount = blocks.count
             parsers[update.messageID] = nil
         } else {
             let snapshot = parser.update(update.text)
             blocks = snapshot.blocks
-            committedCount = snapshot.committed.count
             parsers[update.messageID] = parser
         }
+        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: .assistant)
         let state = shown[update.messageID].flatMap {
             $0.width == update.width && $0.styleVersion == update.style.version ? $0 : nil
         }
         let previous = state?.rows ?? []
-        // Committed blocks strictly before the last block of the previous
-        // update cannot change unless the parser reset them (a replaced
-        // message, or a reference definition resolving an earlier link).
-        let canSkipCommitted = state.map { $0.parserResetCount == parser.committedResetCount } ?? false
-        let skipPrefix =
-            canSkipCommitted
-            ? min(state?.stableCount ?? 0, max(0, committedCount - 1), previous.count, max(0, blocks.count - 1))
-            : 0
         var current: [(kind: TranscriptRowKind, layout: RowLayout)] = []
-        current.reserveCapacity(blocks.count)
-        if skipPrefix > 0 { current.append(contentsOf: previous[..<skipPrefix]) }
+        current.reserveCapacity(kinds.count)
         var changed: [Row] = []
-        for index in skipPrefix..<blocks.count {
-            let block = blocks[index]
-            let kind = TranscriptRowKind.markdownBlock(block, .of(index, in: blocks))
+        for index in 0..<kinds.count {
+            let kind = kinds[index]
             let before = index < previous.count ? previous[index] : nil
             if let before, before.kind == kind {
                 current.append(before)
@@ -109,7 +93,8 @@ actor TranscriptStreamWorker {
                 key: RowLayoutKey(contentVersion: -1, width: update.width, styleVersion: update.style.version),
                 style: update.style)
             if let before { request.previous = before }
-            if case .markdownBlock(.code(_, let code), _) = kind, let isDark = update.isDark,
+            if case .markdownBlock(.code(_, let code), _, let ctx) = kind, !ctx.isNestedInContainer,
+                let isDark = update.isDark,
                 let colors = update.codeColors[rowID], colors.matches(code: code, isDark: isDark)
             {
                 request.codeColors = colors
@@ -125,14 +110,10 @@ actor TranscriptStreamWorker {
         if update.isFinished {
             shown[update.messageID] = nil
         } else {
-            let nextStable = max(0, min(committedCount, blocks.count - 1))
             shown[update.messageID] = ShownState(
-                width: update.width, styleVersion: update.style.version, stableCount: nextStable,
-                parserResetCount: parser.committedResetCount, rows: current)
+                width: update.width, styleVersion: update.style.version, rows: current)
         }
-        let metrics = blocks.indices.map { index in
-            TextMetrics(.markdownBlock(blocks[index], .of(index, in: blocks)))
-        }
+        let metrics = kinds.map(TextMetrics.init)
         return Result(
             messageID: update.messageID, textLength: update.text.utf8.count, isFinished: update.isFinished,
             blocks: blocks, metrics: metrics, width: update.width, styleVersion: update.style.version, rows: changed)

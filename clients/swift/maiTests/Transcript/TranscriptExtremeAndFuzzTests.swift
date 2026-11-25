@@ -134,7 +134,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         let code = (0..<200).map { "token_\($0)_value" }.joined(separator: " ")
         let codeLayout = CodeLayout.make(code: code, language: "swift", colors: nil, width: 400, style: style)
         let palette = await TextPalette.resolveForTests
-        let tile = CGRect(x: 768, y: 0, width: 768, height: min(512, codeLayout.body.size.height + 16))
+        let tile = CGRect(x: 768, y: 0, width: 768, height: min(512, codeLayout.bodySize.height + 16))
 
         func render(clipped: Bool) -> [UInt8] {
             let w = Int(ceil(tile.width))
@@ -154,7 +154,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
                 let drawClip = clipped
                     ? tile
                     : CGRect(x: 0, y: tile.minY, width: codeLayout.contentWidth + 100, height: tile.height)
-                TextRenderer.draw(codeLayout.body, at: CGPoint(x: codeLayout.bodyOrigin.x, y: 0), clip: drawClip, palette: palette, in: ctx)
+                codeLayout.drawBody(at: CGPoint(x: codeLayout.bodyOrigin.x, y: 0), clip: drawClip, palette: palette, in: ctx)
             }
             return pixels
         }
@@ -203,8 +203,8 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         let key = RowLayoutKey(contentVersion: 0, width: 600, styleVersion: style.version)
         let controller = TranscriptController(configuration: .testing)
 
-        // Memory-budget eviction: 16 rows of 200 wide lines hold > 12 MB of
-        // layout in fewer rows than the 64-row cap; the off-window ones go.
+        // 2D-virtualized wide code blocks stay tiny in RAM (16 × 35 KB code
+        // blocks hold < 100 KB total instead of > 12 MB).
         let chunk = (0..<200).map { "let line\($0) = " + String(repeating: "x", count: 160) }.joined(separator: "\n")
         let wideRows = (0..<16).map { index in
             TranscriptRow(
@@ -213,15 +213,32 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
                 messageID: "t1|a2", role: .assistant, turnID: "t1")
         }
         controller.setRows(wideRows)
-        let layouts = await Task.detached {
+        let codeLayouts = await Task.detached {
             wideRows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
-        for layout in layouts { controller.storeLayout(layout) }
-        #expect(controller.layouts.count == 16)
-        #expect(controller.cachedLayoutBytes > 12 << 20)
-        controller.dropLayouts(outside: 0...1_000)
-        #expect(controller.layouts.count < 16)
-        #expect(controller.cachedLayoutBytes == controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
+        for layout in codeLayouts { controller.storeLayout(layout) }
+        #expect(controller.cachedLayoutBytes < 256_000)
+
+        // Memory-budget eviction: 40 materialized 12 KB prose rows hold > 12 MB
+        // in fewer rows than the 64-row cap; the off-window ones must evict.
+        let proseController = TranscriptController(configuration: .testing)
+        let bigProse = String(repeating: "memory budget eviction check ", count: 440)
+        let proseRows = (0..<40).map { index in
+            TranscriptRow(
+                id: "t1|p#\(index)", sourceID: "t1|p",
+                kind: .markdownBlock(.paragraph([MarkdownInline(text: bigProse)]), .single),
+                messageID: "t1|p", role: .assistant, turnID: "t1")
+        }
+        proseController.setRows(proseRows)
+        let proseLayouts = await Task.detached {
+            proseRows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
+        }.value
+        for layout in proseLayouts { proseController.storeLayout(layout) }
+        #expect(proseController.layouts.count == 40)
+        #expect(proseController.cachedLayoutBytes > 12 << 20)
+        proseController.dropLayouts(outside: 0...1_000)
+        #expect(proseController.layouts.count < 40)
+        #expect(proseController.cachedLayoutBytes == proseController.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
     }
 
     // MARK: 4. Parse-Only Split for 2,000-Block Messages

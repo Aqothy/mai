@@ -224,7 +224,15 @@ nonisolated enum TranscriptFuzz {
             guard xf == yf, x.size == y.size, x.contentWidth == y.contentWidth, x.headerHeight == y.headerHeight,
                 x.code == y.code
             else { return "code frame" }
-            return difference(x.label, y.label).map { "label: \($0)" } ?? difference(x.body, y.body).map { "body: \($0)" }
+            if let labelDiff = difference(x.label, y.label) { return "label: \(labelDiff)" }
+            switch (x.storage, y.storage) {
+            case (.materialized(let a), .materialized(let b)):
+                return difference(a, b).map { "body: \($0)" }
+            case (.virtualized(let a), .virtualized(let b)):
+                return a.unchangedHeight(comparedTo: b) == .infinity ? nil : "virtual body differs"
+            default:
+                return "code storage kind differs"
+            }
         case (.table(let x, let xf), .table(let y, let yf)):
             guard xf == yf, x.size == y.size, x.gridSize == y.gridSize, x.cells.count == y.cells.count,
                 x.dividers == y.dividers

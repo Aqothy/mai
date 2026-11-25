@@ -123,7 +123,7 @@ struct TextLayoutEngineTests {
     @Test func codeKeepsLinesUnwrappedWithAnAnalyticHeight() {
         let code = "let a = 1\n" + String(repeating: "x", count: 400) + "\nend"
         let block = CodeLayout.make(code: code, language: "swift", colors: nil, width: 300, style: style)
-        #expect(block.body.lines.count == 3)
+        #expect(block.materializedBody?.lines.count == 3)
         #expect(block.isWiderThanBlock)
         #expect(block.size.height == ceil(style.codeHeaderHeight + 3 * style.codeLineHeight + style.codeBottomInset))
         #expect(CodeLayout.displayName("py") == "Python")
@@ -247,8 +247,8 @@ struct TextLayoutEngineTests {
         let c2Inc = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style, previous: c1)
         let c2Full = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style)
         #expect(c2Inc.size == c2Full.size)
-        #expect(c2Inc.body.lines.count == 7)
-        #expect(RowContentDiff.unchangedHeight(c2Inc.body, c2Full.body) == .infinity)
+        #expect(c2Inc.materializedBody?.lines.count == 7)
+        #expect(c2Inc.unchangedBodyHeight(comparedTo: c2Full) == .infinity)
 
         // 3. Table growth.
         let t1 = MarkdownTable(
@@ -317,7 +317,11 @@ struct TextLayoutEngineTests {
             [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.code(language: nil, code: code)])]))],
             width: 600)
         let nestedStart = (nested.string as NSString).range(of: "\tx").location
-        for (name, body, start) in [("whole", whole.body, 0), ("streamed", streamed.body, 0), ("nested", nested, nestedStart)] {
+        guard let wholeBody = whole.materializedBody, let streamedBody = streamed.materializedBody else {
+            Issue.record("expected materialized code bodies")
+            return
+        }
+        for (name, body, start) in [("whole", wholeBody, 0), ("streamed", streamedBody, 0), ("nested", nested, nestedStart)] {
             let lines = body.lines.filter { $0.range.lowerBound >= start }
             // The caret before each line's `x`, from the line's first caret.
             func xCaret(_ line: TextLine) -> CGFloat {

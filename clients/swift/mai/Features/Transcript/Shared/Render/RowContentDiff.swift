@@ -17,15 +17,15 @@ nonisolated enum RowContentDiff {
         where oldFrame.origin == newFrame.origin
             && before.bodyOrigin == after.bodyOrigin
             && (oldFrame.width == newFrame.width
-                || (before.bodyOrigin.x + before.body.size.width <= min(oldFrame.width, newFrame.width)
+                || (before.bodyOrigin.x + before.bodySize.width <= min(oldFrame.width, newFrame.width)
                     && before.bodyOrigin.x + before.label.size.width <= min(oldFrame.width, newFrame.width)))
             && before.colorsAreDark == after.colorsAreDark && before.headerHeight == after.headerHeight
             && before.labelTop == after.labelTop && unchangedHeight(before.label, after.label) == .infinity:
-            let bodyY = oldFrame.minY + before.bodyOrigin.y + unchangedHeight(before.body, after.body)
+            let bodyY = oldFrame.minY + before.bodyOrigin.y + before.unchangedBodyHeight(comparedTo: after)
             return oldFrame.height == newFrame.height ? bodyY : min(bodyY, min(oldFrame.maxY, newFrame.maxY))
         case (.codeBody(let before), .codeBody(let after))
         where before.bodyOrigin == after.bodyOrigin && before.colorsAreDark == after.colorsAreDark:
-            return unchangedHeight(before.body, after.body)
+            return before.unchangedBodyHeight(comparedTo: after)
         case (.table(let before, let oldFrame), .table(let after, let newFrame))
         where oldFrame.origin == newFrame.origin
             && (oldFrame.width == newFrame.width || before.gridSize.width <= min(oldFrame.width, newFrame.width))

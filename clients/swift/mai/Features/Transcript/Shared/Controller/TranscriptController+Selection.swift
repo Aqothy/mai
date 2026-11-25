@@ -67,22 +67,8 @@ extension TranscriptController {
             guard local.x >= body.frame.minX, local.x <= body.frame.maxX else { return nil }
             local.x += scrollX(rows[index].id)
         }
-        guard
-            let segment = layout.content.textSegments.first(where: { segment in
-                (segment.hitRect ?? CGRect(origin: segment.origin, size: segment.layout.size)).contains(local)
-            })
-        else { return nil }
-        let segmentLocal = CGPoint(x: local.x - segment.origin.x, y: local.y - segment.origin.y)
-        if segment.hitRect == nil {
-            // Require the pointer to land over actual glyphs on the hit line,
-            // not empty whitespace 400 pt to the right of a short last line.
-            guard let lineIdx = segment.layout.lineIndex(nearestY: segmentLocal.y) else { return nil }
-            let line = segment.layout.lines[lineIdx]
-            guard segmentLocal.y >= line.top, segmentLocal.y <= line.bottom,
-                segmentLocal.x >= line.x, segmentLocal.x <= line.x + line.width
-            else { return nil }
-        }
-        return TextPosition(rowID: rows[index].id, offset: segment.start + segment.layout.offset(closestTo: segmentLocal))
+        guard let offset = layout.content.strictTextOffset(at: local) else { return nil }
+        return TextPosition(rowID: rows[index].id, offset: offset)
     }
 
     /// The link at `point` (document coordinates), if any.
@@ -234,11 +220,31 @@ extension TranscriptController {
         var remaining = abs(lineOffset)
         let step = lineOffset > 0 ? 1 : -1
 
-        func lineMetrics(
-            in rowIndex: Int, matchingColumnX: CGFloat? = nil
-        ) -> [(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)] {
-            guard let layout = layouts[rows[rowIndex].id] else { return [] }
+        enum RowLines {
+            case materialized([(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)])
+            case virtualized(body: VirtualCodeBody, bodyTop: CGFloat)
+
+            var count: Int {
+                switch self {
+                case .materialized(let list): list.count
+                case .virtualized(let body, _): body.lineCount
+                }
+            }
+
+            func midY(at index: Int) -> CGFloat {
+                switch self {
+                case .materialized(let list): (list[index].top + list[index].bottom) / 2
+                case .virtualized(let body, let bodyTop): bodyTop + (CGFloat(index) + 0.5) * body.lineHeight
+                }
+            }
+        }
+
+        func rowLines(in rowIndex: Int, matchingColumnX: CGFloat? = nil) -> RowLines? {
+            guard let layout = layouts[rows[rowIndex].id] else { return nil }
             let rowTop = geometry.offset(at: rowIndex)
+            if let (virtual, origin) = layout.content.virtualCodeBody {
+                return virtual.lineCount > 0 ? .virtualized(body: virtual, bodyTop: rowTop + origin.y) : nil
+            }
             let segments = layout.content.textSegments
             var result: [(TextSegment, TextLine, CGFloat, CGFloat)] = []
             for segment in segments {
@@ -250,7 +256,7 @@ extension TranscriptController {
                     result.append((segment, line, top, top + line.height))
                 }
             }
-            return result
+            return result.isEmpty ? nil : .materialized(result)
         }
 
         let currentColumnX: CGFloat? = {
@@ -260,42 +266,48 @@ extension TranscriptController {
             return seg.origin.x
         }()
 
-        var lines = lineMetrics(in: rowIndex, matchingColumnX: currentColumnX)
-        // Use `.lastIndex` so a caret at the start of line N+1 (where
-        // line[N].upperBound == line[N+1].lowerBound) matches line N+1 rather
-        // than stalling on line N (agrees with `caretRect`).
-        guard
-            var lineIdx = lines.lastIndex(where: {
-                position.offset >= $0.segment.start + $0.line.range.lowerBound
-                    && position.offset <= $0.segment.start + $0.line.range.upperBound
-            })
-        else { return nil }
+        guard var currentLines = rowLines(in: rowIndex, matchingColumnX: currentColumnX) else { return nil }
+        var lineIdx: Int
+        switch currentLines {
+        case .virtualized(let body, _):
+            lineIdx = body.lineIndex(forUTF16Offset: position.offset)
+        case .materialized(let list):
+            // Use `.lastIndex` so a caret at the start of line N+1 (where
+            // line[N].upperBound == line[N+1].lowerBound) matches line N+1
+            // rather than stalling on line N (agrees with `caretRect`).
+            guard
+                let found = list.lastIndex(where: {
+                    position.offset >= $0.segment.start + $0.line.range.lowerBound
+                        && position.offset <= $0.segment.start + $0.line.range.upperBound
+                })
+            else { return nil }
+            lineIdx = found
+        }
 
         while remaining > 0 {
-            let nextLineIdx = lineIdx + step
-            if lines.indices.contains(nextLineIdx) {
-                lineIdx = nextLineIdx
-                remaining -= 1
+            let count = currentLines.count
+            let avail = step > 0 ? (count - 1 - lineIdx) : lineIdx
+            if remaining <= avail {
+                lineIdx += step * remaining
+                remaining = 0
             } else {
+                remaining -= avail + 1
                 var nextRow = rowIndex + step
                 while rows.indices.contains(nextRow), !rows[nextRow].kind.isSelectable { nextRow += step }
                 guard rows.indices.contains(nextRow) else {
                     return step < 0 ? firstTextPosition : lastTextPosition
                 }
-                let nextLines = lineMetrics(in: nextRow)
-                guard !nextLines.isEmpty else {
+                guard let nextLines = rowLines(in: nextRow) else {
                     let length = selectableLength(ofRowAt: nextRow) ?? 0
                     return TextPosition(rowID: rows[nextRow].id, offset: step < 0 ? length : 0)
                 }
                 rowIndex = nextRow
-                lines = nextLines
-                lineIdx = step > 0 ? 0 : lines.count - 1
-                remaining -= 1
+                currentLines = nextLines
+                lineIdx = step > 0 ? 0 : nextLines.count - 1
             }
         }
 
-        let target = lines[lineIdx]
-        let docPoint = CGPoint(x: targetX, y: (target.top + target.bottom) / 2)
+        let docPoint = CGPoint(x: targetX, y: currentLines.midY(at: lineIdx))
         return self.position(inRowAt: rowIndex, point: docPoint, columnX: columnX, scrollX: scrollX)
     }
 
@@ -383,17 +395,11 @@ extension TranscriptController {
     func caretRect(
         for position: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
     ) -> CGRect? {
-        guard let index = geometry.index(for: position.rowID), let layout = layouts[position.rowID] else { return nil }
+        guard let index = geometry.index(for: position.rowID), let layout = layouts[position.rowID],
+            let local = layout.content.caretRect(for: position.offset)
+        else { return nil }
         let dx = columnX - (layout.content.wideBody != nil ? scrollX(position.rowID) : 0)
-        for segment in layout.content.textSegments where position.offset >= segment.start && position.offset <= segment.end {
-            let local = position.offset - segment.start
-            guard let line = segment.layout.lines.last(where: { $0.range.lowerBound <= local }) else { continue }
-            let x = line.caretOffsets[min(local - line.range.lowerBound, line.caretOffsets.count - 1)]
-            return CGRect(
-                x: dx + segment.origin.x + x, y: geometry.offset(at: index) + segment.origin.y + line.top,
-                width: 2, height: line.height)
-        }
-        return nil
+        return local.offsetBy(dx: dx, dy: geometry.offset(at: index))
     }
 
     /// The message a Comment on the selection belongs to (PLAN Q4): one

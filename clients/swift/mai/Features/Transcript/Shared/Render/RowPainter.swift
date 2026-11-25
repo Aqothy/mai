@@ -12,7 +12,7 @@ nonisolated enum RowPainter {
         switch content {
         case .text(let layout, let origin):
             TextRenderer.draw(layout, at: origin, clip: clip, palette: palette, in: context)
-        case .bubble(let layout, _, let textOrigin):
+        case .bubble(let layout, _, let textOrigin, _, _):
             TextRenderer.draw(layout, at: textOrigin, clip: clip, palette: palette, in: context)
         case .notice(let layout, let frame, let textOrigin):
             TextRenderer.draw(
@@ -30,14 +30,13 @@ nonisolated enum RowPainter {
             if drawsWideBody {
                 context.saveGState()
                 context.clip(to: CGRect(x: frame.minX, y: frame.minY + layout.headerHeight, width: frame.width, height: frame.height - layout.headerHeight))
-                TextRenderer.draw(
-                    layout.body, at: CGPoint(x: frame.minX + layout.bodyOrigin.x, y: frame.minY + layout.bodyOrigin.y),
+                layout.drawBody(
+                    at: CGPoint(x: frame.minX + layout.bodyOrigin.x, y: frame.minY + layout.bodyOrigin.y),
                     clip: clip, palette: palette, in: context)
                 context.restoreGState()
             }
         case .codeBody(let layout):
-            TextRenderer.draw(
-                layout.body, at: CGPoint(x: layout.bodyOrigin.x, y: 0), clip: clip, palette: palette, in: context)
+            layout.drawBody(at: CGPoint(x: layout.bodyOrigin.x, y: 0), clip: clip, palette: palette, in: context)
         case .table(let layout, let frame):
             if drawsWideBody {
                 drawGrid(

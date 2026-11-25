@@ -325,7 +325,7 @@
             let line = String(repeating: #"{"k":"value","n":12345},"#, count: 1_048_576 / 24)
             var lineLayout: RowLayout?
             let lineMs = median { lineLayout = layout(.markdownBlock(.code(language: "json", code: line), .single)) }
-            emit("code-1mb-line", lineMs, ["layoutMB": Double(lineLayout?.content.codeLayout.map { bytes($0.body) } ?? 0) / 1_048_576])
+            emit("code-1mb-line", lineMs, ["layoutMB": Double(lineLayout?.content.retainedBytes ?? 0) / 1_048_576])
 
             // Off-screen retention: twelve rows of a 256 KB line, scrolled past.
             do {
@@ -337,7 +337,7 @@
                     controller.storeLayout(RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
                 }
                 controller.dropLayouts(outside: 0...2_000)
-                let kept = controller.layouts.values.reduce(0) { $0 + ($1.content.codeLayout.map { bytes($0.body) } ?? 0) }
+                let kept = controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes }
                 emit("offscreen-12x256kb-lines", 0, ["keptLayouts": controller.layouts.count, "keptMB": Double(kept) / 1_048_576])
             }
 

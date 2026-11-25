@@ -264,11 +264,12 @@ extension TranscriptController {
             }
         }
         let turnID = existing.first.flatMap { rows[$0].turnID } ?? messageID.split(separator: "|", maxSplits: 1).first.map(String.init)
-        let newRows = result.blocks.enumerated().map { index, block in
+        let kinds = TranscriptBlockFlattener.kinds(for: result.blocks, kind: .assistant)
+        let newRows = kinds.enumerated().map { index, kind in
             let rowMetrics = index < result.metrics.count ? result.metrics[index] : nil
             return TranscriptRow(
                 id: "\(messageID)#\(index)", sourceID: messageID,
-                kind: .markdownBlock(block, .of(index, in: result.blocks)),
+                kind: kind,
                 messageID: messageID, role: .assistant, turnID: turnID, metrics: rowMetrics)
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
