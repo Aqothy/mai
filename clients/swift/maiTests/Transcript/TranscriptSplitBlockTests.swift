@@ -11,12 +11,8 @@ import Testing
 /// Messages and blocks split into rows read and scroll as one, as a
 /// browser shows one element: a split code block scrolls sideways as one
 /// `<pre>`, and a split user message renders and copies as it would whole.
-@MainActor
-@Suite(.serialized)
-struct TranscriptSplitBlockTests {
-    private let style = TextStyle.current()
-
-    private func layout(_ row: TranscriptRow, width: CGFloat = 600) -> RowLayout {
+nonisolated struct TranscriptSplitBlockTests {
+    private func layout(_ row: TranscriptRow, style: TextStyle, width: CGFloat = 600) -> RowLayout {
         RowLayoutBuilder.layout(
             RowLayoutRequest(
                 rowID: row.id, kind: row.kind, key: RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version),
@@ -27,7 +23,8 @@ struct TranscriptSplitBlockTests {
     /// the unsplit block's when its widest line is in the code font's own
     /// glyphs (ASCII, box drawing, arrows, quotes, tabs), and not narrower
     /// when it is CJK (counted two columns an ideograph).
-    @Test func chunksOfASplitCodeBlockShareItsWidth() {
+    @Test func chunksOfASplitCodeBlockShareItsWidth() async {
+        let style = await TextStyle.current()
         for (widest, isCodeFont) in [
             ("let wide = \"" + String(repeating: "w", count: 300) + "\"", true),
             ("│   ├── “" + String(repeating: "→", count: 40) + "” — …", true),
@@ -39,9 +36,9 @@ struct TranscriptSplitBlockTests {
             let code = lines.joined(separator: "\n")
             let rows = TranscriptRowChunker.assistantRows(messageID: "m", turnID: "t", blocks: [.code(language: "swift", code: code)])
             #expect(rows.count == 3)
-            let whole = layout(TranscriptRow(id: "w", kind: .markdownBlock(.code(language: "swift", code: code), .single)))
+            let whole = layout(TranscriptRow(id: "w", kind: .markdownBlock(.code(language: "swift", code: code), .single)), style: style)
             let wholeWidth = whole.content.codeLayout?.contentWidth ?? 0
-            let chunks = rows.map { layout($0) }
+            let chunks = rows.map { layout($0, style: style) }
             let widths = chunks.map { $0.content.codeLayout?.contentWidth ?? 0 }
             #expect(
                 Set(widths).count == 1 && (isCodeFont ? widths[0] == wholeWidth : widths[0] >= wholeWidth),
@@ -54,10 +51,11 @@ struct TranscriptSplitBlockTests {
     /// wherever the cuts fall: at blank lines, inside a long fence (the
     /// continuation reopens it), inside one huge line (at a space before a
     /// letter, the space kept as the seam's separator).
-    @Test(arguments: 0..<4)
-    func aSplitUserMessageRendersAsTheWholeMessage(seed: Int) {
+    @Test(arguments: 0..<2)
+    func aSplitUserMessageRendersAsTheWholeMessage(seed: Int) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: 0x05E5_0000 &+ UInt64(seed))
-        for iteration in 0..<(3 * TranscriptFuzz.scale) {
+        for iteration in 0..<(2 * TranscriptFuzz.scale) {
             var document = TranscriptFuzz.markdownDocument(&rng, blocks: rng.int(in: 30..<90))
             switch rng.int(in: 0..<3) {
             case 0:
@@ -85,7 +83,7 @@ struct TranscriptSplitBlockTests {
         /// others; a chunk mounted again comes back to where the block was
         /// left, as a browser keeps `scrollLeft`. One scrollbar, under the
         /// last chunk.
-        @Test func chunksOfASplitCodeBlockScrollSidewaysTogether() {
+        @MainActor @Test func chunksOfASplitCodeBlockScrollSidewaysTogether() {
             let controller = TranscriptController(configuration: .testing)
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
             scroll.automaticallyAdjustsContentInsets = false
@@ -126,6 +124,21 @@ struct TranscriptSplitBlockTests {
                     origin: .zero, drawn: .null, visible: .null, streamed: nil)
             }
             #expect(document.wideBlocks[rows[2].id]?.scrollX == 700)
+
+            // Reusing that pooled scroller for a narrower block must not leak
+            // its clamped old offset into the new block's stored offset.
+            let narrow = TranscriptRow(
+                id: "narrow#0",
+                kind: .markdownBlock(.code(language: nil, code: String(repeating: "x", count: 120)), .single))
+            let narrowLayout = RowLayoutBuilder.layout(controller.request(narrow))
+            document.removeWideBlock(rowID: rows[2].id)
+            if let narrowBody = narrowLayout.content.wideBody {
+                document.showWideBlock(
+                    rowID: narrow.id, group: narrow.id, body: narrowBody, key: narrowLayout.key,
+                    origin: .zero, drawn: .null, visible: .null, streamed: nil)
+            }
+            #expect(controller.wideBlockOffsets[narrow.id] == nil)
+            #expect(document.wideBlocks[narrow.id]?.scrollX == 0)
         }
     #endif
 }

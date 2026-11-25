@@ -101,6 +101,8 @@
             onReaderScroll = nil
             gestureAxis = nil
             body.resetForReuse()
+            contentView.scroll(to: .zero)
+            reflectScrolledClipView(contentView)
         }
 
         override func scrollWheel(with event: NSEvent) {

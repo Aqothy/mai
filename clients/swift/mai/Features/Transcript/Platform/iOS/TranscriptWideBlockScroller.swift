@@ -149,12 +149,13 @@
             rowID = nil
             group = nil
             onReaderScroll = nil
+            onHorizontalScroll = nil
             lastDrawnY = .null
             lastVisibleY = .null
             lastContentWidth = 0
             lastHorizontalDrawnX = .nan
             lastHorizontalDrawnSpan = nil
-            onHorizontalScroll = nil
+            contentOffset = .zero
             row.resetForReuse()
         }
     }
