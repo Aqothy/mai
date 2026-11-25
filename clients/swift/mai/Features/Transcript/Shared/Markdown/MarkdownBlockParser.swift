@@ -873,7 +873,14 @@ nonisolated struct MarkdownBlockParser {
         // them but not its trailing blank lines. (Heading lines are trimmed
         // when they are read.)
         if kind == .paragraph || kind == .table || (kind == .code && codeFenceChar == 0) {
-            rtrimLeafLines(keepSpaces: kind == .code)
+            let trimmedBlank = rtrimLeafLines(keepSpaces: kind == .code)
+            // CommonMark §5.3: trailing blank lines stripped from an indented
+            // code block inside a list item still separate it from what follows.
+            if kind == .code, codeFenceChar == 0, trimmedBlank,
+                !containers.isEmpty, containers[containers.count &- 1].children > 0
+            {
+                containers[containers.count &- 1].sawBlankAfterChild = true
+            }
         }
         if kind == .paragraph {
             resolveLinkDefsOnLeaf()
@@ -909,9 +916,11 @@ nonisolated struct MarkdownBlockParser {
         }
     }
 
-    private mutating func rtrimLeafLines(keepSpaces: Bool) {
+    @discardableResult
+    private mutating func rtrimLeafLines(keepSpaces: Bool) -> Bool {
         let baseIdx = Int(records[leafRecordIndex].lineStart)
-        var count = Int(records[leafRecordIndex].lineCount)
+        let originalCount = Int(records[leafRecordIndex].lineCount)
+        var count = originalCount
         while count > 0 {
             let idx = baseIdx &+ count &- 1
             let beg = Int(lines[idx].start)
@@ -924,6 +933,7 @@ nonisolated struct MarkdownBlockParser {
             count &-= 1
             records[leafRecordIndex].lineCount = Int32(count)
         }
+        return count < originalCount
     }
 
     private mutating func prepareLeafParent() {
@@ -944,7 +954,9 @@ nonisolated struct MarkdownBlockParser {
         if top.isLoose, top.kind == .ulOpen || top.kind == .olOpen {
             records[top.recordIndex].flags |= Flags.looseList
         }
-        if top.sawBlankAfterChild, !containers.isEmpty, containers[containers.count &- 1].children > 0 {
+        if top.sawBlankAfterChild, top.kind != .quoteOpen,
+            !containers.isEmpty, containers[containers.count &- 1].children > 0
+        {
             containers[containers.count &- 1].sawBlankAfterChild = true
         }
         let closer: RecordKind =

@@ -101,7 +101,7 @@ extension TranscriptController {
     func rebuildRows(fromTurnIndex firstChangedTurn: Int = 0) {
         let builder = TranscriptBuilder(
             blocks: { [self] messageID, source in blocks(forMessage: messageID, source: source) },
-            metrics: { [self] messageID in parsedMessages[messageID]?.metrics },
+            metrics: { [self] messageID in streams[messageID]?.metrics ?? parsedMessages[messageID]?.metrics },
             expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase)
         guard !rows.isEmpty else {
             setRows(builder.rows(for: turns))
@@ -242,6 +242,7 @@ extension TranscriptController {
                 return
             }
             stream.blocks = result.blocks
+            stream.metrics = result.metrics
             stream.shownLength = result.textLength
             streams[result.messageID] = stream
         }

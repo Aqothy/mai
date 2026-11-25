@@ -271,6 +271,10 @@
     /// table cell) so double-tap / long-press never bleeds across blocks
     /// (pattern from gonzalezreal/textual).
     extension TranscriptTextInputView: UITextInputTokenizer {
+        private func isBackward(_ direction: UITextDirection) -> Bool {
+            direction == .storage(.backward) || direction == .layout(.left) || direction == .layout(.up)
+        }
+
         func rangeEnclosingPosition(
             _ position: UITextPosition, with granularity: UITextGranularity, inDirection direction: UITextDirection
         ) -> UITextRange? {
@@ -280,18 +284,25 @@
             guard let raw = baseTokenizer.rangeEnclosingPosition(position, with: granularity, inDirection: direction),
                 let rawRange = raw as? TranscriptTextRange,
                 let anchor = self.position(position),
-                let bounds = controller?.tokenBoundaryRange(for: anchor)
+                let controller,
+                let bounds = controller.tokenBoundaryRange(for: anchor)
             else { return nil }
-            let startOffset = rawRange.from.position.rowID == anchor.rowID
-                ? max(rawRange.from.position.offset, bounds.lowerBound)
-                : bounds.lowerBound
-            let endOffset = rawRange.to.position.rowID == anchor.rowID
-                ? min(rawRange.to.position.offset, bounds.upperBound)
-                : bounds.upperBound
-            guard startOffset < endOffset else { return nil }
-            return TranscriptTextRange(
-                from: TextPosition(rowID: anchor.rowID, offset: startOffset),
-                to: TextPosition(rowID: anchor.rowID, offset: endOffset))
+            let boundStart = TextPosition(rowID: anchor.rowID, offset: bounds.lowerBound)
+            let boundEnd = TextPosition(rowID: anchor.rowID, offset: bounds.upperBound)
+            // Disjoint from the anchor's block (e.g. tokenizer returned a word
+            // wholly in the previous/next row): return nil instead of expanding
+            // across the entire anchor row.
+            if controller.isBefore(rawRange.to.position, boundStart) != false
+                || controller.isBefore(boundEnd, rawRange.from.position) != false
+            {
+                return nil
+            }
+            let clampedStart =
+                controller.isBefore(rawRange.from.position, boundStart) == true ? boundStart : rawRange.from.position
+            let clampedEnd =
+                controller.isBefore(boundEnd, rawRange.to.position) == true ? boundEnd : rawRange.to.position
+            guard controller.isBefore(clampedStart, clampedEnd) == true else { return nil }
+            return TranscriptTextRange(from: clampedStart, to: clampedEnd)
         }
 
         func isPosition(
@@ -299,10 +310,10 @@
         ) -> Bool {
             if granularity == .word || granularity == .sentence,
                 let pos = self.position(position),
-                let bounds = controller?.tokenBoundaryRange(for: pos),
-                pos.offset == bounds.lowerBound || pos.offset == bounds.upperBound
+                let bounds = controller?.tokenBoundaryRange(for: pos)
             {
-                return true
+                let atEdge = isBackward(direction) ? pos.offset == bounds.lowerBound : pos.offset == bounds.upperBound
+                if atEdge { return true }
             }
             return baseTokenizer.isPosition(position, atBoundary: granularity, inDirection: direction)
         }
@@ -313,17 +324,17 @@
             guard granularity == .word || granularity == .sentence else {
                 return baseTokenizer.position(from: position, toBoundary: granularity, inDirection: direction)
             }
-            guard let moved = baseTokenizer.position(from: position, toBoundary: granularity, inDirection: direction),
-                let movedPos = self.position(moved),
-                let startPos = self.position(position),
+            guard let startPos = self.position(position),
                 let bounds = controller?.tokenBoundaryRange(for: startPos)
             else { return nil }
+            let backward = isBackward(direction)
+            let edge = backward ? bounds.lowerBound : bounds.upperBound
+            if startPos.offset == edge { return nil }
+            guard let moved = baseTokenizer.position(from: position, toBoundary: granularity, inDirection: direction),
+                let movedPos = self.position(moved)
+            else { return nil }
             if movedPos.rowID != startPos.rowID || movedPos.offset < bounds.lowerBound || movedPos.offset > bounds.upperBound {
-                let clamped =
-                    direction == UITextDirection(rawValue: UITextStorageDirection.backward.rawValue)
-                    || direction == UITextDirection(rawValue: UITextLayoutDirection.left.rawValue)
-                    ? bounds.lowerBound : bounds.upperBound
-                return TranscriptTextPosition(TextPosition(rowID: startPos.rowID, offset: clamped))
+                return TranscriptTextPosition(TextPosition(rowID: startPos.rowID, offset: edge))
             }
             return moved
         }
@@ -335,11 +346,8 @@
                 let pos = self.position(position),
                 let bounds = controller?.tokenBoundaryRange(for: pos)
             {
-                let backward =
-                    direction == UITextDirection(rawValue: UITextStorageDirection.backward.rawValue)
-                    || direction == UITextDirection(rawValue: UITextLayoutDirection.left.rawValue)
-                if backward, pos.offset == bounds.lowerBound { return false }
-                if !backward, pos.offset == bounds.upperBound { return false }
+                if isBackward(direction), pos.offset == bounds.lowerBound { return false }
+                if !isBackward(direction), pos.offset == bounds.upperBound { return false }
             }
             return baseTokenizer.isPosition(position, withinTextUnit: granularity, inDirection: direction)
         }

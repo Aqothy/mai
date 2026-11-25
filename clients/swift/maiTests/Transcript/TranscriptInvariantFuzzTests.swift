@@ -368,7 +368,7 @@ nonisolated struct TranscriptInvariantFuzzTests {
     }
 
     /// The deepest nesting the parser builds survives every recursive pass
-    /// (parse, chunk, estimate, lay out, compare, hash, free) on a worker
+    /// (parse, estimate, lay out, compare, hash, free) on a worker
     /// thread's 512 KB stack, where the engine runs them.
     @Test func deepNestingSurvivesTheWholePipelineOnAWorkerStack() async {
         // Each past the parser's 250 levels: quotes, indented lists, and

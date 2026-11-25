@@ -233,7 +233,9 @@ extension TranscriptController {
         for result in results {
             switch result {
             case .parsedAndLaidOut(let message, let source, let blocks, let metrics, let blockLayouts):
-                guard parsedMessages[message.id]?.source != source else { continue }
+                guard isCurrentParseSource(source, for: message), parsedMessages[message.id]?.source != source else {
+                    continue
+                }
                 cacheParsedMessage(id: message.id, source: source, blocks: blocks, metrics: metrics)
                 let matchingLayouts =
                     !blockLayouts.isEmpty
@@ -273,6 +275,22 @@ extension TranscriptController {
             scheduleWork()
         }
         checkWarm()
+    }
+
+    /// Rejects stale out-of-order worker parses whose `source` no longer
+    /// matches the pending row or current turn entry.
+    private func isCurrentParseSource(_ source: String, for message: TranscriptMessage) -> Bool {
+        if let index = geometry.index(for: message.pendingRowID), rows.indices.contains(index),
+            case .pendingMessage(let pendingMessage, let pendingSource) = rows[index].kind
+        {
+            return pendingMessage == message && pendingSource == source
+        }
+        if let turn = turns.first(where: { $0.id == message.turnID }),
+            let entry = turn.entries.first(where: { $0.ref == message.ref })
+        {
+            return entry.text == source
+        }
+        return false
     }
 
     /// Splices newly parsed `.pendingMessage` rows in one batch with their

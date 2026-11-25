@@ -193,6 +193,16 @@
             #expect(titles.contains("Copy Link"))
             #expect(titles.contains("Copy"))
             #expect(titles.contains("Look Up"))
+
+            // Right-clicking the right edge of a multi-word selection must preserve
+            // the whole selection instead of collapsing to the last word.
+            fixture.controller.setSelection(
+                TranscriptSelection(
+                    anchor: TextPosition(rowID: "m#0", offset: 0),
+                    focus: TextPosition(rowID: "m#0", offset: 14)))
+            let endPoint = point(fixture, row: 0, fraction: 0.99)
+            _ = fixture.document.menu(for: event(.rightMouseDown, fixture.window, at: endPoint))
+            #expect(fixture.controller.selectedText() == "Visit docs now")
         }
 
         /// `NSViewContentSelectionInfo` exposes the selection's anchor rect,

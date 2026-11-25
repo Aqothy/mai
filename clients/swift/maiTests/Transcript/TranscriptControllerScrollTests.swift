@@ -784,6 +784,18 @@ struct TranscriptControllerScrollTests {
 
             scrollView.contentView.willMove(toWindow: nil)
             #expect(controller.selection == nil)
+
+            // Tokenizer boundary clamping respects direction and never loops at row edges.
+            let r1 = TranscriptRow(
+                id: "r1", sourceID: "m2",
+                kind: .markdownBlock(.paragraph([MarkdownInline(text: "Second row")]), .single))
+            controller.setRows([row, r1], measuredHeights: ["r0": 40, "r1": 40])
+            let startOfR0 = TranscriptTextPosition(TextPosition(rowID: "r0", offset: 0))
+            let endOfR0 = TranscriptTextPosition(TextPosition(rowID: "r0", offset: 11))
+            #expect(scrollView.contentView.isPosition(startOfR0, atBoundary: .word, inDirection: .storage(.backward)))
+            #expect(!scrollView.contentView.isPosition(startOfR0, atBoundary: .word, inDirection: .storage(.forward)))
+            #expect(scrollView.contentView.position(from: startOfR0, toBoundary: .word, inDirection: .storage(.backward)) == nil)
+            #expect(scrollView.contentView.position(from: endOfR0, toBoundary: .word, inDirection: .storage(.forward)) == nil)
         }
     #endif
 
@@ -836,5 +848,15 @@ struct TranscriptControllerScrollTests {
         third.attach(thirdHost)
         third.setRows([msg.pendingRow(source: "Block one\n\nBlock two")])
         #expect(third.geometry.totalHeight != 357)
+
+        // Changing a row's kind in `replaceRows` must discard its stale
+        // `measuredRowHeights` entry and re-estimate rather than reusing 123 pt.
+        let replacedRow = TranscriptRow(
+            id: parsedRows[0].id, sourceID: msg.id,
+            kind: .markdownBlock(
+                .paragraph([MarkdownInline(text: String(repeating: "Expanded content ", count: 80))]), .single))
+        first.replaceRows(0..<1, with: [replacedRow], heights: [:])
+        #expect(first.measuredRowHeights[parsedRows[0].id] == nil)
+        #expect(first.geometry.height(at: 0) != 123)
     }
 }

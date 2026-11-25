@@ -12,6 +12,7 @@ struct TranscriptStream {
     /// store keeps no live text for.
     var entryText: String
     var blocks: [MarkdownBlock] = []
+    var metrics: [TextMetrics] = []
     /// The UTF-8 length the rows show.
     var shownLength = 0
     /// The UTF-8 length released to the rows so far (PLAN 6.2).

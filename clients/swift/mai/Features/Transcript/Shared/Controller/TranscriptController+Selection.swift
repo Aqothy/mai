@@ -73,6 +73,15 @@ extension TranscriptController {
             })
         else { return nil }
         let segmentLocal = CGPoint(x: local.x - segment.origin.x, y: local.y - segment.origin.y)
+        if segment.hitRect == nil {
+            // Require the pointer to land over actual glyphs on the hit line,
+            // not empty whitespace 400 pt to the right of a short last line.
+            guard let lineIdx = segment.layout.lineIndex(nearestY: segmentLocal.y) else { return nil }
+            let line = segment.layout.lines[lineIdx]
+            guard segmentLocal.y >= line.top, segmentLocal.y <= line.bottom,
+                segmentLocal.x >= line.x, segmentLocal.x <= line.x + line.width
+            else { return nil }
+        }
         return TextPosition(rowID: rows[index].id, offset: segment.start + segment.layout.offset(closestTo: segmentLocal))
     }
 
@@ -225,11 +234,17 @@ extension TranscriptController {
         var remaining = abs(lineOffset)
         let step = lineOffset > 0 ? 1 : -1
 
-        func lineMetrics(in rowIndex: Int) -> [(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)] {
+        func lineMetrics(
+            in rowIndex: Int, matchingColumnX: CGFloat? = nil
+        ) -> [(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)] {
             guard let layout = layouts[rows[rowIndex].id] else { return [] }
             let rowTop = geometry.offset(at: rowIndex)
+            let segments = layout.content.textSegments
             var result: [(TextSegment, TextLine, CGFloat, CGFloat)] = []
-            for segment in layout.content.textSegments {
+            for segment in segments {
+                if let colX = matchingColumnX, segments.count > 1, abs(segment.origin.x - colX) > 1 {
+                    continue
+                }
                 for line in segment.layout.lines {
                     let top = rowTop + segment.origin.y + line.top
                     result.append((segment, line, top, top + line.height))
@@ -238,9 +253,19 @@ extension TranscriptController {
             return result
         }
 
-        var lines = lineMetrics(in: rowIndex)
+        let currentColumnX: CGFloat? = {
+            guard let segments = layouts[rows[rowIndex].id]?.content.textSegments, segments.count > 1,
+                let seg = segments.first(where: { position.offset >= $0.start && position.offset <= $0.end })
+            else { return nil }
+            return seg.origin.x
+        }()
+
+        var lines = lineMetrics(in: rowIndex, matchingColumnX: currentColumnX)
+        // Use `.lastIndex` so a caret at the start of line N+1 (where
+        // line[N].upperBound == line[N+1].lowerBound) matches line N+1 rather
+        // than stalling on line N (agrees with `caretRect`).
         guard
-            var lineIdx = lines.firstIndex(where: {
+            var lineIdx = lines.lastIndex(where: {
                 position.offset >= $0.segment.start + $0.line.range.lowerBound
                     && position.offset <= $0.segment.start + $0.line.range.upperBound
             })

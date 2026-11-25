@@ -172,13 +172,20 @@ nonisolated enum TextLayoutEngine {
             if endsLine(unit) { return false }
             if (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A) { return false }
             if unit >= 0x0590 {
-                if (unit <= 0x08FF && unit != 0x061C) || unit == 0x200F || (unit >= 0xFB1D && unit <= 0xFDFF)
-                    || (unit >= 0xFE70 && unit <= 0xFEFC)
+                if unit == 0x061C || unit == 0x200F
+                    || unit == 0xD802 || unit == 0xD803 || unit == 0xD83A || unit == 0xD83B
+                    || (unit >= 0xFB1D && unit <= 0xFDFF) || (unit >= 0xFE70 && unit <= 0xFEFC)
                 {
                     return true
                 }
-                if unit == 0x200E { return false }
-                if unit >= 0x0900, !isBiDiCodeUnit(unit) {
+                if unit <= 0x08FF {
+                    // Excludes weak Arabic-Indic digits (0660..0669, 06F0..06F9),
+                    // punctuation, and combining marks while catching all strong
+                    // Hebrew/Arabic/Syriac/Thaana/NKo/Mandaic letters.
+                    if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return true }
+                } else if unit == 0x200E {
+                    return false
+                } else if !isBiDiCodeUnit(unit) {
                     if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return false }
                 }
             } else if unit >= 0x00C0, let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
@@ -429,7 +436,7 @@ nonisolated enum TextLayoutEngine {
                 indent: indent, lineWidth: lineWidth, availableWidth: availableWidth, isRTL: isRTL)
             let firstRun = runs.count
             let firstDecoration = decorations.count
-            let carets = addRunsAndCarets(
+            let (carets, lineComplexBiDi) = addRunsAndCarets(
                 of: line, range: range, indent: lineX, baseline: baseline, width: lineWidth,
                 activeString: activeString, baseOffset: baseOffset)
             if let paragraph {
@@ -441,7 +448,8 @@ nonisolated enum TextLayoutEngine {
                 TextLine(
                     top: y, baseline: baseline, height: height, x: lineX, width: lineWidth, range: textRange,
                     caretOffsets: carets, runs: firstRun..<runs.count,
-                    decorations: firstDecoration..<decorations.count, endsWithNewline: endsWithNewline))
+                    decorations: firstDecoration..<decorations.count, endsWithNewline: endsWithNewline,
+                    hasComplexBiDi: lineComplexBiDi))
             width = max(width, lineX + lineWidth)
             y += height
         }
@@ -457,7 +465,7 @@ nonisolated enum TextLayoutEngine {
         private mutating func addRunsAndCarets(
             of line: CTLine, range: Range<Int>, indent: CGFloat, baseline: CGFloat, width: CGFloat,
             activeString: NSString, baseOffset: Int
-        ) -> [CGFloat] {
+        ) -> (carets: [CGFloat], isComplexBiDi: Bool) {
             let ctRuns = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
             let needsCoreTextCarets = ctRuns.contains(where: Self.needsCoreTextCarets)
             if needsCoreTextCarets { hasComplexBiDi = true }
@@ -510,10 +518,13 @@ nonisolated enum TextLayoutEngine {
             }
 
             if needsCoreTextCarets {
-                return TextLayoutEngine.enumeratedCaretOffsets(
-                    of: line, range: range, string: activeString, indent: indent, width: width)
+                return (
+                    TextLayoutEngine.enumeratedCaretOffsets(
+                        of: line, range: range, string: activeString, indent: indent, width: width),
+                    true
+                )
             }
-            return TextLayoutEngine.filled(carets, indent: indent, width: width)
+            return (TextLayoutEngine.filled(carets, indent: indent, width: width), false)
         }
 
         /// Right-to-left runs, and runs Core Text reordered, take Core Text's

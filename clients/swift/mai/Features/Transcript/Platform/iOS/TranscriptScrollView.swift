@@ -367,6 +367,7 @@
                 scroller.isHidden = false
                 scroller.onHorizontalScroll = { [weak self] in
                     guard let self, self.controller.selection != nil else { return }
+                    self.lastNotifiedSelectionRects = self.currentSelectionRects()
                     self.contentView.selectionGeometryDidChange()
                 }
                 scroller.onReaderScroll = { [weak self] in self?.wideBlockDidScroll($0) }

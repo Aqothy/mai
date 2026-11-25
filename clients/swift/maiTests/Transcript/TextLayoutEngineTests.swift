@@ -409,4 +409,62 @@ struct TextLayoutEngineTests {
         #expect(laid.lineIndex(nearestY: midpoint - 0.5) == 0)
         #expect(laid.lineIndex(nearestY: midpoint + 0.5) == 1)
     }
+
+    /// A pure-LTR line in a multi-line layout that contains RTL on another line
+    /// must still highlight its exact LTR substring (not drop runs or invert
+    /// using zero `visualWidth`).
+    @Test func ltrLineSelectionWorksWhenAnotherLineContainsRTL() {
+        let laid = layout(
+            [
+                .paragraph([MarkdownInline(text: "Hello "), MarkdownInline(text: "world", style: .strong)]),
+                .paragraph([MarkdownInline(text: "שלום")]),
+            ],
+            width: 400)
+        #expect(laid.hasComplexBiDi)
+        #expect(!laid.lines[0].hasComplexBiDi)
+        #expect(laid.lines[1].hasComplexBiDi)
+
+        // Select "lo " (3..<6) on line 0: must lie strictly to the right of "Hel".
+        let partial = laid.selectionRects(for: 3..<6)
+        #expect(partial.count == 1)
+        if let rect = partial.first {
+            #expect(abs(rect.minX - laid.lines[0].caretOffsets[3]) < 0.5)
+            #expect(abs(rect.maxX - laid.lines[0].caretOffsets[6]) < 0.5)
+        }
+        // Select "Hello wor" (0..<9) across both LTR runs: must start at x=0 and cover "Hello ".
+        let across = laid.selectionRects(for: 0..<9)
+        #expect(across.count == 1)
+        if let rect = across.first {
+            #expect(abs(rect.minX - laid.lines[0].caretOffsets[0]) < 0.5)
+            #expect(abs(rect.maxX - laid.lines[0].caretOffsets[9]) < 0.5)
+        }
+    }
+
+    /// CommonMark §5.3 edge cases: a blank line inside a blockquote must not
+    /// make its enclosing list loose, whereas a blank line after an indented
+    /// code block inside a list item makes the list loose.
+    @Test func tightLooseListEdgeCasesMatchCommonMark() {
+        let quotedBlank = MarkdownPlanner.blocks(from: "- > a\n  >\n- b\n")
+        if case .list(let list) = quotedBlank.first {
+            #expect(list.isTight)
+        } else {
+            Issue.record("expected tight list with quoted blank line")
+        }
+
+        let indentedCodeBlank = MarkdownPlanner.blocks(from: "-     code\n\n- bar\n")
+        if case .list(let list) = indentedCodeBlank.first {
+            #expect(!list.isTight)
+        } else {
+            Issue.record("expected loose list after indented code blank line")
+        }
+    }
+
+    /// UAX #9 P2/P3 `paragraphIsRTL`: Arabic-Indic digits are weak (do not
+    /// force RTL before an LTR letter), while Arabic Letter Mark (U+061C) and
+    /// strong RTL letters do.
+    @Test func paragraphIsRTLClassifiesDigitsAndALMCorrectly() {
+        #expect(!TextLayoutEngine.paragraphIsRTL("١٢٣ hello" as NSString, startingAt: 0))
+        #expect(TextLayoutEngine.paragraphIsRTL("\u{061C}hello" as NSString, startingAt: 0))
+        #expect(TextLayoutEngine.paragraphIsRTL("123 مرحبا" as NSString, startingAt: 0))
+    }
 }

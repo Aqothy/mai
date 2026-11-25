@@ -246,12 +246,33 @@ struct TranscriptSelectionTests {
         let afterCombined = try #require(controller.position(from: afterEmoji, offset: 1))
         #expect(afterCombined == TextPosition(rowID: "r0", offset: 4))
 
-        // Vertical line movement from line 0 to line 1 in r0.
-        let down = try #require(
-            controller.positionVertically(from: TextPosition(rowID: "r0", offset: 0), lineOffset: 1, columnX: 0))
-        #expect(down.rowID == "r0" && down.offset >= 6)
+        // Vertical line movement from line 0 -> line 1 -> line 2 without stalling
+        // at line starts (`line[0].upperBound == line[1].lowerBound`).
+        let rows3 = [
+            TranscriptRow(
+                id: "m3", sourceID: "m",
+                kind: .markdownBlock(.paragraph([MarkdownInline(text: "First\nSecond\nThird")]), .single))
+        ]
+        controller.setRows(rows3, measuredHeights: ["m3": 90])
+        controller.storeLayout(RowLayoutBuilder.layout(controller.request(controller.rows[0])))
+        let line1Start = try #require(
+            controller.positionVertically(from: TextPosition(rowID: "m3", offset: 0), lineOffset: 1, columnX: 0))
+        #expect(line1Start == TextPosition(rowID: "m3", offset: 6))
+        let line2Start = try #require(
+            controller.positionVertically(from: line1Start, lineOffset: 1, columnX: 0))
+        #expect(line2Start == TextPosition(rowID: "m3", offset: 13))
+        let backToLine0 = try #require(
+            controller.positionVertically(from: line1Start, lineOffset: -1, columnX: 0))
+        #expect(backToLine0 == TextPosition(rowID: "m3", offset: 0))
+
+        // Strict hit test rejects empty space far to the right of a short line.
+        #expect(controller.strictTextPosition(atDocumentPoint: CGPoint(x: 350, y: 10), columnX: 0) == nil)
 
         // Table cell token boundary clamps strictly to cell 0 ("Name", 0..<4).
+        controller.setRows(rows, measuredHeights: ["r0": 60, "r1": 100])
+        for row in controller.rows {
+            controller.storeLayout(RowLayoutBuilder.layout(controller.request(row)))
+        }
         let cellBounds = try #require(controller.tokenBoundaryRange(for: TextPosition(rowID: "r1", offset: 2)))
         #expect(cellBounds == 0..<4)
     }

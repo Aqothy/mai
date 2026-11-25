@@ -160,7 +160,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         let dir =
             UserDefaults.standard.string(forKey: "ChatBenchmarkExportDir")
             ?? ".scratch/chat-rewrite/bench/web/fixtures"
-        let baseURL = URL(fileURLWithPath: dir)
+        let baseURL = URL(filePath: dir)
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         let threads: [(file: String, detail: ThreadDetail)] = [
             ("synthetic-1000.json", ChatSyntheticBenchmarkThread.thread(turnCount: 1_000, uniqueAnswers: true)),

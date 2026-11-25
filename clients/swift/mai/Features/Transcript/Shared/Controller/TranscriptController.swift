@@ -289,17 +289,27 @@ final class TranscriptController {
             let sameKind = previous.map { $0.row.kind == versioned[index].kind } ?? false
             if let previous {
                 versioned[index].contentVersion = sameKind ? previous.row.contentVersion : previous.row.contentVersion + 1
+                if !sameKind { measuredRowHeights.removeValue(forKey: id) }
             }
-            newHeights.append(
-                heights[id] ?? (sameKind ? previous?.height : nil)
-                    ?? rememberedHeight(for: versioned[index])
-                    ?? HeightEstimator.estimate(versioned[index], width: width, style: style))
+            let reusedHeight: CGFloat? =
+                if let explicit = heights[id] {
+                    explicit
+                } else if let previous {
+                    sameKind ? previous.height : nil
+                } else {
+                    rememberedHeight(for: versioned[index])
+                }
+            newHeights.append(reusedHeight ?? HeightEstimator.estimate(versioned[index], width: width, style: style))
         }
-        // Drop cached layouts for rows leaving the transcript so a reused ID
-        // (such as `"working"` on the next turn) cannot collide at contentVersion 0.
+        // Drop cached layouts and measured heights for rows leaving the
+        // transcript so a reused ID (such as `"working"` on the next turn)
+        // cannot collide at contentVersion 0 or reuse a stale height.
         if !old.isEmpty {
             let kept = Set(versioned.lazy.map(\.id))
-            for id in old.keys where !kept.contains(id) { removeLayout(for: id) }
+            for id in old.keys where !kept.contains(id) {
+                removeLayout(for: id)
+                measuredRowHeights.removeValue(forKey: id)
+            }
         }
         changeGeometry(replacingRange: range) {
             rows.replaceSubrange(range, with: versioned)
@@ -315,7 +325,9 @@ final class TranscriptController {
         changeGeometry(preservesRowIDs: true) {
             for (index, row) in updates where rows.indices.contains(index) && rows[index].id == row.id {
                 var row = row
-                row.contentVersion = rows[index].kind == row.kind ? rows[index].contentVersion : rows[index].contentVersion + 1
+                let changed = rows[index].kind != row.kind
+                row.contentVersion = changed ? rows[index].contentVersion + 1 : rows[index].contentVersion
+                if changed, heights[row.id] == nil { measuredRowHeights.removeValue(forKey: row.id) }
                 rows[index] = row
             }
             geometry.setHeights(heights)
@@ -536,10 +548,21 @@ final class TranscriptController {
         if !updates.isEmpty { setHeights(updates) }
     }
 
-    /// Snapshots all measured row and message-source heights at the current
-    /// `(columnWidth, style.version)` for persistence on `ThreadSession`.
+    /// Snapshots all measured row and message-source heights for finished turns
+    /// at the current `(columnWidth, style.version)` for persistence on
+    /// `ThreadSession`. Running/streaming turns are excluded so mid-stream
+    /// heights never become stale if the turn finishes while detached.
     func snapshotMeasuredHeights() -> TranscriptMeasuredHeights? {
         guard columnWidth > 0 else { return nil }
+        let runningTurnIDs = Set(turns.lazy.filter(\.isRunning).map(\.id))
+        var volatileRowIDs: Set<String> = []
+        var volatileSourceIDs = Set(streams.keys)
+        for row in rows {
+            if streams[row.sourceID] != nil || row.turnID.map({ runningTurnIDs.contains($0) }) == true {
+                volatileRowIDs.insert(row.id)
+                volatileSourceIDs.insert(row.sourceID)
+            }
+        }
         var rowHeights: [String: CGFloat] = [:]
         var sourceHeights: [String: CGFloat] = [:]
         if let remembered = rememberedHeights,
@@ -548,12 +571,16 @@ final class TranscriptController {
             rowHeights = remembered.rowHeights
             sourceHeights = remembered.sourceHeights
         }
-        for (id, height) in measuredRowHeights { rowHeights[id] = height }
+        for (id, height) in measuredRowHeights where !volatileRowIDs.contains(id) {
+            rowHeights[id] = height
+        }
+        for id in volatileRowIDs { rowHeights.removeValue(forKey: id) }
+        for sourceID in volatileSourceIDs { sourceHeights.removeValue(forKey: sourceID) }
         guard !rowHeights.isEmpty || !sourceHeights.isEmpty else { return nil }
         // Sum measured heights per sourceID so unparsed `.pendingMessage` rows
         // on the next open start with the exact total height of their blocks.
         var totals: [String: (sum: CGFloat, complete: Bool)] = [:]
-        for row in rows {
+        for row in rows where !volatileSourceIDs.contains(row.sourceID) {
             if case .pendingMessage = row.kind { continue }
             var entry = totals[row.sourceID] ?? (0, true)
             if let height = rowHeights[row.id] {

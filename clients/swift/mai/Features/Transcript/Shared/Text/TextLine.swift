@@ -24,6 +24,27 @@ nonisolated struct TextLine: Sendable {
     /// The line ends at a hard break (its last character is a newline), so
     /// the caret after that character starts the next line.
     let endsWithNewline: Bool
+    /// The line contains right-to-left or Core Text reordered runs whose
+    /// per-run `visualWidth` and Core Text caret offsets are populated.
+    let hasComplexBiDi: Bool
+
+    init(
+        top: CGFloat, baseline: CGFloat, height: CGFloat, x: CGFloat, width: CGFloat, range: Range<Int>,
+        caretOffsets: [CGFloat], runs: Range<Int>, decorations: Range<Int>, endsWithNewline: Bool,
+        hasComplexBiDi: Bool = false
+    ) {
+        self.top = top
+        self.baseline = baseline
+        self.height = height
+        self.x = x
+        self.width = width
+        self.range = range
+        self.caretOffsets = caretOffsets
+        self.runs = runs
+        self.decorations = decorations
+        self.endsWithNewline = endsWithNewline
+        self.hasComplexBiDi = hasComplexBiDi
+    }
 
     var bottom: CGFloat { top + height }
 }

@@ -145,7 +145,7 @@
             // Strict hit-test: a right-click in the margin or over chrome
             // never snaps to and selects text in an adjacent row.
             let hit = controller.strictTextPosition(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX)
-            if let hit, !isSelected(hit) {
+            if let hit, !isSelected(hit), !isPointNearSelection(point) {
                 controller.setSelection(controller.wordRange(around: hit))
             }
             let hasSelection = controller.hasValidSelection && (hit != nil || linkURL == nil && isPointNearSelection(point))
@@ -245,7 +245,7 @@
                 }
             }
             switch event.charactersIgnoringModifiers {
-            case "\u{1B}":  // Escape
+            case "\u{1B}" where !hasCommand:  // Escape
                 if controller.selection != nil {
                     controller.setSelection(nil)
                 } else {

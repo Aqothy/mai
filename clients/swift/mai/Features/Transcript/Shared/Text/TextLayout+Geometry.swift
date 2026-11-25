@@ -34,7 +34,7 @@ nonisolated extension TextLayout {
         if point.y >= size.height, index == lines.count - 1 { return length }
         let line = lines[index]
         let best: Int
-        if !hasComplexBiDi, !line.caretOffsets.isEmpty {
+        if !line.hasComplexBiDi, !line.caretOffsets.isEmpty {
             let carets = line.caretOffsets
             var low = 0
             var high = carets.count
@@ -93,7 +93,7 @@ nonisolated extension TextLayout {
             let to = min(range.upperBound, line.range.upperBound) - line.range.lowerBound
             var bottom = line.bottom
             if index + 1 < lines.count, lines[index + 1].top - line.bottom <= 4 { bottom = lines[index + 1].top }
-            if hasComplexBiDi {
+            if line.hasComplexBiDi {
                 let selStart = max(range.lowerBound, line.range.lowerBound)
                 let selEnd = min(range.upperBound, line.range.upperBound)
                 var lineRects: [CGRect] = []

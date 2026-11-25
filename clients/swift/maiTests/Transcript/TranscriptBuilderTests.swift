@@ -157,9 +157,10 @@ struct TranscriptBuilderTests {
         #expect(controller.rows.map(\.id) == ["user|t1|u1", "thought|t1|r1", "t1|a1#0", "t1|a1#1"])
 
         // User message resolved reference link whole and laid out as a bubble.
+        let expectedURL = try #require(URL(string: "https://example.com/ref"))
         if case .bubble(let userLayout, _, _) = controller.layout(forRowAt: 0)?.content {
             #expect(userLayout.string == "See ref and bold.")
-            #expect(userLayout.links == [URL(string: "https://example.com/ref")!])
+            #expect(userLayout.links == [expectedURL])
         } else {
             Issue.record("expected laid-out user bubble")
         }
