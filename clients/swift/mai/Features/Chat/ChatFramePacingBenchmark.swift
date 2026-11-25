@@ -725,6 +725,14 @@ nonisolated enum ChatBenchmarkAutoRun {
         return turns > 0 ? turns : nil
     }
 
+    /// `-ChatDevExtremeThreads YES` seeds the sidebar with lazy-loaded extreme
+    /// and edge-case mock chats (20 MB mega-chat, blanking stress repro, 5 MB
+    /// session, 1,000 turns, and all 7 giant single-block threads) without
+    /// requiring a daemon.
+    static var usesDevExtremeThreads: Bool {
+        UserDefaults.standard.bool(forKey: "ChatDevExtremeThreads")
+    }
+
     /// Whether the timeline has finished priming caches and layouts for the whole
     /// loaded transcript. The scroll benchmark waits for this so it measures
     /// the production steady state — production always prepares a page off

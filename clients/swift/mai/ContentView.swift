@@ -17,7 +17,9 @@ struct MaiApp: App {
         _connection = State(initialValue: connection)
         var syntheticStore: ThreadStore?
         #if DEBUG
-            if let turnCount = ChatBenchmarkAutoRun.syntheticThreadTurnCount {
+            if ChatBenchmarkAutoRun.usesDevExtremeThreads {
+                syntheticStore = ThreadStore(syntheticThreads: ChatSyntheticBenchmarkThread.devExtremeThreads())
+            } else if let turnCount = ChatBenchmarkAutoRun.syntheticThreadTurnCount {
                 let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turnCount)
                 syntheticStore = ThreadStore(
                     previewThreads: [thread.summary],

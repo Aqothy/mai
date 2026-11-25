@@ -84,6 +84,8 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             await runStandaloneStream()
         case "giant":
             await runGiantSuite()
+        case "extreme":
+            await runExtremeMegaSuite()
         case "bare-resize":
             await runBareResizeIsolation(threadID: entry.id)
         default:
@@ -238,6 +240,54 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 }
             #endif
         }
+        emitMemoryCheckpoint(label: "memory-final")
+    }
+
+    /// Benchmarks opening, scrolling, flinging, resizing, and memory footprint
+    /// on the ~20 MB worst-case mega-chat (`-ChatAutoBenchmark extreme`).
+    private func runExtremeMegaSuite() async {
+        let buildStarted = ContinuousClock.now
+        let detail = ChatSyntheticBenchmarkThread.extremeMegaThread()
+        store.insertSyntheticBenchmarkThread(detail)
+        let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
+
+        ChatBenchmarkAutoRun.isTranscriptWarm = false
+        ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+        let started = ContinuousClock.now
+        selectThread(detail.id)
+
+        guard await waitUntilAligned(timeoutSeconds: 30) else {
+            ChatBenchmarkAutoRun.trace("invalid measurement: open-extreme-20mb initial alignment timed out")
+            return
+        }
+        let visibleMs = Self.milliseconds(started.duration(to: .now))
+        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+        let settledMs = Self.milliseconds(started.duration(to: .now))
+        let memory = ChatBenchmarkModel.processMemoryMB()
+        emitJSON([
+            "label": "open-extreme-20mb",
+            "measurementKind": "openCheckpoint",
+            "visibleMilliseconds": visibleMs,
+            "settledMilliseconds": settledMs,
+            "threadBuildMilliseconds": buildMs,
+            "footprintMB": memory.footprint,
+            "peakFootprintMB": memory.peakFootprint,
+            "residentMB": memory.resident,
+            "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+            "visible": isAppWindowVisible,
+        ])
+
+        try? await Task.sleep(for: .milliseconds(32))
+        _ = await benchmark.runScrollBenchmark(
+            pointsPerSecond: 3_000, maximumSweepSeconds: 3, label: "scroll-extreme-20mb")
+        _ = await benchmark.runScrollBenchmark(
+            pointsPerSecond: 8_000, maximumSweepSeconds: 2, label: "fling-extreme-20mb")
+        #if os(macOS)
+            if let window = ChatBenchmarkModel.appWindow() {
+                _ = await benchmark.runResizeBenchmark(
+                    in: window, minimumWidth: 600, seconds: 2, label: "resize-extreme-20mb")
+            }
+        #endif
         emitMemoryCheckpoint(label: "memory-final")
     }
 

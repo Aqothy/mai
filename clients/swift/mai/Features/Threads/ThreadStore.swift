@@ -110,6 +110,9 @@ final class ThreadStore {
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
     @ObservationIgnored private var refreshingProviderIDs: Set<String> = []
     private var maintenanceTask: Task<Void, Never>?
+    #if DEBUG
+        @ObservationIgnored private var syntheticThreadProviders: [String: () -> ThreadDetail] = [:]
+    #endif
 
     convenience init() {
         self.init(rpc: RPCClient())
@@ -164,6 +167,26 @@ final class ThreadStore {
                 session.subscriptionState = .visible
                 session.shouldRestoreAfterReconnect = true
                 sessionsByID[selectedThread.id] = session
+            }
+            rebuildProviderCaches()
+            noteThreadsChanged()
+        }
+
+        init(syntheticThreads: [(summary: ThreadSummary, build: () -> ThreadDetail)]) {
+            let rpc = RPCClient()
+            self.rpc = rpc
+            connection = RPCConnectionCoordinator(rpc: rpc, initiallyConnected: true)
+            now = Date.init
+            threads = syntheticThreads.map(\.summary)
+            for item in syntheticThreads {
+                syntheticThreadProviders[item.summary.id] = item.build
+            }
+            if let first = syntheticThreads.first {
+                selectedThreadID = first.summary.id
+                var session = ThreadSession(detail: first.build())
+                session.subscriptionState = .visible
+                session.shouldRestoreAfterReconnect = true
+                sessionsByID[first.summary.id] = session
             }
             rebuildProviderCaches()
             noteThreadsChanged()
@@ -857,6 +880,19 @@ final class ThreadStore {
         selectedThreadLoadErrorMessage = nil
 
         if let id {
+            #if DEBUG
+                if let build = syntheticThreadProviders[id] {
+                    var session = sessionsByID[id] ?? ThreadSession()
+                    if session.detail == nil { session.detail = build() }
+                    session.inactiveSince = nil
+                    session.subscriptionState = .visible
+                    sessionsByID[id] = session
+                    selectedSessionGeneration += 1
+                    recomputeSelectedThreadTitle()
+                    performSubscriptionMaintenance(at: timestamp)
+                    return
+                }
+            #endif
             var session = sessionsByID[id] ?? ThreadSession()
             session.inactiveSince = nil
             if session.subscriptionState.isSubscribed {
@@ -1219,6 +1255,10 @@ final class ThreadStore {
         session.transcriptMeasuredHeights = nil
         sessionsByID[id] = session
         streamingTextByThreadID[id] = nil
+
+        #if DEBUG
+            if syntheticThreadProviders[id] != nil { return }
+        #endif
 
         guard connectionState == .connected else { return }
         let previousTask = subscriptionTasks[id]?.task
