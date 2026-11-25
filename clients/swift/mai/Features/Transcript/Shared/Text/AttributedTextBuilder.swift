@@ -24,18 +24,20 @@ nonisolated struct AttributedTextBuilder {
     }
 
     let style: TextStyle
+    let baseColor: TextColor
     private(set) var text: StyledText
     /// The font of the last text appended: the newline ending its paragraph
     /// takes it, since a line is as tall as its tallest run.
     private var lastFont: TranscriptFont?
 
-    init(style: TextStyle, existingLinks: [URL] = []) {
+    init(style: TextStyle, color: TextColor = .primary, existingLinks: [URL] = []) {
         self.style = style
+        baseColor = color
         text = StyledText(existingLinks: existingLinks)
     }
 
-    static func build(_ blocks: [MarkdownBlock], style: TextStyle) -> StyledText {
-        var builder = AttributedTextBuilder(style: style)
+    static func build(_ blocks: [MarkdownBlock], style: TextStyle, color: TextColor = .primary) -> StyledText {
+        var builder = AttributedTextBuilder(style: style, color: color)
         let root = Environment(blockSpacing: style.blockSpacing)
         for block in blocks { builder.append(block, environment: root) }
         return builder.text
@@ -103,14 +105,14 @@ nonisolated struct AttributedTextBuilder {
         switch block {
         case .paragraph(let inlines):
             beginParagraph(environment)
-            append(inlines, Inline())
+            append(inlines, Inline(color: baseColor))
         case .heading(let level, let inlines):
             beginParagraph(environment)
-            append(inlines, Inline(role: style.headingRole(level: level), bold: true))
+            append(inlines, Inline(role: style.headingRole(level: level), bold: true, color: baseColor))
         case .code(_, let code):
             beginParagraph(environment)
             let start = text.length
-            appendRun(code, font: style.font(.code), style: TextRunStyle())
+            appendRun(code, font: style.font(.code), style: TextRunStyle(color: baseColor))
             text.setTabInterval(style.codeTabInterval, in: NSRange(location: start, length: text.length - start))
         case .table(let table):
             appendNested(table, environment: environment)
@@ -126,7 +128,7 @@ nonisolated struct AttributedTextBuilder {
         var nested = environment
         nested.indent += style.listIndent
         nested.listDepth += 1
-        nested.blockSpacing = style.listItemSpacing
+        nested.blockSpacing = list.isTight ? style.listItemSpacing : style.blockSpacing
         for (offset, item) in list.items.enumerated() {
             for (blockIndex, child) in item.blocks.enumerated() {
                 if blockIndex == 0,
@@ -149,7 +151,7 @@ nonisolated struct AttributedTextBuilder {
         environment: Environment, nested: Environment
     ) -> Bool {
         var first = environment
-        first.blockSpacing = offset == 0 ? environment.blockSpacing : style.listItemSpacing
+        first.blockSpacing = offset == 0 ? environment.blockSpacing : nested.blockSpacing
         if let checked = item.taskChecked {
             first.indent = nested.indent
             beginParagraph(
@@ -158,14 +160,14 @@ nonisolated struct AttributedTextBuilder {
         } else {
             beginParagraph(first, headIndent: nested.indent)
             if let start = list.startIndex {
-                appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle())
+                appendRun("\(start + offset). ", font: style.font(.body), style: TextRunStyle(color: baseColor))
             } else {
                 let bullet = ["•", "◦", "▪"][environment.listDepth % 3]
-                appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle())
+                appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle(color: baseColor))
             }
         }
         guard case .paragraph(let inlines) = child else { return false }
-        append(inlines, Inline())
+        append(inlines, Inline(color: baseColor))
         return true
     }
 
@@ -173,12 +175,12 @@ nonisolated struct AttributedTextBuilder {
     private mutating func appendNested(_ table: MarkdownTable, environment: Environment) {
         beginParagraph(environment)
         for (rowIndex, cells) in ([table.header] + table.rows).enumerated() {
-            if rowIndex > 0 { appendRun("\n", font: style.font(.body), style: TextRunStyle()) }
+            if rowIndex > 0 { appendRun("\n", font: style.font(.body), style: TextRunStyle(color: baseColor)) }
             for (column, cell) in cells.enumerated() {
                 if column > 0 {
                     appendRun("  │  ", font: style.font(.body), style: TextRunStyle(color: .secondary))
                 }
-                append(cell, Inline(bold: rowIndex == 0))
+                append(cell, Inline(bold: rowIndex == 0, color: baseColor))
             }
         }
     }

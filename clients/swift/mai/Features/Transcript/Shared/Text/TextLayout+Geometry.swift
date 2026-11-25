@@ -8,7 +8,9 @@ nonisolated extension TextLayout {
     /// The UTF-16 length of the text: lines cover it end to end.
     var length: Int { lines.last?.range.upperBound ?? 0 }
 
-    /// The line at `y`, or the nearest one above or below the text.
+    /// The line at `y`, or the nearest one above or below the text. A point in
+    /// the gap between two lines snaps to the closer line by vertical midpoint
+    /// (YYText rule).
     func lineIndex(nearestY y: CGFloat) -> Int? {
         guard !lines.isEmpty else { return nil }
         var low = 0
@@ -17,7 +19,12 @@ nonisolated extension TextLayout {
             let middle = (low + high) / 2
             if lines[middle].bottom <= y { low = middle + 1 } else { high = middle }
         }
-        return min(low, lines.count - 1)
+        if low >= lines.count { return lines.count - 1 }
+        if low > 0, y < lines[low].top {
+            let midpoint = (lines[low - 1].bottom + lines[low].top) / 2
+            return y < midpoint ? low - 1 : low
+        }
+        return low
     }
 
     /// The caret offset closest to `point` (layout coordinates).
@@ -84,13 +91,51 @@ nonisolated extension TextLayout {
             if line.range.lowerBound >= range.upperBound { break }
             let from = max(range.lowerBound, line.range.lowerBound) - line.range.lowerBound
             let to = min(range.upperBound, line.range.upperBound) - line.range.lowerBound
+            var bottom = line.bottom
+            if index + 1 < lines.count, lines[index + 1].top - line.bottom <= 4 { bottom = lines[index + 1].top }
+            if hasComplexBiDi {
+                let selStart = max(range.lowerBound, line.range.lowerBound)
+                let selEnd = min(range.upperBound, line.range.upperBound)
+                var lineRects: [CGRect] = []
+                for runIndex in line.runs {
+                    let run = runs[runIndex]
+                    let lo = max(selStart, run.range.lowerBound)
+                    let hi = min(selEnd, run.range.upperBound)
+                    guard lo < hi, let firstPos = run.positions.first else { continue }
+                    let runLeft = firstPos.x
+                    let runRight = firstPos.x + run.visualWidth
+                    let loX: CGFloat
+                    let hiX: CGFloat
+                    if lo == run.range.lowerBound {
+                        loX = run.isRightToLeft ? runRight : runLeft
+                    } else {
+                        loX = line.caretOffsets[lo - line.range.lowerBound]
+                    }
+                    if hi == run.range.upperBound {
+                        hiX = run.isRightToLeft ? runLeft : runRight
+                    } else {
+                        hiX = line.caretOffsets[hi - line.range.lowerBound]
+                    }
+                    let minX = min(loX, hiX)
+                    let maxX = max(loX, hiX)
+                    guard maxX > minX else { continue }
+                    let rect = CGRect(x: minX, y: line.top, width: maxX - minX, height: bottom - line.top)
+                    if let last = lineRects.last, rect.minX <= last.maxX + 0.5 && rect.maxX >= last.minX - 0.5 {
+                        lineRects[lineRects.count - 1] = last.union(rect)
+                    } else {
+                        lineRects.append(rect)
+                    }
+                }
+                if !lineRects.isEmpty {
+                    rects.append(contentsOf: lineRects)
+                    continue
+                }
+            }
             var minX = min(line.caretOffsets[from], line.caretOffsets[to])
             var maxX = max(line.caretOffsets[from], line.caretOffsets[to])
             // A selected newline shows as a little space past the line.
             if line.endsWithNewline, range.upperBound >= line.range.upperBound { maxX += line.height / 3 }
             if from == 0 { minX = min(minX, line.x) }
-            var bottom = line.bottom
-            if index + 1 < lines.count, lines[index + 1].top - line.bottom <= 4 { bottom = lines[index + 1].top }
             rects.append(CGRect(x: minX, y: line.top, width: max(0, maxX - minX), height: bottom - line.top))
         }
         return rects

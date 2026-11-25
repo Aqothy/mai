@@ -132,7 +132,11 @@ extension MarkdownPlanner {
                     items.append(
                         MarkdownList.Item(taskChecked: Self.taskState(from: next.flags), blocks: readChildren(until: .liClose)))
                 }
-                return .list(MarkdownList(startIndex: rec.kind == .olOpen ? Int(rec.data) : nil, items: items))
+                return .list(
+                    MarkdownList(
+                        startIndex: rec.kind == .olOpen ? Int(rec.data) : nil,
+                        isTight: rec.flags & MarkdownBlockParser.Flags.looseList == 0,
+                        items: items))
             default:
                 return readLeaf()
             }

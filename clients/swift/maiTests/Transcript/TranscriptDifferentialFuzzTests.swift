@@ -280,7 +280,9 @@ nonisolated struct TranscriptDifferentialFuzzTests {
             let ctLine = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
             let lineWidth = max(0, CGFloat(CTLineGetTypographicBounds(ctLine, nil, nil, nil)) - CGFloat(CTLineGetTrailingWhitespaceWidth(ctLine)))
             guard line.width == lineWidth else { return "line \(index) width \(line.width) vs \(lineWidth)" }
-            let carets = TextLayoutEngine.caretOffsets(of: ctLine, range: line.range, string: ns, indent: indent, width: lineWidth)
+            let isRTL = TextLayoutEngine.paragraphIsRTL(ns, startingAt: styled.paragraphs.first?.start ?? 0)
+            let lineX = TextLayoutEngine.lineOriginX(indent: indent, lineWidth: lineWidth, availableWidth: width, isRTL: isRTL)
+            let carets = TextLayoutEngine.caretOffsets(of: ctLine, range: line.range, string: ns, indent: lineX, width: lineWidth)
             guard line.caretOffsets == carets else {
                 let at = carets.indices.first { line.caretOffsets[$0] != carets[$0] } ?? 0
                 let units = (max(0, start + at - 3)..<min(ns.length, start + at + 3)).map { String(ns.character(at: $0), radix: 16) }
@@ -295,7 +297,7 @@ nonisolated struct TranscriptDifferentialFuzzTests {
                 CTRunGetGlyphs(run, CFRange(), &g)
                 CTRunGetPositions(run, CFRange(), &p)
                 glyphs += g
-                xs += p.map { indent + $0.x }
+                xs += p.map { lineX + $0.x }
             }
             let laid = line.runs.flatMap { layout.runs[$0].glyphs }
             let laidX = line.runs.flatMap { layout.runs[$0].positions.map(\.x) }

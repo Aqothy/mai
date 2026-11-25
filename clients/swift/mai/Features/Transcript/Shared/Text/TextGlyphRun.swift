@@ -14,4 +14,22 @@ nonisolated struct TextGlyphRun: Sendable {
     let range: Range<Int>
     /// Index into the layout's links, for hit testing a click or tap.
     let linkIndex: Int?
+    /// Set on runs inside complex BiDi lines so selection rects split cleanly
+    /// per visual run without jumping across LTR/RTL boundaries.
+    let isRightToLeft: Bool
+    let visualWidth: CGFloat
+
+    init(
+        font: TranscriptFont, glyphs: [CGGlyph], positions: [CGPoint], color: TextColor, range: Range<Int>,
+        linkIndex: Int?, isRightToLeft: Bool = false, visualWidth: CGFloat = 0
+    ) {
+        self.font = font
+        self.glyphs = glyphs
+        self.positions = positions
+        self.color = color
+        self.range = range
+        self.linkIndex = linkIndex
+        self.isRightToLeft = isRightToLeft
+        self.visualWidth = visualWidth
+    }
 }

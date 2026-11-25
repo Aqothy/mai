@@ -18,6 +18,10 @@ nonisolated enum TextLayoutEngine {
         /// Every line this tall instead of its own metrics (code).
         var fixedLineHeight: CGFloat?
         var quoteBarWidth: CGFloat = 3
+        /// Right-align RTL paragraphs (`dir="auto"`) to `availableWidth`;
+        /// disabled for shrink-wrapped user bubbles so short Arabic prompts
+        /// stay compact.
+        var alignsRTLToWidth = true
     }
 
     /// Core Text lays a string longer than 10,240 UTF-16 units out another
@@ -154,6 +158,42 @@ nonisolated enum TextLayoutEngine {
         if u >= 0xFB1D && u <= 0xFDFF { return true }
         if u >= 0xFE70 && u <= 0xFEFF { return true }
         return false
+    }
+
+    /// UAX #9 P2/P3 (`dir="auto"`): true when the paragraph starting at
+    /// `start` has a strong right-to-left character before any strong
+    /// left-to-right character. O(1) on normal LTR text (first ASCII letter
+    /// returns `false`).
+    static func paragraphIsRTL(_ string: NSString, startingAt start: Int) -> Bool {
+        let length = string.length
+        var index = max(0, start)
+        while index < length {
+            let unit = string.character(at: index)
+            if endsLine(unit) { return false }
+            if (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A) { return false }
+            if unit >= 0x0590 {
+                if (unit <= 0x08FF && unit != 0x061C) || unit == 0x200F || (unit >= 0xFB1D && unit <= 0xFDFF)
+                    || (unit >= 0xFE70 && unit <= 0xFEFC)
+                {
+                    return true
+                }
+                if unit == 0x200E { return false }
+                if unit >= 0x0900, !isBiDiCodeUnit(unit) {
+                    if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return false }
+                }
+            } else if unit >= 0x00C0, let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
+                return false
+            }
+            index += 1
+        }
+        return false
+    }
+
+    /// Leading x for a line (`dir="auto"` flush-right alignment for RTL
+    /// paragraphs, matching browsers and `NSTextView`).
+    static func lineOriginX(indent: CGFloat, lineWidth: CGFloat, availableWidth: CGFloat, isRTL: Bool) -> CGFloat {
+        guard isRTL, availableWidth.isFinite else { return indent }
+        return max(0, availableWidth - indent - lineWidth)
     }
 
     /// Lays `attributedString` out in typesetter windows of at most
@@ -381,10 +421,16 @@ nonisolated enum TextLayoutEngine {
             let lineWidth = max(0, typographicWidth - CGFloat(CTLineGetTrailingWhitespaceWidth(line)))
             let height = options.fixedLineHeight ?? ceil(ascent + descent + leading)
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
+            let paragraphStart = paragraph?.start ?? 0
+            let isRTL =
+                options.wraps && options.alignsRTLToWidth && availableWidth.isFinite
+                && TextLayoutEngine.paragraphIsRTL(nsString, startingAt: paragraphStart)
+            let lineX = TextLayoutEngine.lineOriginX(
+                indent: indent, lineWidth: lineWidth, availableWidth: availableWidth, isRTL: isRTL)
             let firstRun = runs.count
             let firstDecoration = decorations.count
             let carets = addRunsAndCarets(
-                of: line, range: range, indent: indent, baseline: baseline, width: lineWidth,
+                of: line, range: range, indent: lineX, baseline: baseline, width: lineWidth,
                 activeString: activeString, baseOffset: baseOffset)
             if let paragraph {
                 addParagraphDecorations(
@@ -393,10 +439,10 @@ nonisolated enum TextLayoutEngine {
             let textRange = (range.lowerBound + baseOffset)..<(range.upperBound + baseOffset)
             lines.append(
                 TextLine(
-                    top: y, baseline: baseline, height: height, x: indent, width: lineWidth, range: textRange,
+                    top: y, baseline: baseline, height: height, x: lineX, width: lineWidth, range: textRange,
                     caretOffsets: carets, runs: firstRun..<runs.count,
                     decorations: firstDecoration..<decorations.count, endsWithNewline: endsWithNewline))
-            width = max(width, indent + lineWidth)
+            width = max(width, lineX + lineWidth)
             y += height
         }
 
@@ -450,12 +496,16 @@ nonisolated enum TextLayoutEngine {
                     return positions.map { CGPoint(x: indent + $0.x, y: $0.y - baseline) }
                 }
 
+                let runIsRTL = needsCoreTextCarets && CTRunGetStatus(run).contains(.rightToLeft)
+                let runVisualWidth: CGFloat =
+                    needsCoreTextCarets
+                    ? CGFloat(CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), nil, nil, nil)) : 0
                 runs.append(
                     TextGlyphRun(
                         font: font, glyphs: glyphs, positions: positions, color: style.color,
                         range: (stringRange.location + baseOffset)..<(
                             stringRange.location + baseOffset + stringRange.length),
-                        linkIndex: style.linkIndex))
+                        linkIndex: style.linkIndex, isRightToLeft: runIsRTL, visualWidth: runVisualWidth))
                 addRunDecorations(run, style: style, font: font, start: positions[0].x, baseline: baseline)
             }
 

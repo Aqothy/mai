@@ -34,6 +34,8 @@ nonisolated struct MarkdownBlockParser {
         /// A list item starting with a GFM task marker (`[ ]`, `[x]`, `[X]`).
         static let task: UInt8 = 1 << 2
         static let taskDone: UInt8 = 1 << 3
+        /// CommonMark 5.3: a loose list (blank line between items or direct item blocks).
+        static let looseList: UInt8 = 1 << 4
     }
 
     struct LineSpan {
@@ -86,6 +88,8 @@ nonisolated struct MarkdownBlockParser {
         var indent: Int
         var children: Int
         var recordIndex: Int
+        var sawBlankAfterChild = false
+        var isLoose = false
     }
 
     private static let maxNesting = 250
@@ -788,7 +792,12 @@ nonisolated struct MarkdownBlockParser {
                 }
                 return
             }
-            if isBlank { return }
+            if isBlank {
+                if !containers.isEmpty, containers[containers.count &- 1].children > 0 {
+                    containers[containers.count &- 1].sawBlankAfterChild = true
+                }
+                return
+            }
             if leaf == .none {
                 prepareLeafParent()
                 openLeaf(.paragraph)
@@ -809,9 +818,19 @@ nonisolated struct MarkdownBlockParser {
     }
 
     private mutating func noteChildAdded() {
-        if !containers.isEmpty {
-            containers[containers.count &- 1].children &+= 1
+        guard !containers.isEmpty else { return }
+        let idx = containers.count &- 1
+        if containers[idx].sawBlankAfterChild {
+            containers[idx].sawBlankAfterChild = false
+            if containers[idx].kind == .ulOpen || containers[idx].kind == .olOpen {
+                containers[idx].isLoose = true
+            } else if containers[idx].kind == .liOpen, idx > 0,
+                containers[idx &- 1].kind == .ulOpen || containers[idx &- 1].kind == .olOpen
+            {
+                containers[idx &- 1].isLoose = true
+            }
         }
+        containers[idx].children &+= 1
     }
 
     private mutating func openLeaf(_ kind: RecordKind) {
@@ -922,6 +941,12 @@ nonisolated struct MarkdownBlockParser {
 
     private mutating func closeContainer() {
         guard let top = containers.popLast() else { return }
+        if top.isLoose, top.kind == .ulOpen || top.kind == .olOpen {
+            records[top.recordIndex].flags |= Flags.looseList
+        }
+        if top.sawBlankAfterChild, !containers.isEmpty, containers[containers.count &- 1].children > 0 {
+            containers[containers.count &- 1].sawBlankAfterChild = true
+        }
         let closer: RecordKind =
             switch top.kind {
             case .quoteOpen: .quoteClose

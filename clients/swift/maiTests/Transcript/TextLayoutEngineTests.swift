@@ -357,4 +357,56 @@ struct TextLayoutEngineTests {
         let span = abs(line.caretOffsets[bStart + 1] - line.caretOffsets[bStart])
         #expect(span > 1, "expected non-zero caret span for 'b', got \(span)")
     }
+
+    /// Tight lists separate items by `listItemSpacing` (8 pt); loose lists
+    /// (blank line between items or inside a multi-block item) use
+    /// `blockSpacing` (16 pt), matching browsers and CommonMark §5.3.
+    @Test func tightAndLooseListsDifferInItemSpacing() {
+        let tightBlocks = MarkdownPlanner.blocks(from: "- Alpha\n- Beta\n")
+        let looseBlocks = MarkdownPlanner.blocks(from: "- Alpha\n\n- Beta\n")
+        guard case .list(let tight) = tightBlocks.first, case .list(let loose) = looseBlocks.first else {
+            Issue.record("expected list blocks")
+            return
+        }
+        #expect(tight.isTight)
+        #expect(!loose.isTight)
+
+        let tightLayout = layout(tightBlocks, width: 400)
+        let looseLayout = layout(looseBlocks, width: 400)
+        let delta = looseLayout.size.height - tightLayout.size.height
+        let expected = style.blockSpacing - style.listItemSpacing
+        #expect(abs(delta - expected) < 0.5, "expected loose list taller by \(expected), got \(delta)")
+    }
+
+    /// Selecting across an LTR/RTL boundary on one line produces disjoint
+    /// per-run highlight rects instead of one spanning rect over unselected
+    /// glyphs in between.
+    @Test func mixedBiDiSelectionProducesDisjointRectsPerRun() {
+        let text = "hello שלום world"
+        let laid = layout([.paragraph([MarkdownInline(text: text)])], width: 400)
+        // Select "lo של" (UTF-16 offsets 3..<8): covers the end of "hello"
+        // (left side) and the visual right half of "שלום" (right of "ום"),
+        // leaving "ום" unselected between them.
+        let rects = laid.selectionRects(for: 3..<8)
+        #expect(rects.count == 2, "expected 2 disjoint BiDi selection rects, got \(rects)")
+        if rects.count == 2 {
+            let ordered = rects.sorted { $0.minX < $1.minX }
+            #expect(ordered[1].minX > ordered[0].maxX + 1, "expected unselected gap between BiDi runs: \(ordered)")
+        }
+    }
+
+    /// Hit-testing in the vertical gap between two lines snaps to the closer
+    /// line at the exact vertical midpoint (YYText rule).
+    @Test func lineGapHitTestingSnapsAtVerticalMidpoint() {
+        let laid = layout(
+            [.paragraph([MarkdownInline(text: "First")]), .paragraph([MarkdownInline(text: "Second")])],
+            width: 400)
+        #expect(laid.lines.count == 2)
+        let gapTop = laid.lines[0].bottom
+        let gapBottom = laid.lines[1].top
+        #expect(gapBottom - gapTop >= 10)
+        let midpoint = (gapTop + gapBottom) / 2
+        #expect(laid.lineIndex(nearestY: midpoint - 0.5) == 0)
+        #expect(laid.lineIndex(nearestY: midpoint + 0.5) == 1)
+    }
 }

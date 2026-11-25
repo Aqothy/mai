@@ -132,7 +132,7 @@ struct StreamingMarkdownParserTests {
         var p8 = StreamingMarkdownParser()
         #expect(
             p8.update("- item\n\n  ```swift\n  let x = **foo").open == [
-                .list(MarkdownList(startIndex: nil, items: [
+                .list(MarkdownList(startIndex: nil, isTight: false, items: [
                     MarkdownList.Item(blocks: [
                         .paragraph([MarkdownInline(text: "item")]),
                         .code(language: "swift", code: "let x = **foo"),
@@ -397,5 +397,36 @@ struct StreamingMarkdownParserTests {
             MarkdownPlanner.blocks(from: "mailto:a@b.com") == [
                 .paragraph([MarkdownInline(text: "mailto:a@b.com", link: URL(string: "mailto:a@b.com"))])
             ])
+    }
+
+    /// Every example in the 1,324-example CommonMark + GFM spec corpus parses
+    /// cleanly and produces the exact same block tree when streamed in chunks
+    /// as when parsed one-shot.
+    @Test func commonMarkAndGFMSpecStreamingMatchesOneShot() throws {
+        final class BundleAnchor {}
+        let url =
+            Bundle(for: BundleAnchor.self).url(forResource: "commonmark-gfm-spec", withExtension: "json")
+            ?? URL(filePath: #filePath).deletingLastPathComponent().appending(path: "commonmark-gfm-spec.json")
+        let data = try Data(contentsOf: url)
+        let examples = try JSONDecoder().decode([String].self, from: data)
+        #expect(examples.count == 1_324)
+
+        for (index, source) in examples.enumerated() {
+            let oneShot = MarkdownPlanner.blocks(from: source)
+            var parser = StreamingMarkdownParser()
+            let bytes = Array(source.utf8)
+            var offset = 0
+            while offset < bytes.count {
+                // Step by UTF-8 scalar boundary in small chunks to stress block
+                // and inline seams without splitting a scalar mid-codepoint.
+                var next = min(bytes.count, offset + 11)
+                while next < bytes.count, (bytes[next] & 0xC0) == 0x80 { next += 1 }
+                let prefix = String(decoding: bytes[..<next], as: UTF8.self)
+                _ = parser.update(prefix)
+                offset = next
+            }
+            let streamed = parser.finish(source)
+            #expect(streamed == oneShot, "spec example \(index) diverged:\n\(source)")
+        }
     }
 }
