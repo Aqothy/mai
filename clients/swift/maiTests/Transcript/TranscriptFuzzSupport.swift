@@ -94,7 +94,9 @@ nonisolated enum TranscriptFuzz {
     /// (incremental layout keeps at least two), fences (closed, open, wide,
     /// tabbed), tables, lists, quotes, headings and rules, with inline
     /// emphasis, code, links and strikethrough.
-    static func markdownDocument(_ rng: inout FuzzRNG, blocks: Int, vocabulary: [String] = words) -> String {
+    static func markdownDocument(
+        _ rng: inout FuzzRNG, blocks: Int, vocabulary: [String] = words, fenceTokens: [String] = adversarialTokens
+    ) -> String {
         func paragraph(_ rng: inout FuzzRNG, words count: Int) -> String {
             Self.paragraph(&rng, words: count, vocabulary: vocabulary)
         }
@@ -106,7 +108,7 @@ nonisolated enum TranscriptFuzz {
             case 4:
                 parts.append(String(repeating: "#", count: rng.int(in: 1..<4)) + " " + paragraph(&rng, words: 6))
             case 5:
-                parts.append(fence(&rng))
+                parts.append(fence(&rng, tokens: fenceTokens))
             case 6:
                 let columns = rng.int(in: 1..<5)
                 var table = "|" + (0..<columns).map { " H\($0) |" }.joined() + "\n|"
@@ -146,12 +148,12 @@ nonisolated enum TranscriptFuzz {
         }.joined(separator: " ")
     }
 
-    private static func fence(_ rng: inout FuzzRNG) -> String {
+    private static func fence(_ rng: inout FuzzRNG, tokens: [String]) -> String {
         let wide = rng.chance(30)
         let lines = (0..<rng.int(in: 1..<(rng.chance(10) ? 400 : 40))).map { index -> String in
             var line = (rng.chance(30) ? "\t" : "    ") + "let value\(index) = compute(\(index))"
             if wide { line += " // " + String(repeating: "wide-payload-", count: rng.int(in: 4..<20)) }
-            if rng.chance(10) { line += " " + rng.pick(adversarialTokens) }
+            if rng.chance(10) { line += " " + rng.pick(tokens) }
             return line
         }
         return "```" + rng.pick(["swift", "go", "", "json"]) + "\n" + lines.joined(separator: "\n") + "\n```"

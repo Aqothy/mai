@@ -6,7 +6,7 @@ import Testing
 
 /// Following the end (PLAN 3.9 rules 1, 6, 7, 10), as `ChatScrollState`
 /// did it, minus the delayed geometry reports.
-struct FollowStateTests {
+nonisolated struct FollowStateTests {
     @Test func readerMovesStopAndResumeFollowing() {
         var state = FollowState()
         #expect(state.isFollowing)

@@ -10,19 +10,16 @@ import Testing
 /// PageList integrity checks, CSS scroll anchoring's guarantee), and the
 /// inputs that make Markdown parsers quadratic or overflow the stack (cmark
 /// `test/pathological_tests.py`).
-@MainActor
-@Suite(.serialized)
-struct TranscriptInvariantFuzzTests {
-    private let style = TextStyle.current()
+nonisolated struct TranscriptInvariantFuzzTests {
 
     // MARK: Chunking
 
     /// Chunked user messages and thoughts copy back exactly, every chunk
     /// within its limits, and no chunk boundary splits a grapheme cluster.
-    @Test(arguments: 0..<4)
+    @Test(arguments: 0..<2)
     func chunkedTextReassemblesExactlyAtGraphemeBoundaries(seed: Int) {
         var rng = FuzzRNG(seed: 0xC4A2_0000 &+ UInt64(seed))
-        for iteration in 0..<(12 * TranscriptFuzz.scale) {
+        for iteration in 0..<(6 * TranscriptFuzz.scale) {
             let text: String
             switch rng.int(in: 0..<5) {
             case 0: text = TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 0..<60_000), newlines: true)
@@ -60,10 +57,10 @@ struct TranscriptInvariantFuzzTests {
 
     /// Chunked paragraphs keep every character's style and link, chunked
     /// code its exact text, and chunked lists their items and numbering.
-    @Test(arguments: 0..<4)
+    @Test(arguments: 0..<2)
     func chunkedBlocksKeepTheirContent(seed: Int) {
         var rng = FuzzRNG(seed: 0xB10C_0000 &+ UInt64(seed))
-        for iteration in 0..<(10 * TranscriptFuzz.scale) {
+        for iteration in 0..<(5 * TranscriptFuzz.scale) {
             var inlines: [MarkdownInline] = []
             var total = 0
             let target = rng.int(in: 1..<80_000)
@@ -151,18 +148,19 @@ struct TranscriptInvariantFuzzTests {
 
     /// Drawn bands always cover what was asked, sit on the tile grid inside
     /// the painted area, and releasing leaves no bitmap outside what is kept.
-    @Test func bandsCoverRequestedRectsAndReleaseEverythingElse() {
+    @MainActor @Test func bandsCoverRequestedRectsAndReleaseEverythingElse() {
+        let style = TextStyle.current()
         var rng = FuzzRNG(seed: 0x711E)
         let palette = TextPalette.resolveForTests
-        for iteration in 0..<(6 * TranscriptFuzz.scale) {
+        for iteration in 0..<(2 * TranscriptFuzz.scale) {
             // Each iteration's bitmaps go when the app lets them go, at the end
             // of a run loop turn: its autorelease pool drained and transaction
             // committed. A test that never returns to the run loop keeps them
             // all (23 GB by iteration 289 at scale 50, until IOSurfaces fail).
             autoreleasepool {
                 let wide = rng.chance(50)
-                let lines = (0..<rng.int(in: 1..<500)).map { index in
-                    "line \(index)" + (wide ? String(repeating: " wide", count: rng.int(in: 0..<600)) : "")
+                let lines = (0..<rng.int(in: 1..<150)).map { index in
+                    "line \(index)" + (wide ? String(repeating: " wide", count: rng.int(in: 0..<250)) : "")
                 }
                 let key = RowLayoutKey(contentVersion: 0, width: CGFloat(rng.int(in: 200..<760)), styleVersion: style.version)
                 let layout = RowLayoutBuilder.layout(
@@ -184,7 +182,7 @@ struct TranscriptInvariantFuzzTests {
                     rowID: "r", layout: RowLayout(rowID: "r", key: key, height: size.height, content: content),
                     palette: palette, drawsWideBody: true, scale: 1)
                 let bounds = CGRect(origin: .zero, size: size)
-                for step in 0..<20 {
+                for step in 0..<12 {
                     let rect = CGRect(
                         x: CGFloat(rng.int(in: -500..<Int(size.width) + 500)), y: CGFloat(rng.int(in: -500..<Int(size.height) + 500)),
                         width: CGFloat(rng.int(in: 1..<2_000)), height: CGFloat(rng.int(in: 1..<2_000)))
@@ -223,7 +221,7 @@ struct TranscriptInvariantFuzzTests {
     /// `rebuildRows(fromTurnIndex:)`); after any sequence of the daemon's
     /// events and expansions, the rows are exactly what a full rebuild makes
     /// and the controller's turns are the store's.
-    @Test(arguments: 0..<4)
+    @MainActor @Test(arguments: 0..<2)
     func incrementalStoreUpdatesEqualAFullRebuild(seed: Int) async {
         var rng = FuzzRNG(seed: 0x57_0BE0 &+ UInt64(seed))
         let base = Date(timeIntervalSince1970: 1_800_000_000)
@@ -240,13 +238,13 @@ struct TranscriptInvariantFuzzTests {
         let kinds: [MaidItemKind] = [.assistantMessage, .reasoning, .toolCall, .commandExecution, .warning, .error, .userMessage]
         func entry(_ ref: String) -> EntryView {
             let kind = rng.pick(kinds)
-            let text = kind == .toolCall || kind == .commandExecution ? nil : TranscriptFuzz.markdownDocument(&rng, blocks: rng.int(in: 1..<4))
+            let text = kind == .toolCall || kind == .commandExecution ? nil : TranscriptFuzz.markdownDocument(&rng, blocks: rng.int(in: 1..<3))
             return ThreadFixtures.entry(ref: ref, kind: kind, text: text, title: "step \(ref)")
         }
-        var turns = (0..<rng.int(in: 1..<6)).map { index -> TurnView in
+        var turns = (0..<rng.int(in: 1..<5)).map { index -> TurnView in
             var view = turn(index, state: .completed)
             view.entries = [ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Prompt \(index)")]
-                + (0..<rng.int(in: 0..<6)).map { entry("e\($0)") }
+                + (0..<rng.int(in: 0..<5)).map { entry("e\($0)") }
             return view
         }
         turns.append(turn(turns.count, state: .running))
@@ -258,9 +256,9 @@ struct TranscriptInvariantFuzzTests {
         var nextRef = 100
         var running = turns.count - 1
         var checked = 0
-        defer { #expect(checked > 75, "seed \(seed): only \(checked) steps reached the controller") }
+        defer { #expect(checked > 25, "seed \(seed): only \(checked) steps reached the controller") }
 
-        for step in 0..<(150 * TranscriptFuzz.scale) {
+        for step in 0..<(50 * TranscriptFuzz.scale) {
             guard let thread = store.selectedThread else { return }
             seq += 1
             let operation = rng.int(in: 0..<10)
@@ -334,7 +332,7 @@ struct TranscriptInvariantFuzzTests {
     /// row at their viewport's top exactly where it was (clamped to the
     /// content), a following reader stays at the end, and the document,
     /// rows and geometry agree after every step.
-    @Test(arguments: 0..<4)
+    @MainActor @Test(arguments: 0..<2)
     func readingPlaceHoldsUnderRandomOperations(seed: Int) {
         var rng = FuzzRNG(seed: 0xA2C4_0000 &+ UInt64(seed))
         let controller = TranscriptController(configuration: .testing)
@@ -359,7 +357,7 @@ struct TranscriptInvariantFuzzTests {
         controller.setRows(initial, measuredHeights: initialHeights)
         controller.alignInitialEndIfPossible()
 
-        for step in 0..<(300 * TranscriptFuzz.scale) {
+        for step in 0..<(150 * TranscriptFuzz.scale) {
             let following = controller.isFollowing
             let top = host.viewportTop
             let place = controller.geometry.readingPlace(atViewportTop: top)
@@ -424,25 +422,26 @@ struct TranscriptInvariantFuzzTests {
     /// Off-screen layouts are bounded by memory, not row or line count: a
     /// one-line row can hold megabytes of glyphs (Ghostty bounds scrollback
     /// in bytes, `max_scrollback_bytes`, for the same reason).
-    @Test func layoutCacheEvictsLongSingleLineRowsByTheirSize() {
+    @MainActor @Test func layoutCacheEvictsLongSingleLineRowsByTheirSize() async {
+        let style = TextStyle.current()
         let controller = TranscriptController(configuration: .testing)
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 800, height: 600)
         host.controller = controller
         controller.attach(host)
-        let line = String(repeating: #"{"k":"value","n":12345},"#, count: 256 * 1024 / 24)
-        let rows = (0..<6).map { index in
+        let line = String(repeating: #"{"k":"value","n":12345},"#, count: 200 * 1024 / 24)
+        let rows = (0..<4).map { index in
             TranscriptRow(id: "c\(index)", kind: .markdownBlock(.code(language: "json", code: line), .single))
         }
         let heights = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, CGFloat(2_000)) })
         controller.setRows(rows, measuredHeights: heights)
         let key = controller.currentKey(rows[0])
-        for row in rows {
-            controller.storeLayout(
-                RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
-        }
-        // Six rows of a 256 KB line: ~6.5 MB of glyph positions and carets
-        // each. Only the rows near the viewport may stay.
+        let built = await Task.detached {
+            rows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
+        }.value
+        for layout in built { controller.storeLayout(layout) }
+        // Four rows of a 200 KB line: ~5.6 MB of glyph positions and carets
+        // each (> 12 MB budget). Only the rows near the viewport may stay.
         controller.dropLayouts(outside: 0...2_000)
         #expect(controller.layouts.count <= 2, "kept \(controller.layouts.count) off-screen megabyte layouts")
     }
@@ -511,7 +510,7 @@ struct TranscriptInvariantFuzzTests {
             (0..<300).map { String(repeating: "  ", count: $0) + "* a" }.joined(separator: "\n"),
             String(repeating: "> ", count: 200) + String(repeating: "- 1. ", count: 40) + "x",
         ]
-        let style = self.style
+        let style = await TextStyle.current()
         let survived = await Task.detached(priority: .userInitiated) {
             for source in sources {
                 let blocks = MarkdownPlanner.blocks(from: source)

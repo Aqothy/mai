@@ -7,7 +7,7 @@ import Testing
 /// PLAN 3.9 rule 1: only a move toward the end that shows it follows; any
 /// other move stops following, even inside the end zone. Overscroll past
 /// either edge, and any pull on content shorter than the viewport, is no move.
-struct ScrollFollowPolicyTests {
+nonisolated struct ScrollFollowPolicyTests {
     @Test func readerScrollsFollowOnlyWhenTheyReachTheEnd() {
         typealias Move = ScrollFollowPolicy.ReaderScroll
         let cases: [(name: String, from: CGFloat, to: CGFloat, endTop: CGFloat, isNearBottom: Bool, expected: Move?)] = [

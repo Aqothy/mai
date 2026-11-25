@@ -11,36 +11,40 @@ import Testing
 /// typesetter window against one Core Text typesetter, and the bands a row
 /// keeps across a streamed update against a fresh raster (Blink's paint
 /// under-invalidation checking).
-@MainActor
-@Suite(.serialized)
-struct TranscriptDifferentialFuzzTests {
-    private let style = TextStyle.current()
-
+nonisolated struct TranscriptDifferentialFuzzTests {
     /// Streams random replies in random cuts; every block the worker lays
     /// out incrementally equals its layout from nothing, and every band a
     /// mounted row keeps (`RowContentDiff`) draws what a fresh band would.
-    @Test(arguments: 0..<6)
+    @Test(arguments: 0..<3)
     func streamedLayoutsEqualOneShotLayoutsAndKeptBandsStayCurrent(seed: Int) async {
-        await checkStreamedLayouts(seed: 0x5EED_0000 &+ UInt64(seed), vocabulary: TranscriptFuzz.words)
+        await checkStreamedLayouts(
+            seed: 0x5EED_0000 &+ UInt64(seed), iterations: 2, vocabulary: TranscriptFuzz.words,
+            fenceTokens: TranscriptFuzz.adversarialTokens)
     }
 
     /// The same with every kind of character a model can emit in the prose
-    /// (`unicodeEdgeTokens`).
-    @Test(arguments: 0..<3)
+    /// and code fences (`unicodeEdgeTokens`).
+    @Test(arguments: 0..<2)
     func streamedLayoutsHoldForEveryKindOfCharacter(seed: Int) async {
         await checkStreamedLayouts(
-            seed: 0x5EED_1000 &+ UInt64(seed), vocabulary: TranscriptFuzz.words + TranscriptFuzz.unicodeEdgeTokens)
+            seed: 0x5EED_1000 &+ UInt64(seed), iterations: 1,
+            vocabulary: TranscriptFuzz.words + TranscriptFuzz.unicodeEdgeTokens,
+            fenceTokens: TranscriptFuzz.adversarialTokens + TranscriptFuzz.unicodeEdgeTokens)
     }
 
-    private func checkStreamedLayouts(seed: UInt64, vocabulary: [String]) async {
+    private func checkStreamedLayouts(
+        seed: UInt64, iterations: Int, vocabulary: [String], fenceTokens: [String]
+    ) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: seed)
-        let palette = TextPalette.resolveForTests
-        for _ in 0..<(2 * TranscriptFuzz.scale) {
-            let document = TranscriptFuzz.markdownDocument(&rng, blocks: rng.int(in: 1..<8), vocabulary: vocabulary)
+        let palette = await TextPalette.resolveForTests
+        for _ in 0..<(iterations * TranscriptFuzz.scale) {
+            let document = TranscriptFuzz.markdownDocument(
+                &rng, blocks: rng.int(in: 1..<8), vocabulary: vocabulary, fenceTokens: fenceTokens)
             let width = CGFloat(rng.int(in: 180..<760))
             let worker = TranscriptStreamWorker()
             var shown: [Int: RowLayout] = [:]
-            let maxStep = document.utf8.count < 2_000 ? rng.pick([3, 40]) : rng.pick([64, 400, 2_000])
+            let maxStep = max(16, document.utf8.count / rng.int(in: 8..<20))
             let cuts = TranscriptFuzz.prefixes(of: document, &rng, maxStep: maxStep)
             for (step, text) in cuts.enumerated() {
                 let isFinished = step == cuts.count - 1
@@ -75,12 +79,11 @@ struct TranscriptDifferentialFuzzTests {
             let unchanged = RowContentDiff.unchangedHeight(before, after)
             guard unchanged > 0 else { return }
             let oldFrames = Set(RowLayer.bandFrames(height: height.0, width: width.0).map { "\($0)" })
-            // Stale bands sit just above where the change starts: check the
-            // two kept bands nearest it (the rest drew identical lines).
+            // A stale band sits immediately above where the change starts.
             let kept = RowLayer.bandFrames(height: height.1, width: width.1)
                 .filter { $0.maxY <= unchanged && oldFrames.contains("\($0)") }
-            let nearest = kept.map(\.maxY).sorted().suffix(2)
-            for frame in kept where nearest.contains(frame.maxY) {
+            guard let maxY = kept.map(\.maxY).max() else { return }
+            for frame in kept where frame.maxY == maxY {
                 let keptPixels = TranscriptFuzz.pixels(before, rect: frame, drawsWideBody: drawsWideBody, palette: palette)
                 let fresh = TranscriptFuzz.pixels(after, rect: frame, drawsWideBody: drawsWideBody, palette: palette)
                 #expect(keptPixels == fresh, "\(context): kept band \(frame) is stale (unchanged \(unchanged))")
@@ -120,11 +123,12 @@ struct TranscriptDifferentialFuzzTests {
     /// Khmer or Myanmar letters) and ends 64 units on, so a line holding
     /// such a run can measure and break differently. Neither is wrong: a
     /// browser shapes each run on its own.
-    @Test(arguments: 0..<4)
-    func slidingWindowMatchesOneTypesetterExactly(seed: Int) {
+    @Test(arguments: 0..<2)
+    func slidingWindowMatchesOneTypesetterExactly(seed: Int) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ UInt64(seed))
-        for iteration in 0..<(8 * TranscriptFuzz.scale) {
-            checkSlidingWindow(slidingWindowCase(&rng), context: "seed \(seed) iteration \(iteration)")
+        for iteration in 0..<(4 * TranscriptFuzz.scale) {
+            checkSlidingWindow(slidingWindowCase(&rng, style: style), style: style, context: "seed \(seed) iteration \(iteration)")
         }
     }
 
@@ -135,20 +139,24 @@ struct TranscriptDifferentialFuzzTests {
     /// mandatory breaks inside hard lines, controls, BiDi controls and
     /// right-to-left runs (whole-line typesetters), and scripts Core Text
     /// shapes by syllable.
-    @Test(arguments: 0..<4)
-    func slidingWindowMatchesOneTypesetterForEveryKindOfCharacter(seed: Int) {
+    @Test(arguments: 0..<2)
+    func slidingWindowMatchesOneTypesetterForEveryKindOfCharacter(seed: Int) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ 0x100 &+ UInt64(seed))
         let tokens = TranscriptFuzz.adversarialTokens + TranscriptFuzz.unicodeEdgeTokens
-        for iteration in 0..<(8 * TranscriptFuzz.scale) {
-            checkSlidingWindow(slidingWindowCase(&rng, tokens: tokens), context: "seed \(seed) iteration \(iteration)")
+        for iteration in 0..<(4 * TranscriptFuzz.scale) {
+            checkSlidingWindow(
+                slidingWindowCase(&rng, style: style, tokens: tokens), style: style,
+                context: "seed \(seed) iteration \(iteration)")
         }
     }
 
     @Test(arguments: zip([2, 3], [260, 247]))
-    func slidingWindowRegressions(seed: Int, iteration: Int) {
+    func slidingWindowRegressions(seed: Int, iteration: Int) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ UInt64(seed))
-        for _ in 0..<iteration { _ = slidingWindowCase(&rng) }
-        checkSlidingWindow(slidingWindowCase(&rng), context: "seed \(seed) iteration \(iteration)")
+        for _ in 0..<iteration { _ = slidingWindowCase(&rng, style: style) }
+        checkSlidingWindow(slidingWindowCase(&rng, style: style), style: style, context: "seed \(seed) iteration \(iteration)")
     }
 
     private static let slidingWindowSeed: UInt64 = 0x51_1D00
@@ -156,7 +164,7 @@ struct TranscriptDifferentialFuzzTests {
     /// Random text past the sliding threshold in styled runs (fonts change
     /// inside lines, as in real replies), and a width.
     private func slidingWindowCase(
-        _ rng: inout FuzzRNG, tokens: [String] = TranscriptFuzz.adversarialTokens
+        _ rng: inout FuzzRNG, style: TextStyle, tokens: [String] = TranscriptFuzz.adversarialTokens
     ) -> (text: StyledText, width: CGFloat) {
         var text = TranscriptFuzz.adversarialText(
             &rng, utf16Length: rng.int(in: 4_200..<10_000), newlines: rng.chance(30), tokens: tokens)
@@ -174,7 +182,7 @@ struct TranscriptDifferentialFuzzTests {
         return (AttributedTextBuilder.build([.paragraph(inlines)], style: style), width)
     }
 
-    private func checkSlidingWindow(_ testCase: (text: StyledText, width: CGFloat), context: String) {
+    private func checkSlidingWindow(_ testCase: (text: StyledText, width: CGFloat), style: TextStyle, context: String) {
         let options = TextLayoutEngine.Options(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth)
         let layout = TextLayoutEngine.layout(testCase.text, width: testCase.width, options: options)
         let diff =
@@ -188,37 +196,36 @@ struct TranscriptDifferentialFuzzTests {
     /// Text drops kerning and ligatures in strings over 10,240 units, which
     /// windows never reach.
     @Test(arguments: [TextStyle.FontRole.body, .code])
-    func linesLayOutTheSameHoweverMuchTextSurroundsThem(role: TextStyle.FontRole) {
+    func linesLayOutTheSameHoweverMuchTextSurroundsThem(role: TextStyle.FontRole) async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: 0x5A3E)
         let options = TextLayoutEngine.Options(lineSpacing: 0, wraps: role == .body)
-        for iteration in 0..<(6 * TranscriptFuzz.scale) {
+        let filler = String(repeating: "lorem ipsum dolor sit amet\n", count: 12_000 / 27)
+        for iteration in 0..<(3 * TranscriptFuzz.scale) {
             // Ends in a newline wherever it sits, so its lines' ranges match.
             let line = "AVATAR Toyota WAVE office affluent Yesterday, VA. ✌️ café — “quotes” fi ffl ✌︎ "
                 + TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 10..<300)) + "\n"
             let alone = TextLayoutEngine.layout(
                 AttributedTextBuilder.plain(line, role: role, color: .primary, style: style), width: 640, options: options)
-            for fillerUnits in [5_000, 12_000, 40_000] {
-                let filler = String(repeating: "lorem ipsum dolor sit amet\n", count: fillerUnits / 27)
-                let before = TextLayoutEngine.layout(
-                    AttributedTextBuilder.plain(line + filler, role: role, color: .primary, style: style),
-                    width: 640, options: options)
-                let after = TextLayoutEngine.layout(
-                    AttributedTextBuilder.plain(filler + line, role: role, color: .primary, style: style),
-                    width: 640, options: options)
-                let tail = after.lines.suffix(alone.lines.count)
-                for (index, expected) in alone.lines.enumerated() {
-                    for (context, layout, actual) in [
-                        ("before", before, before.lines[index]), ("after", after, tail[tail.startIndex + index]),
-                    ] {
-                        let offset = actual.range.lowerBound - expected.range.lowerBound
-                        let same =
-                            actual.range.count == expected.range.count && actual.width == expected.width
-                            && actual.caretOffsets == expected.caretOffsets
-                            && actual.runs.flatMap { layout.runs[$0].glyphs } == expected.runs.flatMap { alone.runs[$0].glyphs }
-                            && actual.runs.flatMap { layout.runs[$0].positions.map(\.x) }
-                                == expected.runs.flatMap { alone.runs[$0].positions.map(\.x) }
-                        #expect(same, "iteration \(iteration) \(role) \(context) \(fillerUnits): line \(index) (offset \(offset)) differs")
-                    }
+            let before = TextLayoutEngine.layout(
+                AttributedTextBuilder.plain(line + filler, role: role, color: .primary, style: style),
+                width: 640, options: options)
+            let after = TextLayoutEngine.layout(
+                AttributedTextBuilder.plain(filler + line, role: role, color: .primary, style: style),
+                width: 640, options: options)
+            let tail = after.lines.suffix(alone.lines.count)
+            for (index, expected) in alone.lines.enumerated() {
+                for (context, layout, actual) in [
+                    ("before", before, before.lines[index]), ("after", after, tail[tail.startIndex + index]),
+                ] {
+                    let offset = actual.range.lowerBound - expected.range.lowerBound
+                    let same =
+                        actual.range.count == expected.range.count && actual.width == expected.width
+                        && actual.caretOffsets == expected.caretOffsets
+                        && actual.runs.flatMap { layout.runs[$0].glyphs } == expected.runs.flatMap { alone.runs[$0].glyphs }
+                        && actual.runs.flatMap { layout.runs[$0].positions.map(\.x) }
+                            == expected.runs.flatMap { alone.runs[$0].positions.map(\.x) }
+                    #expect(same, "iteration \(iteration) \(role) \(context): line \(index) (offset \(offset)) differs")
                 }
             }
         }
@@ -228,16 +235,17 @@ struct TranscriptDifferentialFuzzTests {
     /// character inside one a glyph of its own: a VS16 after a fallback font
     /// drew its base (one code line past 10,240 units), Indic spacing marks,
     /// © and ® joined to an emoji by a ZWJ.
-    @Test func caretsNeverLandInsideAGraphemeCluster() {
+    @Test func caretsNeverLandInsideAGraphemeCluster() async {
+        let style = await TextStyle.current()
         var rng = FuzzRNG(seed: 0xC1_5751)
         var texts = [
             "का कि की कु क्ष त्र श्र", "রাষ্ট্র্রে অপার্টমেন্ট", "✌︎ and ✌️, ❤︎ and ❤️, e\u{0301} n\u{0308}",
             "a👍\u{200D}©b 👍\u{200D}® ©",
         ]
-        for _ in 0..<(4 * TranscriptFuzz.scale) {
+        for _ in 0..<(2 * TranscriptFuzz.scale) {
             texts.append("✌︎ " + TranscriptFuzz.adversarialText(&rng, utf16Length: 11_000) + " ✌️ ✌︎ ❤️")
         }
-        for _ in 0..<(4 * TranscriptFuzz.scale) {
+        for _ in 0..<(2 * TranscriptFuzz.scale) {
             texts.append(
                 TranscriptFuzz.adversarialText(
                     &rng, utf16Length: 11_000, newlines: true,

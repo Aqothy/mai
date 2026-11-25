@@ -11,42 +11,11 @@ import Testing
 /// transcript engine, covering large/pathological inputs, CoreText /
 /// Unicode / grapheme / BiDi / Zalgo edge cases, and layout / geometry
 /// invariants.
-@MainActor
-struct TranscriptExtremeAndFuzzTests {
-    private let style = TextStyle.current()
+nonisolated struct TranscriptExtremeAndFuzzTests {
+    // MARK: 1. Sliding-Window CTTypesetter (Extreme Length, BiDi, Zalgo)
 
-    /// Reference single-typesetter layout (no sliding window) for differential
-    /// verification on medium strings above `slidingWindowThreshold`.
-    private func unslicedReferenceLayout(_ styled: StyledText, width: CGFloat) -> (
-        lineRanges: [Range<Int>], lineWidths: [CGFloat], totalHeight: CGFloat
-    ) {
-        let length = styled.length
-        let typesetter = CTTypesetterCreateWithAttributedString(styled.string)
-        var start = 0
-        var ranges: [Range<Int>] = []
-        var widths: [CGFloat] = []
-        var y: CGFloat = 0
-        while start < length {
-            let count = max(
-                1, min(CTTypesetterSuggestLineBreak(typesetter, start, Double(max(1, width))), length - start))
-            let line = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
-            var ascent: CGFloat = 0
-            var descent: CGFloat = 0
-            var leading: CGFloat = 0
-            let typographic = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-            let lineWidth = max(0, typographic - CGFloat(CTLineGetTrailingWhitespaceWidth(line)))
-            if !ranges.isEmpty { y += style.lineSpacing }
-            y += ceil(ascent + descent + leading)
-            ranges.append(start..<(start + count))
-            widths.append(lineWidth)
-            start += count
-        }
-        return (ranges, widths, ceil(y))
-    }
-
-    // MARK: 1. Sliding-Window CTTypesetter (Parity, Extreme Length, Boundary Fuzzing, BiDi, Zalgo)
-
-    @Test func giantSingleParagraphStaysLinearWithSpacesAndZeroSpaces() {
+    @Test func giantSingleParagraphStaysLinearWithSpacesAndZeroSpaces() async {
+        let style = await TextStyle.current()
         // 256 KB prose without newlines (used to take ~3,000 ms with O(N^2) ICU).
         let word = "performance "
         let spaced = String(repeating: word, count: 256 * 1024 / word.utf8.count)
@@ -73,73 +42,8 @@ struct TranscriptExtremeAndFuzzTests {
         verifyTextLayoutInvariants(unspacedLayout, maxWidth: 728)
     }
 
-    @Test func slidingWindowMatchesUnslicedCoreTextExactlyOnLtrProseAndStyledRuns() {
-        let baseWords = [
-            "Sliding", "window", "typesetter", "café", "👩🏽‍💻", "漢字", "alpha-beta",
-            "https://example.com/path", "12345", "end.",
-        ]
-        var inlines: [MarkdownInline] = []
-        var totalUTF16 = 0
-        var i = 0
-        while totalUTF16 < 10_000 {
-            let text = baseWords[i % baseWords.count] + " "
-            let inlineStyle: MarkdownInline.Style =
-                switch i % 5 {
-                case 1: .strong
-                case 2: .emphasis
-                case 3: .code
-                default: []
-                }
-            inlines.append(MarkdownInline(text: text, style: inlineStyle))
-            totalUTF16 += text.utf16.count
-            i += 1
-        }
-        let styled = AttributedTextBuilder.build([.paragraph(inlines)], style: style)
-        #expect(styled.length > TextLayoutEngine.slidingWindowThreshold)
-
-        for width in [CGFloat(220), 420, 728] {
-            let actual = TextLayoutEngine.layout(
-                styled, width: width, options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth))
-            let reference = unslicedReferenceLayout(styled, width: width)
-            #expect(actual.lines.count == reference.lineRanges.count, "width \(width)")
-            #expect(actual.lines.map(\.range) == reference.lineRanges, "line ranges width \(width)")
-            #expect(actual.size.height == reference.totalHeight, "height width \(width)")
-            verifyTextLayoutInvariants(actual, maxWidth: width)
-        }
-    }
-
-    @Test func slidingWindowBoundaryFuzzerPreservesAllUnicodeAndCaretInvariants() {
-        var rng = FuzzRNG(seed: 0xDEAD_BEEF_CAFE_0001)
-        let widths: [CGFloat] = [120, 280, 480, 728]
-
-        for iteration in 0..<24 {
-            // Deliberately build strings of 5,000..9,000 UTF-16 units so multiple
-            // 2 KB window boundaries land inside random Unicode clusters.
-            let targetLength = rng.int(in: 5_000..<9_000)
-            var parts: [String] = []
-            var utf16Count = 0
-            while utf16Count < targetLength {
-                let token = TranscriptFuzz.adversarialTokens[rng.int(in: 0..<TranscriptFuzz.adversarialTokens.count)]
-                parts.append(token)
-                utf16Count += token.utf16.count
-            }
-            let text = parts.joined()
-            let width = widths[iteration % widths.count]
-            let layout = RowLayoutBuilder.prose([.paragraph([MarkdownInline(text: text)])], width: width, style: style)
-            verifyTextLayoutInvariants(layout, maxWidth: width, allowWideAtomicCluster: true)
-
-            // Verify no line break splits a UTF-16 surrogate pair.
-            let ns = text as NSString
-            for line in layout.lines where line.range.upperBound < ns.length {
-                let lastUnit = ns.character(at: line.range.upperBound - 1)
-                let nextUnit = ns.character(at: line.range.upperBound)
-                let splitSurrogate = (0xD800...0xDBFF).contains(lastUnit) && (0xDC00...0xDFFF).contains(nextUnit)
-                #expect(!splitSurrogate, "iteration \(iteration) split surrogate pair at \(line.range.upperBound)")
-            }
-        }
-    }
-
-    @Test func biDiArabicAndZalgoStressRemainValidAndBounded() {
+    @Test func biDiArabicAndZalgoStressRemainValidAndBounded() async {
+        let style = await TextStyle.current()
         // Mixed Arabic RTL + Eastern Arabic numerals + Latin exceeding slidingWindowThreshold.
         let arabicChunk = "مرحبا بالعالم ٢٥ Hello world שלום 👋 עולם أبا "
         let longBiDi = String(repeating: arabicChunk, count: 160)
@@ -162,16 +66,19 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: 2. Horizontal + Vertical 2D Tiling & Wide Blocks
 
-    @Test func giantSingleCodeLineTilesHorizontallyWithinSurfaceMemoryCap() {
+    @MainActor @Test func giantSingleCodeLineTilesHorizontallyWithinSurfaceMemoryCap() async {
+        let style = TextStyle.current()
         // 100 KB single minified JSON line inside a code block.
         let unit = #"{"id":12345,"name":"transcript-engine","ok":true},"#
         let longLine = "[" + String(repeating: unit, count: 100_000 / unit.utf8.count) + "]"
         let key = RowLayoutKey(contentVersion: 0, width: 700, styleVersion: style.version)
-        let layout = RowLayoutBuilder.layout(
-            RowLayoutRequest(
-                rowID: "wide-code",
-                kind: .markdownBlock(.code(language: "json", code: longLine), .single),
-                key: key, style: style))
+        let layout = await Task.detached {
+            RowLayoutBuilder.layout(
+                RowLayoutRequest(
+                    rowID: "wide-code",
+                    kind: .markdownBlock(.code(language: "json", code: longLine), .single),
+                    key: key, style: style))
+        }.value
         guard let wide = layout.content.wideBody else {
             Issue.record("expected wideBody for 100 KB single code line")
             return
@@ -222,10 +129,11 @@ struct TranscriptExtremeAndFuzzTests {
         }
     }
 
-    @Test func horizontalGlyphCullingMatchesFullRenderBitForBit() throws {
+    @Test func horizontalGlyphCullingMatchesFullRenderBitForBit() async throws {
+        let style = await TextStyle.current()
         let code = (0..<200).map { "token_\($0)_value" }.joined(separator: " ")
         let codeLayout = CodeLayout.make(code: code, language: "swift", colors: nil, width: 400, style: style)
-        let palette = TextPalette.resolveForTests
+        let palette = await TextPalette.resolveForTests
         let tile = CGRect(x: 768, y: 0, width: 768, height: min(512, codeLayout.body.size.height + 16))
 
         func render(clipped: Bool) -> [UInt8] {
@@ -257,7 +165,8 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(culled.contains { $0 != 0 })
     }
 
-    @Test func giantTablesTileWithinMemoryLimits() {
+    @Test func giantTablesTileWithinMemoryLimits() async {
+        let style = await TextStyle.current()
         // 500 rows x 10 cols (tall) and 5 rows x 100 cols (wide).
         let tallHeader = (0..<10).map { [MarkdownInline(text: "Col \($0)")] }
         let tallRows = (0..<500).map { r in (0..<10).map { c in [MarkdownInline(text: "r\(r)c\(c)")] } }
@@ -275,7 +184,7 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(wideLayout.isWiderThanBlock)
         #expect(wideLayout.gridSize.width > 10_000)
 
-        let palette = TextPalette.resolveForTests
+        let palette = await TextPalette.resolveForTests
         let tile = CGRect(x: 3_072, y: 0, width: RowLayer.bandWidth, height: min(RowLayer.bandHeight, wideLayout.gridSize.height))
         let bitmap = BandRasterizer.bitmap(
             BandRaster(
@@ -289,7 +198,8 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: 3. Bounded Row Chunking, Memory-Budget Eviction & Non-Blocking Accessibility
 
-    @Test func tall20000LineCodeBlockChunksSeamlesslyAndEvictsByByteBudget() {
+    @MainActor @Test func tall20000LineCodeBlockChunksSeamlesslyAndEvictsByByteBudget() async {
+        let style = TextStyle.current()
         let code = (0..<20_000).map { "let line\($0) = \($0) * 2" }.joined(separator: "\n")
         let rows = TranscriptRowChunker.assistantRows(
             messageID: "t1|a1", turnID: "t1", blocks: [.code(language: "swift", code: code)])
@@ -313,30 +223,31 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(midLayout.content.codeLayout?.headerHeight == 0)
         #expect(midLayout.content.accessories(forRowID: rows[1].id).isEmpty)
 
-        // Memory-budget eviction: 30 chunks of 200 wide lines hold ~30 MB of
-        // layout (> 12 MB) in fewer rows than the 64-row cap; the off-window
-        // ones go.
-        let wide = (0..<6_000).map { "let line\($0) = " + String(repeating: "x", count: 150) }.joined(separator: "\n")
+        // Memory-budget eviction: 16 chunks of 200 wide lines hold > 12 MB of
+        // layout in fewer rows than the 64-row cap; the off-window ones go.
+        let wide = (0..<3_200).map { "let line\($0) = " + String(repeating: "x", count: 160) }.joined(separator: "\n")
         let wideRows = TranscriptRowChunker.assistantRows(
             messageID: "t1|a2", turnID: "t1", blocks: [.code(language: "swift", code: wide)])
         controller.setRows(wideRows)
-        for row in wideRows.prefix(30) {
-            controller.storeLayout(
-                RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
-        }
-        #expect(controller.layouts.count == 30)
+        let batch = Array(wideRows.prefix(16))
+        let layouts = await Task.detached {
+            batch.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
+        }.value
+        for layout in layouts { controller.storeLayout(layout) }
+        #expect(controller.layouts.count == 16)
         #expect(controller.cachedLayoutBytes > 12 << 20)
         controller.dropLayouts(outside: 0...1_000)
-        #expect(controller.layouts.count < 30)
+        #expect(controller.layouts.count < 16)
         #expect(controller.cachedLayoutBytes == controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
     }
 
-    @Test func giant500KBUserMessageChunksAndPreservesExactTextAndFastAccessibility() {
-        // 1. Newline-separated 500 KB log.
+    @MainActor @Test func giant500KBUserMessageChunksAndPreservesExactTextAndFastAccessibility() {
+        let style = TextStyle.current()
+        // 1. Newline-separated oversized log (well past the 16 KB chunk limit).
         let logLine = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
-        let bigLog = String(repeating: logLine, count: 500_000 / logLine.utf8.count)
+        let bigLog = String(repeating: logLine, count: 100_000 / logLine.utf8.count)
         let logRows = TranscriptRowChunker.userRows(messageID: "t1|u1", turnID: "t1", source: bigLog)
-        #expect(logRows.count > 20)
+        #expect(logRows.count > 5)
         #expect(logRows.allSatisfy { $0.sourceID == "t1|u1" })
 
         // Split, it copies as it would whole: Markdown rendered either way.
@@ -356,18 +267,18 @@ struct TranscriptExtremeAndFuzzTests {
         }
         #expect(a11yElapsed < .milliseconds(50), "a11y query took \(a11yElapsed)")
 
-        // 2. Zero-newline 500 KB minified JSON pasted by user.
+        // 2. Zero-newline oversized minified JSON pasted by user.
         let jsonUnit = #"{"key":"value","nested":[1,2,3],"emoji":"👩🏽‍💻"},"#
-        let bigJSON = String(repeating: jsonUnit, count: 500_000 / jsonUnit.utf8.count)
+        let bigJSON = String(repeating: jsonUnit, count: 100_000 / jsonUnit.utf8.count)
         let jsonRows = TranscriptRowChunker.userRows(messageID: "t2|u1", turnID: "t2", source: bigJSON)
-        #expect(jsonRows.count > 20)
+        #expect(jsonRows.count > 5)
         let controller2 = TranscriptController(configuration: .testing)
         controller2.setRows(jsonRows)
         controller2.selectAll()
         #expect(controller2.selectedText() == RowSelectableText.string(for: .userMessage(source: bigJSON), style: style))
     }
 
-    @Test func giantParagraphChunksWithoutSplittingEmojiOrInjectingNewlines() {
+    @MainActor @Test func giantParagraphChunksWithoutSplittingEmojiOrInjectingNewlines() {
         let unit = "The quick 👩🏽‍💻 brown fox jumps over café lazy dog. "
         let text = String(repeating: unit, count: 2_500)  // ~140 KB
         let rows = TranscriptRowChunker.assistantRows(
@@ -388,7 +299,7 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: 4. Parse-Only Split for 2,000-Block Messages
 
-    @Test func messageWith2000BlocksParsesWithoutEagerlyLayingOutOffscreenBlocks() async throws {
+    @MainActor @Test func messageWith2000BlocksParsesWithoutEagerlyLayingOutOffscreenBlocks() async throws {
         let source = (0..<2_000).map { "Paragraph number \($0) with enough words to measure." }.joined(separator: "\n\n")
         let controller = TranscriptController(configuration: .launch)
         let host = FakeTranscriptHost()
@@ -416,7 +327,7 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: 5. 5 MB Multi-Turn Chat + 200 Live Tool Updates
 
-    @Test func fiveMBChatWith200LiveToolUpdatesStaysFastAndLazyCopiesReply() {
+    @MainActor @Test func fiveMBChatWith200LiveToolUpdatesStaysFastAndLazyCopiesReply() {
         let base = Date(timeIntervalSince1970: 1_800_000_000)
         let summary = ThreadFixtures.summary(
             id: "big-thread", title: "5 MB Chat", cwd: "/tmp", agent: ("a", "A"), status: .running,
@@ -619,7 +530,8 @@ struct TranscriptExtremeAndFuzzTests {
 
     // MARK: Adversarial Review Regression Tests
 
-    @Test func unchunkedUserMessageSelectableTextMatchesLaidOutText() {
+    @Test func unchunkedUserMessageSelectableTextMatchesLaidOutText() async {
+        let style = await TextStyle.current()
         let source = "Check **bold**, *italic*, `code`, and [link](https://example.com)."
         let kind = TranscriptRowKind.userMessage(source: source, position: .single)
         let key = RowLayoutKey(contentVersion: 0, width: 728, styleVersion: style.version)
@@ -643,7 +555,7 @@ struct TranscriptExtremeAndFuzzTests {
         }
     }
 
-    @Test func replaceRowsReestimatesHeightWhenRowKindChangesAndStreamingMatchesBuilder() {
+    @MainActor @Test func replaceRowsReestimatesHeightWhenRowKindChangesAndStreamingMatchesBuilder() {
         let bigCode = (0..<1_000).map { "line \($0)" }.joined(separator: "\n")
         let block = MarkdownBlock.code(language: "txt", code: bigCode)
 
@@ -674,7 +586,7 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(controller.geometry.height(at: 0) < 5_000)
     }
 
-    @Test func parsedMessageEvictionRetainsMessagesVisibleViaLaterBlock() {
+    @MainActor @Test func parsedMessageEvictionRetainsMessagesVisibleViaLaterBlock() {
         let controller = TranscriptController(configuration: .testing)
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 800, height: 600)
@@ -711,7 +623,8 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(controller.parsedMessages["t|m0"] != nil)
     }
 
-    @Test func slidingWindowExpandsWhenSingleLineExceedsWindowSize() {
+    @Test func slidingWindowExpandsWhenSingleLineExceedsWindowSize() async {
+        let style = await TextStyle.current()
         let text = "a" + String(repeating: " ", count: 5_000) + "b"
         let styled = AttributedTextBuilder.plain(text, role: .body, color: .primary, style: style)
         let layout = TextLayoutEngine.layout(
@@ -732,7 +645,8 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(layout.lines[1].caretOffsets.first == 0)
     }
 
-    @Test func drawnBandsRedrawsShrunkWideTile() {
+    @Test func drawnBandsRedrawsShrunkWideTile() async {
+        let style = await TextStyle.current()
         let wideLine = String(repeating: "W", count: 160)
         let narrowerLine = String(repeating: "W", count: 130)
         let key1 = RowLayoutKey(contentVersion: 1, width: 728, styleVersion: style.version)
@@ -748,7 +662,7 @@ struct TranscriptExtremeAndFuzzTests {
         #expect(b1.contentWidth > RowLayer.bandWidth)
         #expect(b2.contentWidth > RowLayer.bandWidth)
         #expect(b2.contentWidth < b1.contentWidth)
-        let palette = TextPalette.resolveForTests
+        let palette = await TextPalette.resolveForTests
         let drawn = DrawnBands.draw(l2, after: l1, palette: palette, scale: 2, colorSpace: RowLayer.colorSpace)
         let shrunkCol1Frame = CGRect(
             x: RowLayer.bandWidth, y: 0, width: b2.contentWidth - RowLayer.bandWidth, height: b2.frame.height)

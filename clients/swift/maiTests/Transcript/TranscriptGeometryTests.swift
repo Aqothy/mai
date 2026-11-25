@@ -6,7 +6,7 @@ import Testing
 
 /// PLAN 3.9 rule 4's geometry: heights by row, offsets, and where a reading
 /// place is after the rows change. Cases from `ChatVirtualTranscriptGeometryTests`.
-struct TranscriptGeometryTests {
+nonisolated struct TranscriptGeometryTests {
     private func geometry(_ ids: [String], sources: [String]? = nil, height: CGFloat) -> TranscriptGeometry {
         var geometry = TranscriptGeometry()
         geometry.replace(ids: ids, sources: sources ?? ids) { _ in height }

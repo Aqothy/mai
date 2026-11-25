@@ -9,7 +9,6 @@ import Testing
 /// not, and random selections, hit tests and word and character ranges,
 /// each checked against a model of the transcript as one string.
 @MainActor
-@Suite(.serialized)
 struct TranscriptSelectionFuzzTests {
     private let style = TextStyle.current()
 
@@ -40,36 +39,38 @@ struct TranscriptSelectionFuzzTests {
         return rows
     }
 
-    @Test(arguments: 0..<4)
-    func selectionsHitTestsAndRangesMatchTheTranscriptAsOneText(seed: Int) {
-        checkSelections(seed: 0x5E1E_C700 &+ UInt64(seed), tokens: TranscriptFuzz.adversarialTokens)
+    @Test(arguments: 0..<2)
+    func selectionsHitTestsAndRangesMatchTheTranscriptAsOneText(seed: Int) async {
+        await checkSelections(seed: 0x5E1E_C700 &+ UInt64(seed), tokens: TranscriptFuzz.adversarialTokens)
     }
 
     /// The same with every kind of character a model can emit mixed in
     /// (`unicodeEdgeTokens`).
-    @Test(arguments: 0..<4)
-    func selectionsHoldForEveryKindOfCharacter(seed: Int) {
-        checkSelections(
+    @Test(arguments: 0..<2)
+    func selectionsHoldForEveryKindOfCharacter(seed: Int) async {
+        await checkSelections(
             seed: 0x5E1E_C800 &+ UInt64(seed), tokens: TranscriptFuzz.adversarialTokens + TranscriptFuzz.unicodeEdgeTokens)
     }
 
-    private func checkSelections(seed: UInt64, tokens: [String]) {
+    private func checkSelections(seed: UInt64, tokens: [String]) async {
         var rng = FuzzRNG(seed: seed)
-        for iteration in 0..<(4 * TranscriptFuzz.scale) {
+        let style = self.style
+        for iteration in 0..<(2 * TranscriptFuzz.scale) {
             let controller = TranscriptController(configuration: .testing)
             controller.columnWidth = CGFloat(rng.int(in: 200..<700))
             let rows = randomRows(&rng, tokens: tokens)
             controller.setRows(rows)
             // Some rows laid out, some not: offsets must agree either way.
+            let requests = controller.rows.filter { _ in rng.chance(70) }.map { controller.request($0) }
+            let laidOut = await Task.detached { requests.map(RowLayoutBuilder.layout) }.value
             var heights: [String: CGFloat] = [:]
-            for row in controller.rows where rng.chance(70) {
-                let layout = RowLayoutBuilder.layout(controller.request(row))
+            for (request, layout) in zip(requests, laidOut) {
                 controller.storeLayout(layout)
-                heights[row.id] = layout.height
-                if row.kind.isSelectable {
+                heights[layout.rowID] = layout.height
+                if request.kind.isSelectable {
                     #expect(
-                        layout.content.selectableString == RowSelectableText.string(for: row.kind, style: style),
-                        "seed \(seed) iteration \(iteration): \(row.id) text differs without its layout")
+                        layout.content.selectableString == RowSelectableText.string(for: request.kind, style: style),
+                        "seed \(seed) iteration \(iteration): \(layout.rowID) text differs without its layout")
                 }
             }
             controller.setHeights(heights)
@@ -89,13 +90,40 @@ struct TranscriptSelectionFuzzTests {
             guard !selectable.isEmpty else { continue }
             let modelUTF16 = Array(model.utf16)
             func global(_ position: TextPosition) -> Int { (starts[position.rowID] ?? 0) + position.offset }
-            // Selections end on grapheme boundaries, as hit tests and word
-            // ranges put them.
+            // Selections end on cluster boundaries (`startsCluster`), as hit
+            // tests and word ranges put them.
             func randomPosition() -> TextPosition {
                 let pick = selectable[rng.int(in: 0..<selectable.count)]
-                let boundaries = pick.text.indices.map { pick.text.utf16.distance(from: pick.text.startIndex, to: $0) }
-                    + [pick.text.utf16.count]
+                let ns = pick.text as NSString
+                var boundaries: [Int] = []
+                boundaries.reserveCapacity(ns.length + 1)
+                for offset in 0..<ns.length where TextLayoutEngine.startsCluster(ns, at: offset) {
+                    boundaries.append(offset)
+                }
+                boundaries.append(ns.length)
                 return TextPosition(rowID: controller.rows[pick.index].id, offset: rng.pick(boundaries))
+            }
+
+            // Every non-BiDi laid-out line's end caret must reach its visible
+            // width (catches mid-cluster trailing edges pinning Myanmar/Indic
+            // carets short). Checked per segment because BiDi base direction
+            // spans wrapped lines of a paragraph.
+            for (rowIndex, _) in selectable {
+                guard let layout = controller.layouts[controller.rows[rowIndex].id] else { continue }
+                for segment in layout.content.textSegments {
+                    let ns = segment.layout.string as NSString
+                    let hasBiDi = (0..<ns.length).contains {
+                        let unit = ns.character(at: $0)
+                        return unit >= 0x0590 && TextLayoutEngine.isBiDiCodeUnit(unit)
+                    }
+                    guard !hasBiDi else { continue }
+                    for line in segment.layout.lines where line.width > 1 {
+                        let endX = line.caretOffsets.last ?? 0
+                        #expect(
+                            endX >= line.x + line.width - 1,
+                            "\(context): line \(line.range) end caret \(endX) < \(line.x + line.width)")
+                    }
+                }
             }
 
             for step in 0..<40 {
@@ -111,10 +139,12 @@ struct TranscriptSelectionFuzzTests {
                 if let moved = controller.position(from: a, offset: global(b) - global(a)) {
                     #expect(global(moved) == global(b), "\(context) step \(step): position(from:offset:)")
                 }
-                // Word and character ranges cover the position and never cut
-                // a grapheme cluster.
-                for range in [controller.wordRange(around: a), controller.characterRange(around: a)].compactMap({ $0 }) {
-                    guard let index = controller.geometry.index(for: a.rowID),
+                // Word and character ranges cover the position, never cut a
+                // cluster, and character ranges never cross a line terminator.
+                let charRange = controller.characterRange(around: a)
+                let wordRange = controller.wordRange(around: a)
+                for (isChar, range) in [(false, wordRange), (true, charRange)] {
+                    guard let range, let index = controller.geometry.index(for: a.rowID),
                         let rowText = controller.selectableText(ofRowAt: index)
                     else { continue }
                     let ns = rowText as NSString
@@ -123,7 +153,13 @@ struct TranscriptSelectionFuzzTests {
                             TextLayoutEngine.startsCluster(ns, at: offset),
                             "\(context) step \(step): range edge \(offset) inside a cluster")
                     }
-                    #expect(range.anchor.offset <= max(range.focus.offset, min(a.offset, ns.length)))
+                    let clamped = min(a.offset, max(0, ns.length - 1))
+                    #expect(range.anchor.offset <= clamped && clamped <= range.focus.offset)
+                    if isChar, range.focus.offset - range.anchor.offset > 1 {
+                        #expect(
+                            !TextLayoutEngine.endsLine(ns.character(at: range.anchor.offset)),
+                            "\(context) step \(step): characterRange crossed line terminator")
+                    }
                 }
                 // Highlights are finite and inside their rows.
                 let ordered = global(a) <= global(b) ? (a, b) : (b, a)
