@@ -270,6 +270,130 @@
                 let ms = milliseconds(start.duration(to: .now))
                 emit("geometry-10k-50-splices", ms: ms)
             }
+            await runStressBenchmarks(style: style, palette: palette) { emit($0, ms: $1, extra: $2) }
+        }
+
+        /// Inputs past normal use, each the median of 5 runs: long pasted
+        /// text, large code chunks and lines, non-Latin paragraphs, streaming a
+        /// megabyte, and what off-screen layouts keep in memory.
+        @MainActor private static func runStressBenchmarks(
+            style: TextStyle, palette: TextPalette, emit: (String, Double, [String: Any]) -> Void
+        ) async {
+            func median(_ body: () -> Void) -> Double {
+                var times: [Double] = []
+                for _ in 0..<5 {
+                    let start = ContinuousClock.now
+                    body()
+                    times.append(milliseconds(start.duration(to: .now)))
+                }
+                return times.sorted()[2]
+            }
+            func bytes(_ layout: TextLayout) -> Int {
+                layout.lines.reduce(0) { $0 + $1.caretOffsets.count * 8 } + layout.runs.reduce(0) { $0 + $1.glyphs.count * 18 }
+            }
+            let key = RowLayoutKey(contentVersion: 0, width: 728, styleVersion: style.version)
+            func layout(_ kind: TranscriptRowKind) -> RowLayout {
+                RowLayoutBuilder.layout(RowLayoutRequest(rowID: "r", kind: kind, key: key, style: style))
+            }
+
+            // Pasted text and code chunks around Core Text's 10,240-unit switch.
+            let pasted = String(repeating: "The quick brown fox, AVATAR office affluent Toyota; fi ffl.\n", count: 200)
+            var pastedLayout: RowLayout?
+            let pastedMs = median { pastedLayout = layout(.thought(pasted)) }
+            let firstLine = pastedLayout.flatMap { if case .text(let text, _) = $0.content { text.lines.first } else { nil } }
+            emit("thought-12kb-200-lines", pastedMs, ["firstLineWidth": firstLine?.width ?? 0])
+            let codeChunk = (0..<200).map { "    let value\($0) = compute(input[\($0)], \"step\") // " + String(repeating: "x", count: 110) }
+                .joined(separator: "\n")
+            emit("code-chunk-32kb-200-lines", median { _ = layout(.markdownBlock(.code(language: "swift", code: codeChunk), .single)) }, [:])
+
+            // Non-Latin paragraphs (16 KB chunks, carets per cluster): Arabic,
+            // Devanagari and Myanmar take Core Text's carets (right-to-left
+            // and reordered runs).
+            for (name, unit) in [
+                ("cjk", "漢字かな交じり文の長い段落です。"), ("cyrillic", "Привет мир, это длинный текст. "),
+                ("emoji", "👩🏽‍💻 ok 👍🏼 🇦🇧 ✌️ "), ("latin", "The quick brown fox jumps over. "),
+                ("arabic", "مَرْحَبًا بالعالم، هذا نص طويل. "), ("devanagari", "क्षत्रिय अपार्टमेंट हिन्दी पाठ। "),
+                ("myanmar", "မြန်မာစာ ရှည်လျားသော စာပိုဒ် "),
+            ] {
+                let text = String(repeating: unit, count: 16_384 / unit.utf8.count)
+                emit("paragraph-16kb-\(name)", median { _ = layout(.markdownBlock(.paragraph([MarkdownInline(text: text)]), .single)) }, [:])
+            }
+
+            // A megabyte on one code line: time and what its layout holds.
+            let line = String(repeating: #"{"k":"value","n":12345},"#, count: 1_048_576 / 24)
+            var lineLayout: RowLayout?
+            let lineMs = median { lineLayout = layout(.markdownBlock(.code(language: "json", code: line), .single)) }
+            emit("code-1mb-line", lineMs, ["layoutMB": Double(lineLayout?.content.codeLayout.map { bytes($0.body) } ?? 0) / 1_048_576])
+
+            // Off-screen retention: twelve rows of a 256 KB line, scrolled past.
+            do {
+                let controller = TranscriptController(configuration: .testing)
+                let quarter = String(repeating: #"{"k":"value","n":12345},"#, count: 262_144 / 24)
+                let rows = (0..<12).map { TranscriptRow(id: "c\($0)", kind: .markdownBlock(.code(language: "json", code: quarter), .single)) }
+                controller.setRows(rows, measuredHeights: Dictionary(uniqueKeysWithValues: rows.map { ($0.id, CGFloat(2_000)) }))
+                for row in rows {
+                    controller.storeLayout(RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
+                }
+                controller.dropLayouts(outside: 0...2_000)
+                let kept = controller.layouts.values.reduce(0) { $0 + ($1.content.codeLayout.map { bytes($0.body) } ?? 0) }
+                emit("offscreen-12x256kb-lines", 0, ["keptLayouts": controller.layouts.count, "keptMB": Double(kept) / 1_048_576])
+            }
+
+            // Main-thread cost per frame of a streamed 25,000-line code block:
+            // the mounted row compares each new layout with the one it shows.
+            do {
+                let lines = (0..<25_000).map { "let value\($0) = compute(\($0)) // ok" }
+                var previous: CodeLayout?
+                var streamed: [RowLayout] = []
+                for (version, count) in [24_850, 24_900, 24_950, 25_000].enumerated() {
+                    let code = lines[..<count].joined(separator: "\n")
+                    let code2 = CodeLayout.make(
+                        code: code, language: "swift", colors: nil, width: 728, style: style, previous: previous)
+                    previous = code2
+                    streamed.append(
+                        RowLayout(
+                            rowID: "s", key: RowLayoutKey(contentVersion: version, width: 728, styleVersion: style.version),
+                            height: code2.size.height, content: .code(code2, frame: CGRect(origin: .zero, size: code2.size))))
+                }
+                let row = RowLayer()
+                row.frame = CGRect(x: 0, y: 0, width: 728, height: streamed[0].height)
+                row.show(rowID: "s", layout: streamed[0], palette: palette, drawsWideBody: true, scale: 2)
+                var times: [Double] = []
+                for layout in streamed.dropFirst() {
+                    row.frame.size.height = layout.height
+                    let start = ContinuousClock.now
+                    row.show(rowID: "s", layout: layout, palette: palette, drawsWideBody: true, scale: 2)
+                    times.append(milliseconds(start.duration(to: .now)))
+                }
+                emit("stream-25k-line-row-show-main", times.sorted()[1], [:])
+            }
+
+            // Streaming a megabyte: per-update worker time at the end.
+            func stream(_ text: String, chunk: Int) async -> (median: Double, tail: Double) {
+                let worker = TranscriptStreamWorker()
+                let utf8 = text.utf8
+                var end = utf8.startIndex
+                var times: [Double] = []
+                while end < utf8.endIndex {
+                    end = utf8.index(end, offsetBy: chunk, limitedBy: utf8.endIndex) ?? utf8.endIndex
+                    while end < utf8.endIndex, end.samePosition(in: text) == nil { utf8.formIndex(after: &end) }
+                    let update = TranscriptStreamWorker.Update(
+                        messageID: "s", text: String(text[..<end]), isFinished: false, width: 728, style: style,
+                        codeColors: [:], isDark: true, drawing: nil)
+                    let start = ContinuousClock.now
+                    _ = await worker.run(update)
+                    times.append(milliseconds(start.duration(to: .now)))
+                }
+                let tail = Array(times.suffix(max(1, times.count / 10))).sorted()
+                return (times.sorted()[times.count / 2], tail[tail.count / 2])
+            }
+            let code = "```swift\n" + (0..<25_000).map { "let value\($0) = compute(\($0)) // ok" }.joined(separator: "\n")
+            let codeStream = await stream(code, chunk: 16_384)
+            emit("stream-code-1mb", codeStream.median, ["lastTenthMedianMilliseconds": codeStream.tail])
+            let words = ["stream", "**bold**", "the", "[link](https://x.y)", "`code`", "text", "and"]
+            let prose = (0..<150_000).map { words[$0 % words.count] }.joined(separator: " ")
+            let proseStream = await stream(prose, chunk: 16_384)
+            emit("stream-paragraph-1mb", proseStream.median, ["lastTenthMedianMilliseconds": proseStream.tail])
         }
     }
 #endif
