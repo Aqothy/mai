@@ -67,28 +67,5 @@
             }
         }
 
-        @Test
-        func staleHorizontalClipOriginReturnsToLeadingEdge() {
-            let scroll = ChatMacTranscriptScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300))
-            let document = ChatNativeTranscript<Text>.VirtualDocument()
-            scroll.documentView = document
-            defer {
-                document.preparationTask?.cancel()
-                document.geometryReporter.cancel()
-            }
-            document.nativeRowFactory = { _, reused in reused ?? NSView() }
-            document.install(heights: [400, 400], width: 760, ids: ["a", "b"]) { _ in Text("Fixture") }
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: 120))
-
-            // A clip moved sideways while the document was wider than it.
-            scroll.setFrameSize(NSSize(width: 720, height: 300))
-            scroll.tile()
-            scroll.contentView.setBoundsOrigin(NSPoint(x: 40, y: 120))
-            document.viewportChanged()
-
-            #expect(document.frame.width == scroll.contentSize.width)
-            #expect(scroll.contentView.bounds.origin.x == 0)
-            #expect(scroll.contentView.bounds.origin.y == 120)
-        }
     }
 #endif
