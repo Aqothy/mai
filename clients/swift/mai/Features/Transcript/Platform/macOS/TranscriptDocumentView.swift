@@ -274,7 +274,7 @@
         // MARK: TranscriptRowMounterDelegate
 
         func showWideBlock(
-            rowID: String, group: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScrollView()
@@ -291,20 +291,17 @@
             let localDrawn = drawn.offsetBy(dx: -frame.minX, dy: -frame.minY)
             let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -frame.minX, dy: -frame.minY)
             scroller.show(
-                rowID: rowID, group: group, offset: controller.wideBlockOffsets[group] ?? 0, body: body, key: key,
+                rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
                 streamed: streamed)
         }
 
-        /// The reader scrolled a wide block: its offset is kept, and the
-        /// other chunks of its block follow.
+        /// The reader scrolled a wide block: keep its sideways offset across
+        /// remounts (browser `scrollLeft`).
         private func wideBlockDidScroll(_ scroller: TranscriptWideBlockScrollView) {
-            guard let group = scroller.group else { return }
-            controller.wideBlockOffsets[group] = scroller.scrollX
-            for other in wideBlocks.values where other !== scroller && other.group == group {
-                other.scroll(toX: scroller.scrollX)
-            }
+            guard let rowID = scroller.rowID else { return }
+            controller.wideBlockOffsets[rowID] = scroller.scrollX
         }
 
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {

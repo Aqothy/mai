@@ -196,42 +196,25 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }
     }
 
-    // MARK: 3. Bounded Row Chunking, Memory-Budget Eviction & Non-Blocking Accessibility
+    // MARK: 3. Memory-Budget Eviction
 
-    @MainActor @Test func tall20000LineCodeBlockChunksSeamlesslyAndEvictsByByteBudget() async {
+    @MainActor @Test func wideCodeBlocksEvictByByteBudget() async {
         let style = TextStyle.current()
-        let code = (0..<20_000).map { "let line\($0) = \($0) * 2" }.joined(separator: "\n")
-        let rows = TranscriptRowChunker.assistantRows(
-            messageID: "t1|a1", turnID: "t1", blocks: [.code(language: "swift", code: code)])
-        #expect(rows.count == 100)
-        #expect(rows.allSatisfy { $0.sourceID == "t1|a1" && $0.messageID == "t1|a1" })
-
-        let controller = TranscriptController(configuration: .testing)
-        controller.setRows(rows)
-        #expect(controller.fullCodeText(startingAtRowID: rows[0].id) == code)
-
-        // Selection across all chunks reproduces the exact 20,000-line source.
-        controller.selectAll()
-        #expect(controller.selectedText() == code)
-
-        // First chunk has header + Copy accessory; middle/last have no header.
         let key = RowLayoutKey(contentVersion: 0, width: 600, styleVersion: style.version)
-        let firstLayout = RowLayoutBuilder.layout(RowLayoutRequest(rowID: rows[0].id, kind: rows[0].kind, key: key, style: style))
-        let midLayout = RowLayoutBuilder.layout(RowLayoutRequest(rowID: rows[1].id, kind: rows[1].kind, key: key, style: style))
-        #expect(firstLayout.content.codeLayout?.headerHeight ?? 0 > 0)
-        #expect(firstLayout.content.accessories(forRowID: rows[0].id).map(\.action) == [.copyChunkedCode(rowID: rows[0].id)])
-        #expect(midLayout.content.codeLayout?.headerHeight == 0)
-        #expect(midLayout.content.accessories(forRowID: rows[1].id).isEmpty)
+        let controller = TranscriptController(configuration: .testing)
 
-        // Memory-budget eviction: 16 chunks of 200 wide lines hold > 12 MB of
+        // Memory-budget eviction: 16 rows of 200 wide lines hold > 12 MB of
         // layout in fewer rows than the 64-row cap; the off-window ones go.
-        let wide = (0..<3_200).map { "let line\($0) = " + String(repeating: "x", count: 160) }.joined(separator: "\n")
-        let wideRows = TranscriptRowChunker.assistantRows(
-            messageID: "t1|a2", turnID: "t1", blocks: [.code(language: "swift", code: wide)])
+        let chunk = (0..<200).map { "let line\($0) = " + String(repeating: "x", count: 160) }.joined(separator: "\n")
+        let wideRows = (0..<16).map { index in
+            TranscriptRow(
+                id: "t1|a2#\(index)", sourceID: "t1|a2",
+                kind: .markdownBlock(.code(language: "swift", code: chunk), .single),
+                messageID: "t1|a2", role: .assistant, turnID: "t1")
+        }
         controller.setRows(wideRows)
-        let batch = Array(wideRows.prefix(16))
         let layouts = await Task.detached {
-            batch.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
+            wideRows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
         for layout in layouts { controller.storeLayout(layout) }
         #expect(controller.layouts.count == 16)
@@ -239,62 +222,6 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         controller.dropLayouts(outside: 0...1_000)
         #expect(controller.layouts.count < 16)
         #expect(controller.cachedLayoutBytes == controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
-    }
-
-    @MainActor @Test func giant500KBUserMessageChunksAndPreservesExactTextAndFastAccessibility() {
-        let style = TextStyle.current()
-        // 1. Newline-separated oversized log (well past the 16 KB chunk limit).
-        let logLine = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
-        let bigLog = String(repeating: logLine, count: 100_000 / logLine.utf8.count)
-        let logRows = TranscriptRowChunker.userRows(messageID: "t1|u1", turnID: "t1", source: bigLog)
-        #expect(logRows.count > 5)
-        #expect(logRows.allSatisfy { $0.sourceID == "t1|u1" })
-
-        // Split, it copies as it would whole: Markdown rendered either way.
-        let controller = TranscriptController(configuration: .testing)
-        controller.setRows(logRows)
-        controller.selectAll()
-        #expect(controller.selectedText() == RowSelectableText.string(for: .userMessage(source: bigLog), style: style))
-
-        // Accessibility query must not parse Markdown synchronously on MainActor.
-        let a11yStart = ContinuousClock.now
-        let accessible = controller.accessibleRows(minY: 0, maxY: 800, columnX: 0)
-        let a11yElapsed = a11yStart.duration(to: .now)
-        #expect(!accessible.isEmpty)
-        #expect(accessible[0].text.hasPrefix("You: "))
-        if accessible.count > 1 {
-            #expect(!accessible[1].text.hasPrefix("You: "))
-        }
-        #expect(a11yElapsed < .milliseconds(50), "a11y query took \(a11yElapsed)")
-
-        // 2. Zero-newline oversized minified JSON pasted by user.
-        let jsonUnit = #"{"key":"value","nested":[1,2,3],"emoji":"👩🏽‍💻"},"#
-        let bigJSON = String(repeating: jsonUnit, count: 100_000 / jsonUnit.utf8.count)
-        let jsonRows = TranscriptRowChunker.userRows(messageID: "t2|u1", turnID: "t2", source: bigJSON)
-        #expect(jsonRows.count > 5)
-        let controller2 = TranscriptController(configuration: .testing)
-        controller2.setRows(jsonRows)
-        controller2.selectAll()
-        #expect(controller2.selectedText() == RowSelectableText.string(for: .userMessage(source: bigJSON), style: style))
-    }
-
-    @MainActor @Test func giantParagraphChunksWithoutSplittingEmojiOrInjectingNewlines() {
-        let unit = "The quick 👩🏽‍💻 brown fox jumps over café lazy dog. "
-        let text = String(repeating: unit, count: 2_500)  // ~140 KB
-        let rows = TranscriptRowChunker.assistantRows(
-            messageID: "m1", turnID: "t1", blocks: [.paragraph([MarkdownInline(text: text)])])
-        #expect(rows.count > 5)
-
-        let controller = TranscriptController(configuration: .testing)
-        controller.setRows(rows)
-        controller.selectAll()
-        #expect(controller.selectedText() == text)
-
-        // Verify UIKit UITextInput position/offset math matches selectedText UTF-16 count.
-        if let first = controller.firstTextPosition, let last = controller.lastTextPosition {
-            #expect(controller.offset(from: first, to: last) == text.utf16.count)
-            #expect(controller.position(from: first, offset: text.utf16.count) == last)
-        }
     }
 
     // MARK: 4. Parse-Only Split for 2,000-Block Messages
@@ -310,9 +237,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         // never reveals before the viewport's async layouts land.
         controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
 
-        let pending = TranscriptRow(
-            id: "big#pending", sourceID: "big", kind: .pendingMessage(source: source),
-            messageID: "big", role: .assistant, turnID: "t1")
+        let pending = TranscriptMessage(kind: .assistant, turnID: "t1", ref: "big").pendingRow(source: source)
         controller.setRows([pending])
 
         for _ in 0..<250 where controller.isAwaitingInitialEnd {
@@ -530,48 +455,22 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
 
     // MARK: Adversarial Review Regression Tests
 
-    @Test func unchunkedUserMessageSelectableTextMatchesLaidOutText() async {
+    @Test func unchunkedUserAndThoughtSelectableTextMatchesLaidOutText() async {
         let style = await TextStyle.current()
         let source = "Check **bold**, *italic*, `code`, and [link](https://example.com)."
-        let kind = TranscriptRowKind.userMessage(source: source, position: .single)
+        let blocks = MarkdownPlanner.blocks(from: source)
         let key = RowLayoutKey(contentVersion: 0, width: 728, styleVersion: style.version)
-        let laidOut = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "u", kind: kind, key: key, style: style))
-        let fallback = RowSelectableText.string(for: kind, style: style)
-        #expect(fallback == laidOut.content.selectableString)
-        #expect(fallback == "Check bold, italic, code, and link.")
-    }
-
-    @Test func splitUserMessageKeepsItsTrailingNewline() {
-        for count in [200, 400] {
-            let source = String(repeating: "x\n", count: count)
-            let rows = TranscriptRowChunker.userRows(messageID: "m-\(count)", turnID: "t", source: source)
-            #expect(rows.count == (count > 200 ? 2 : 1))
-            var joined = ""
-            for (index, row) in rows.enumerated() {
-                if index > 0 { joined.append(row.separatorBefore) }
-                if case .userMessage(let text, _) = row.kind { joined.append(text) }
-            }
-            #expect(joined == source)
+        for kind in [TranscriptRowKind.userMessage(blocks), TranscriptRowKind.thought(blocks)] {
+            let laidOut = RowLayoutBuilder.layout(RowLayoutRequest(rowID: "u", kind: kind, key: key, style: style))
+            let fallback = RowSelectableText.string(for: kind, style: style)
+            #expect(fallback == laidOut.content.selectableString)
+            #expect(fallback == "Check bold, italic, code, and link.")
         }
     }
 
-    @MainActor @Test func replaceRowsReestimatesHeightWhenRowKindChangesAndStreamingMatchesBuilder() {
+    @MainActor @Test func replaceRowsReestimatesHeightWhenRowKindChanges() {
         let bigCode = (0..<1_000).map { "line \($0)" }.joined(separator: "\n")
         let block = MarkdownBlock.code(language: "txt", code: bigCode)
-
-        // Streaming builder must emit unchunked rows matching applyStreamRows.
-        let streamingBuilder = TranscriptBuilder(
-            blocks: { _, _ in [block] }, isStreaming: { $0 == "t|m" }, expandedTurnIDs: [], workingPhrase: "Working")
-        let turn = TranscriptTurn(
-            ThreadFixtures.turn(
-                id: "t", participant: "a", state: .running, startedAt: Date(), settledAt: nil,
-                entries: [ThreadFixtures.entry(ref: "m", kind: .assistantMessage, text: "```txt\n\(bigCode)\n```")]))
-        let streamingRows = streamingBuilder.rows(for: [turn])
-        let assistantStreamingRows = streamingRows.filter { $0.sourceID == "t|m" }
-        #expect(assistantStreamingRows.count == 1)
-
-        // Finishing replaces unchunked m#0 (huge measured height) with chunked rows;
-        // chunk 0 must not inherit the old 1,000-line height when its kind changed.
         let controller = TranscriptController(configuration: .testing)
         controller.columnWidth = 728
         let initialRow = TranscriptRow(
@@ -580,9 +479,11 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         controller.setRows([initialRow], measuredHeights: ["t|m#0": 18_000])
         #expect(controller.geometry.height(at: 0) == 18_000)
 
-        let chunked = TranscriptRowChunker.assistantRows(messageID: "t|m", turnID: "t", blocks: [block])
-        #expect(chunked.count == 5)
-        controller.replaceRows(0..<1, with: chunked, heights: [:])
+        let shortRow = TranscriptRow(
+            id: "t|m#0", sourceID: "t|m",
+            kind: .markdownBlock(.paragraph([MarkdownInline(text: "short")]), .single),
+            messageID: "t|m", role: .assistant, turnID: "t")
+        controller.replaceRows(0..<1, with: [shortRow], heights: [:])
         #expect(controller.geometry.height(at: 0) < 5_000)
     }
 

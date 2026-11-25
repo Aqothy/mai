@@ -33,7 +33,7 @@
         /// avoiding a `UIButton.Configuration` rebuild on reuse.
         func matchesKind(of action: RowAccessory.Action) -> Bool {
             switch action {
-            case .copy, .copyReply, .copyChunkedCode: shown?.icon == .copy
+            case .copy, .copyReply: shown?.icon == .copy
             case .fork: shown?.icon == .fork
             }
         }
@@ -82,7 +82,7 @@
 
         private static func isCopyAction(_ action: RowAccessory.Action?) -> Bool {
             switch action {
-            case .copy, .copyReply, .copyChunkedCode: true
+            case .copy, .copyReply: true
             case .fork, nil: false
             }
         }
@@ -100,7 +100,7 @@
             let text: String
             switch accessory {
             case .copy(let value, _): text = value
-            case .copyReply, .copyChunkedCode: text = resolveCopy?(accessory) ?? ""
+            case .copyReply: text = resolveCopy?(accessory) ?? ""
             case .fork: return
             }
             guard !text.isEmpty else { return }
@@ -120,7 +120,6 @@
                 switch accessory {
                 case .copy(_, let label): copied ? (.copied, "Copied") : (.copy, label)
                 case .copyReply: copied ? (.copied, "Copied") : (.copy, "Copy reply")
-                case .copyChunkedCode: copied ? (.copied, "Copied") : (.copy, "Copy code")
                 case .fork: (.fork, "Fork from this turn")
                 case nil: (.copy, "")
                 }

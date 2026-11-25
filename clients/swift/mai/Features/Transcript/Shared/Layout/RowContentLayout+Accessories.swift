@@ -9,13 +9,10 @@ nonisolated extension RowContentLayout {
         let size = RowAccessory.size
         switch self {
         case .code(let code, let frame):
-            guard !code.position.joinsAbove else { return [] }
             let lineCenter = frame.minY + code.labelTop + code.label.size.height / 2
-            let action: RowAccessory.Action =
-                code.position.joinsBelow ? .copyChunkedCode(rowID: rowID) : .copy(text: code.code, label: "Copy code")
             return [
                 RowAccessory(
-                    action: action,
+                    action: .copy(text: code.code, label: "Copy code"),
                     frame: CGRect(
                         x: frame.maxX - code.bodyOrigin.x + 4 - size, y: (lineCenter - size / 2).rounded(),
                         width: size, height: size))

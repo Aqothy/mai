@@ -18,10 +18,8 @@
         /// Called when the horizontal offset changes so UIKit selection rects
         /// and handles follow the scrolled content.
         var onHorizontalScroll: (() -> Void)?
-        /// The block the body belongs to: its scrollers share one offset.
-        private(set) var group: String?
         /// The reader scrolled this block sideways (never called for
-        /// `scroll(toX:)`, so scrollers kept in step do not echo).
+        /// `scroll(toX:)`, so restored offsets do not echo).
         var onReaderScroll: ((TranscriptWideBlockScroller) -> Void)?
         private var isSettingOffset = false
 
@@ -62,14 +60,12 @@
         /// Shows `wide` for `rowID`; a row new to this scroller starts at its
         /// block's offset.
         func show(
-            rowID: String, group: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
+            rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID
-            self.group = group
-            showsHorizontalScrollIndicator = wide.showsScroller
             let height = wide.frame.height
             let targetSize = CGSize(width: max(bounds.width, wide.contentWidth), height: height)
             if contentSize != targetSize {
@@ -147,7 +143,6 @@
 
         func resetForReuse() {
             rowID = nil
-            group = nil
             onReaderScroll = nil
             onHorizontalScroll = nil
             lastDrawnY = .null

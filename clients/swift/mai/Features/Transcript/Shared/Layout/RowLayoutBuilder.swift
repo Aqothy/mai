@@ -19,16 +19,14 @@ nonisolated enum RowLayoutBuilder {
         let sameStyle = previous?.layout.key.styleVersion == style.version
         switch kind {
         case .markdownBlock(let block, let position):
-            let isCode: Bool
-            if case .code = block { isCode = true } else { isCode = false }
-            let top = position.spacingAbove(style, forCode: isCode)
+            let top = position.spacingAbove(style)
             let bottom = position.spacingBelow(style)
             switch block {
             case .code(let language, let code):
                 let prevCode = sameStyle ? previous?.layout.content.codeLayout : nil
-                let display = position.joinsAbove ? "" : CodeLayout.displayName(language)
+                let display = CodeLayout.displayName(language)
                 let layout: CodeLayout
-                if let prevCode, prevCode.code == code, prevCode.position == position,
+                if let prevCode, prevCode.code == code,
                     prevCode.label.string == display,
                     prevCode.colors?.code == codeColors?.code, prevCode.colorsAreDark == codeColors?.isDark
                 {
@@ -36,7 +34,7 @@ nonisolated enum RowLayoutBuilder {
                 } else {
                     layout = CodeLayout.make(
                         code: code, language: language, colors: codeColors, width: width, style: style,
-                        position: position, previous: prevCode)
+                        previous: prevCode)
                 }
                 return (
                     top + layout.size.height + bottom,
@@ -100,33 +98,26 @@ nonisolated enum RowLayoutBuilder {
                 let layout = prose([block], width: width, style: style)
                 return (top + layout.size.height + bottom, .text(layout, origin: CGPoint(x: 0, y: top)))
             }
-        case .userMessage(let source, let position):
+        case .userMessage(let blocks):
             let inner = max(1, width - 2 * style.bubbleHorizontalPadding)
-            let isChunked = position.joinsAbove || position.joinsBelow
-            let layout = prose(MarkdownPlanner.blocks(from: source), width: inner, style: style)
-            let bubbleWidth =
-                isChunked ? width : min(width, ceil(layout.size.width) + 2 * style.bubbleHorizontalPadding)
-            let topInset = position.joinsAbove ? 0 : style.messageVerticalInset
-            let bottomInset = position.joinsBelow ? 0 : style.messageVerticalInset
-            let topPad = Self.bubbleTopPadding(position, style: style)
-            let bottomPad = position.joinsBelow ? 0 : style.bubbleVerticalPadding
-            let textHeight = isChunked && source.isEmpty ? style.font(.body).lineHeight : layout.size.height
+            let layout = prose(blocks, width: inner, style: style, alignsRTLToWidth: false)
+            let bubbleWidth = min(width, ceil(layout.size.width) + 2 * style.bubbleHorizontalPadding)
             let bubble = CGRect(
-                x: width - bubbleWidth, y: topInset, width: bubbleWidth,
-                height: textHeight + topPad + bottomPad)
+                x: width - bubbleWidth, y: style.messageVerticalInset, width: bubbleWidth,
+                height: layout.size.height + 2 * style.bubbleVerticalPadding)
             return (
-                topInset + bubble.height + bottomInset,
+                bubble.height + 2 * style.messageVerticalInset,
                 .bubble(
                     layout, frame: bubble,
-                    textOrigin: CGPoint(x: bubble.minX + style.bubbleHorizontalPadding, y: bubble.minY + topPad),
-                    position: position)
+                    textOrigin: CGPoint(
+                        x: bubble.minX + style.bubbleHorizontalPadding, y: bubble.minY + style.bubbleVerticalPadding))
             )
         case .pendingMessage:
             // Pending messages are parsed off-main and spliced into their
-            // Markdown block rows; never lay out raw Markdown text.
+            // Markdown rows; never lay out raw Markdown text.
             return (HeightEstimator.estimate(kind, width: width, style: style), .empty)
-        case .thought(let text):
-            let layout = plain(text, role: .body, color: .secondary, width: width, style: style)
+        case .thought(let blocks):
+            let layout = prose(blocks, width: width, style: style, color: .secondary)
             return (layout.size.height + 8, .text(layout, origin: CGPoint(x: 0, y: 4)))
         case .activity(let summary):
             let layout = plain(summary, role: .callout, color: .secondary, width: width, style: style)
@@ -156,18 +147,15 @@ nonisolated enum RowLayoutBuilder {
         }
     }
 
-    /// Above a bubble's text: the bubble's padding, or at a seam of a split
-    /// message the space the whole message has there (between two blocks,
-    /// or between two lines of one).
-    static func bubbleTopPadding(_ position: TranscriptBlockPosition, style: TextStyle) -> CGFloat {
-        guard position.joinsAbove else { return style.bubbleVerticalPadding }
-        return position.startsBlock ? style.blockSpacing : style.lineSpacing
-    }
-
-    static func prose(_ blocks: [MarkdownBlock], width: CGFloat, style: TextStyle) -> TextLayout {
+    static func prose(
+        _ blocks: [MarkdownBlock], width: CGFloat, style: TextStyle, color: TextColor = .primary,
+        alignsRTLToWidth: Bool = true
+    ) -> TextLayout {
         TextLayoutEngine.layout(
-            AttributedTextBuilder.build(blocks, style: style), width: width,
-            options: .init(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth))
+            AttributedTextBuilder.build(blocks, style: style, color: color), width: width,
+            options: .init(
+                lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth,
+                alignsRTLToWidth: alignsRTLToWidth))
     }
 
     private static func plain(

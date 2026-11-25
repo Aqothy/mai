@@ -4,15 +4,15 @@ import Foundation
 /// What a row shows. Each case carries everything its layout needs, as
 /// values, so a row can be laid out on any thread.
 nonisolated enum TranscriptRowKind: Hashable, Sendable {
-    /// A user prompt: one bubble (or a vertical slice of a chunked bubble),
-    /// its Markdown laid out inside.
-    case userMessage(source: String, position: TranscriptBlockPosition = .single)
-    /// One top-level Markdown block (or bounded chunk) of an assistant message.
+    /// A user prompt: one bubble, its parsed Markdown blocks laid out inside.
+    case userMessage([MarkdownBlock])
+    /// One top-level Markdown block of an assistant message.
     case markdownBlock(MarkdownBlock, TranscriptBlockPosition)
-    /// An assistant message not parsed yet; shown by estimate until its
-    /// blocks replace it. Only rows far from the viewport stay like this.
-    case pendingMessage(source: String)
-    case thought(String)
+    /// Reasoning, in muted text: parsed Markdown blocks laid out as one text.
+    case thought([MarkdownBlock])
+    /// A message (user, assistant, or reasoning) not parsed yet; shown by O(1)
+    /// estimate until its off-main parse replaces it.
+    case pendingMessage(TranscriptMessage, source: String)
     case activity(summary: String)
     case turnHeader(TranscriptTurnHeader)
     /// The actions under a finished turn: copying its reply (resolved lazily

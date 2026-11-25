@@ -17,9 +17,9 @@ import Foundation
 nonisolated struct TranscriptBuilder {
     /// Blocks for a message, if parsed or streaming: `(messageID, source)`.
     let blocks: (String, String) -> [MarkdownBlock]?
-    /// Messages currently streaming stay unchunked until their final parse so
-    /// `rebuildRows` and `applyStreamRows` emit identical row shapes.
-    var isStreaming: (String) -> Bool = { _ in false }
+    /// Precomputed per-row text metrics for a parsed message, so rebuilding
+    /// rows on the main thread never scans text.
+    var metrics: (String) -> [TextMetrics]? = { _ in nil }
     let expandedTurnIDs: Set<String>
     /// The working row's verb.
     let workingPhrase: String
@@ -138,33 +138,14 @@ nonisolated struct TranscriptBuilder {
     private func append(_ item: Item, turnID: String, to rows: inout [TranscriptRow]) {
         switch item {
         case .user(let entry):
-            let id = "\(turnID)|\(entry.ref)"
-            rows.append(contentsOf: TranscriptRowChunker.userRows(messageID: id, turnID: turnID, source: entry.text))
+            appendMessage(TranscriptMessage(kind: .user, turnID: turnID, ref: entry.ref), source: entry.text, to: &rows)
         case .message(let entry):
-            let id = "\(turnID)|\(entry.ref)"
-            guard let blocks = blocks(id, entry.text) else {
-                rows.append(
-                    TranscriptRow(
-                        id: "\(id)#pending", sourceID: id, kind: .pendingMessage(source: entry.text), messageID: id,
-                        role: .assistant, turnID: turnID))
-                return
-            }
-            if isStreaming(id) {
-                for index in blocks.indices {
-                    rows.append(
-                        TranscriptRow(
-                            id: "\(id)#\(index)", sourceID: id,
-                            kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
-                            messageID: id, role: .assistant, turnID: turnID))
-                }
-            } else {
-                rows.append(
-                    contentsOf: TranscriptRowChunker.assistantRows(messageID: id, turnID: turnID, blocks: blocks))
-            }
+            appendMessage(
+                TranscriptMessage(kind: .assistant, turnID: turnID, ref: entry.ref), source: entry.text, to: &rows)
         case .thought(let entry):
             let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
-            rows.append(contentsOf: TranscriptRowChunker.thoughtRows(turnID: turnID, ref: entry.ref, text: text))
+            appendMessage(TranscriptMessage(kind: .thought, turnID: turnID, ref: entry.ref), source: text, to: &rows)
         case .activity(let entries):
             guard let first = entries.first else { return }
             rows.append(
@@ -176,5 +157,13 @@ nonisolated struct TranscriptBuilder {
             rows.append(
                 TranscriptRow(id: "notice|\(turnID)|\(ref)", kind: .notice(title: title, text: text), turnID: turnID))
         }
+    }
+
+    private func appendMessage(_ message: TranscriptMessage, source: String, to rows: inout [TranscriptRow]) {
+        guard let blocks = blocks(message.id, source) else {
+            rows.append(message.pendingRow(source: source))
+            return
+        }
+        rows.append(contentsOf: message.rows(from: blocks, metrics: metrics(message.id)))
     }
 }

@@ -13,12 +13,12 @@ nonisolated enum RowSelectableText {
             return TableLayout.tabSeparatedText(table)
         case .markdownBlock(let block, _):
             return AttributedTextBuilder.build([block], style: style).string.string
-        case .userMessage(let source, _):
-            return AttributedTextBuilder.build(MarkdownPlanner.blocks(from: source), style: style).string.string
-        case .pendingMessage(let source):
+        case .userMessage(let blocks):
+            return AttributedTextBuilder.build(blocks, style: style).string.string
+        case .thought(let blocks):
+            return AttributedTextBuilder.build(blocks, style: style, color: .secondary).string.string
+        case .pendingMessage(_, let source):
             return source
-        case .thought(let text):
-            return text
         case .notice(let title, let text):
             guard let text, !text.isEmpty else { return title }
             return title + "\n" + text

@@ -198,7 +198,7 @@ struct TranscriptStreamOrderTests {
         var wideOrigins: [String: CGPoint] = [:]
         var accessoryOrigins: [String: CGPoint] = [:]
         func showWideBlock(
-            rowID: String, group: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) { wideOrigins[rowID] = origin }
         func removeWideBlock(rowID: String) { wideOrigins[rowID] = nil }

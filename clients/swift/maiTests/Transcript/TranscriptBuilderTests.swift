@@ -127,4 +127,49 @@ struct TranscriptBuilderTests {
         }
         #expect(titles == ["Working", "Pondering…"])
     }
+
+    /// User, assistant, and reasoning messages all unify through `.pendingMessage`
+    /// -> off-main Markdown parsing -> laid-out Markdown (reasoning muted).
+    @Test func userAssistantAndReasoningAllParseWholeOffMainAsMarkdown() async throws {
+        let controller = TranscriptController(configuration: .launch)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 600, height: 600)
+        host.controller = controller
+        controller.attach(host)
+        controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
+
+        let userSource = "[ref]: https://example.com/ref\n\nSee [ref] and **bold**."
+        let thoughtSource = "Reasoning with *emphasis* and `code`."
+        let assistantSource = "Final answer.\n\n```swift\nlet x = 1\n```"
+        let userMsg = TranscriptMessage(kind: .user, turnID: "t1", ref: "u1")
+        let thoughtMsg = TranscriptMessage(kind: .thought, turnID: "t1", ref: "r1")
+        let assistantMsg = TranscriptMessage(kind: .assistant, turnID: "t1", ref: "a1")
+
+        controller.setRows([
+            userMsg.pendingRow(source: userSource),
+            thoughtMsg.pendingRow(source: thoughtSource),
+            assistantMsg.pendingRow(source: assistantSource),
+        ])
+        for _ in 0..<250 where controller.isAwaitingInitialEnd {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!controller.isAwaitingInitialEnd)
+        #expect(controller.rows.map(\.id) == ["user|t1|u1", "thought|t1|r1", "t1|a1#0", "t1|a1#1"])
+
+        // User message resolved reference link whole and laid out as a bubble.
+        if case .bubble(let userLayout, _, _) = controller.layout(forRowAt: 0)?.content {
+            #expect(userLayout.string == "See ref and bold.")
+            #expect(userLayout.links == [URL(string: "https://example.com/ref")!])
+        } else {
+            Issue.record("expected laid-out user bubble")
+        }
+
+        // Reasoning rendered as Markdown with muted secondary color on all runs.
+        if case .text(let thoughtLayout, _) = controller.layout(forRowAt: 1)?.content {
+            #expect(thoughtLayout.string == "Reasoning with emphasis and code.")
+            #expect(thoughtLayout.runs.allSatisfy { $0.color == .secondary })
+        } else {
+            Issue.record("expected laid-out muted thought text")
+        }
+    }
 }

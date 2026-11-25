@@ -22,7 +22,7 @@
         }
 
         private(set) var accessory: RowAccessory.Action?
-        /// Resolves lazy copy payloads (reply Markdown, multi-chunk code) on click.
+        /// Resolves lazy copy payloads (reply Markdown) on click.
         var onResolveCopy: ((RowAccessory.Action) -> String)?
         /// Opens turn `turnID`'s fork menu from this button.
         var onFork: ((String, NSButton) -> Void)?
@@ -33,7 +33,7 @@
 
         func matchesKind(of action: RowAccessory.Action) -> Bool {
             switch action {
-            case .copy, .copyReply, .copyChunkedCode: shown?.icon == .copy
+            case .copy, .copyReply: shown?.icon == .copy
             case .fork: shown?.icon == .fork
             }
         }
@@ -74,7 +74,7 @@
             switch accessory {
             case .copy(let text, _):
                 copyToPasteboard(text)
-            case .copyReply, .copyChunkedCode:
+            case .copyReply:
                 if let text = onResolveCopy?(accessory), !text.isEmpty {
                     copyToPasteboard(text)
                 }
@@ -101,7 +101,6 @@
                 switch accessory {
                 case .copy(_, let label): copied ? (.copied, "Copied") : (.copy, label)
                 case .copyReply: copied ? (.copied, "Copied") : (.copy, "Copy reply")
-                case .copyChunkedCode: copied ? (.copied, "Copied") : (.copy, "Copy code")
                 case .fork: (.fork, "Fork from this turn")
                 case nil: (.copy, "")
                 }

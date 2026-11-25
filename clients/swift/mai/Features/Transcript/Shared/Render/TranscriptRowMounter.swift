@@ -11,10 +11,8 @@ protocol TranscriptRowMounterDelegate: AnyObject {
     /// coordinates so tall wide blocks vertically clip and release bands just
     /// like normal rows. `streamed` carries bands pre-drawn with a streamed
     /// layout so wide blocks update size and pixels in the same frame.
-    /// `group` is the block the body belongs to (`wideBlockGroup`): its
-    /// scrollers share one horizontal offset.
     func showWideBlock(
-        rowID: String, group: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
+        rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
         visible: CGRect, streamed: DrawnBands?)
     func removeWideBlock(rowID: String)
     /// Highlights `range` of a wide block's text in its scroller.
@@ -211,7 +209,7 @@ final class TranscriptRowMounter {
                             let wideBody = layout.content.wideBody
                         {
                             delegate?.showWideBlock(
-                                rowID: id, group: controller.wideBlockGroup(forRowAt: index), body: wideBody,
+                                rowID: id, body: wideBody,
                                 key: layout.key, origin: origin, drawn: drawn, visible: visible, streamed: nil)
                         }
                     }
@@ -291,7 +289,7 @@ final class TranscriptRowMounter {
         if let wideBody {
             layer.hasWideBlock = true
             delegate?.showWideBlock(
-                rowID: row.id, group: controller.wideBlockGroup(forRowAt: index), body: wideBody, key: layout.key,
+                rowID: row.id, body: wideBody, key: layout.key,
                 origin: origin, drawn: drawn, visible: showsContent ? visible : .null, streamed: streamed?.wideBodyDrawn)
             delegate?.showWideBlockSelection(
                 rowID: row.id, range: hasSelection ? controller.selectedRange(inRowAt: index) : nil,

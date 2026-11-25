@@ -15,10 +15,8 @@ nonisolated struct TranscriptRow: Equatable, Sendable {
     /// The turn this row belongs to, so incremental store updates rebuild only
     /// changed turns without rescanning history.
     var turnID: String?
-    /// What joins this row's text to the previous row's when copied: a
-    /// newline between rows; nothing for a chunk split inside a word; a space
-    /// for a user message split at one (Markdown drops it at a piece's end).
-    var separatorBefore: String
+    /// Precomputed text counts for O(1) height estimation on the main thread.
+    let metrics: TextMetrics
     /// Changes whenever the row's content does: a layout for another version
     /// is stale.
     var contentVersion: Int
@@ -26,7 +24,7 @@ nonisolated struct TranscriptRow: Equatable, Sendable {
     init(
         id: String, sourceID: String? = nil, kind: TranscriptRowKind,
         messageID: String? = nil, role: TranscriptRole? = nil, turnID: String? = nil,
-        separatorBefore: String = "\n", contentVersion: Int = 0
+        metrics: TextMetrics? = nil, contentVersion: Int = 0
     ) {
         self.id = id
         self.sourceID = sourceID ?? id
@@ -34,7 +32,7 @@ nonisolated struct TranscriptRow: Equatable, Sendable {
         self.messageID = messageID
         self.role = role
         self.turnID = turnID
-        self.separatorBefore = separatorBefore
+        self.metrics = metrics ?? TextMetrics(kind)
         self.contentVersion = contentVersion
     }
 }

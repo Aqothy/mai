@@ -12,138 +12,6 @@ import Testing
 /// `test/pathological_tests.py`).
 nonisolated struct TranscriptInvariantFuzzTests {
 
-    // MARK: Chunking
-
-    /// Chunked user messages and thoughts copy back exactly, every chunk
-    /// within its limits, and no chunk boundary splits a grapheme cluster.
-    @Test(arguments: 0..<2)
-    func chunkedTextReassemblesExactlyAtGraphemeBoundaries(seed: Int) {
-        var rng = FuzzRNG(seed: 0xC4A2_0000 &+ UInt64(seed))
-        for iteration in 0..<(6 * TranscriptFuzz.scale) {
-            let text: String
-            switch rng.int(in: 0..<5) {
-            case 0: text = TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 0..<60_000), newlines: true)
-            case 1: text = TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 16_000..<60_000))
-            case 2: text = (0..<rng.int(in: 1..<900)).map { _ in String(repeating: "x", count: rng.int(in: 0..<90)) }
-                .joined(separator: rng.pick(["\n", "\r\n"]))
-            case 3: text = String(repeating: rng.pick(["👩‍👩‍👧‍👦", "e\u{0301}", "🇦🇧", "漢"]), count: rng.int(in: 1..<9_000))
-            default: text = String(repeating: rng.pick([" ", "\n", "\t", "a "]), count: rng.int(in: 1..<40_000))
-            }
-            let pieces = TranscriptRowChunker.markdownPieces(
-                text, maxBytes: TranscriptRowChunker.maxUserMessageBytes, maxLines: TranscriptRowChunker.maxUserMessageLines)
-            checkChunks(
-                text, pieces: pieces.map { String($0.text) }, separators: pieces.map(\.separator),
-                context: "user seed \(seed) iteration \(iteration)")
-            let rows = TranscriptRowChunker.userRows(messageID: "m", turnID: "t", source: text)
-            if rows.count > 1 {
-                #expect(rows.count == pieces.count)
-                for (index, (row, piece)) in zip(rows, pieces).enumerated() {
-                    guard case .userMessage(let source, let position) = row.kind else { continue }
-                    #expect(source == piece.prefix + piece.text && row.separatorBefore == piece.separator)
-                    #expect(position.isFirst == (index == 0) && position.isLast == (index == rows.count - 1))
-                    #expect(position.joinsAbove == (index > 0) && position.joinsBelow == (index < rows.count - 1))
-                }
-            }
-            let thoughts = TranscriptRowChunker.thoughtRows(turnID: "t", ref: "r", text: text)
-            let thoughtPieces = thoughts.map { row -> String in
-                guard case .thought(let piece) = row.kind else { return "" }
-                return piece
-            }
-            checkChunks(
-                text, pieces: thoughtPieces, separators: thoughts.map(\.separatorBefore),
-                context: "thought seed \(seed) iteration \(iteration)")
-        }
-    }
-
-    /// Chunked paragraphs keep every character's style and link, chunked
-    /// code its exact text, and chunked lists their items and numbering.
-    @Test(arguments: 0..<2)
-    func chunkedBlocksKeepTheirContent(seed: Int) {
-        var rng = FuzzRNG(seed: 0xB10C_0000 &+ UInt64(seed))
-        for iteration in 0..<(5 * TranscriptFuzz.scale) {
-            var inlines: [MarkdownInline] = []
-            var total = 0
-            let target = rng.int(in: 1..<80_000)
-            while total < target {
-                let text = TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 1..<3_000), newlines: rng.chance(20))
-                let link = rng.chance(10) ? URL(string: "https://example.com/\(inlines.count)") : nil
-                inlines.append(MarkdownInline(text: text, style: rng.pick([[], .strong, .code, .emphasis]), link: link))
-                total += text.utf8.count
-            }
-            let code = (0..<rng.int(in: 1..<2_000)).map { _ in
-                TranscriptFuzz.adversarialText(&rng, utf16Length: rng.int(in: 0..<(rng.chance(5) ? 40_000 : 120)))
-            }.joined(separator: "\n")
-            let items = (0..<rng.int(in: 1..<450)).map { MarkdownList.Item(blocks: [.paragraph([MarkdownInline(text: "item \($0)")])]) }
-            let list = MarkdownList(startIndex: rng.chance(50) ? rng.int(in: 0..<9) : nil, items: items)
-            let blocks: [MarkdownBlock] = [.paragraph(inlines), .code(language: "swift", code: code), .list(list)]
-            let rows = TranscriptRowChunker.assistantRows(messageID: "m", turnID: "t", blocks: blocks)
-            let context = "seed \(seed) iteration \(iteration)"
-            #expect(Set(rows.map(\.id)).count == rows.count, "\(context) duplicate row IDs")
-
-            var paragraph: [(Character, MarkdownInline.Style, URL?)] = []
-            var codeParts: [String] = []
-            var listItems: [MarkdownList.Item] = []
-            for row in rows {
-                guard case .markdownBlock(let block, _) = row.kind else { continue }
-                switch block {
-                case .paragraph(let chunk):
-                    for inline in chunk { paragraph += inline.text.map { ($0, inline.style, inline.link) } }
-                    #expect(chunk.reduce(0) { $0 + $1.text.utf8.count } <= TranscriptRowChunker.maxParagraphBytes + 64)
-                case .code(_, let piece):
-                    codeParts.append(piece)
-                case .list(let chunk):
-                    if let start = list.startIndex { #expect(chunk.startIndex == start + listItems.count, "\(context) numbering") }
-                    listItems += chunk.items
-                default:
-                    break
-                }
-            }
-            let expected = inlines.flatMap { inline in inline.text.map { ($0, inline.style, inline.link) } }
-            #expect(paragraph.map(\.0) == expected.map(\.0), "\(context) paragraph text")
-            #expect(paragraph.map(\.1) == expected.map(\.1), "\(context) paragraph styles")
-            #expect(paragraph.map(\.2) == expected.map(\.2), "\(context) paragraph links")
-            #expect(codeParts.joined(separator: "\n") == code, "\(context) code")
-            #expect(listItems == items, "\(context) list items")
-        }
-    }
-
-    /// `pieces` joined by `separators` (the first unused) are `text`, and
-    /// every cut, with the separator it consumed, sits on grapheme cluster
-    /// boundaries of the whole text; no piece is over its limits but one
-    /// character or line that alone is.
-    private func checkChunks(_ text: String, pieces: [String], separators: [String], context: String) {
-        var joined = ""
-        var cuts: [(at: Int, separator: String)] = []
-        for (index, piece) in pieces.enumerated() {
-            if index > 0 {
-                cuts.append((joined.utf8.count, separators[index]))
-                joined += separators[index]
-            }
-            joined += piece
-        }
-        #expect(joined == text, "\(context): reassembly differs")
-        guard joined == text else { return }
-        // A consumed newline may be a CRLF's LF: the CR stays at the end of
-        // the chunk before, which lays it out as the line's terminator.
-        let boundaries = Set(text.indices.map { text.utf8.distance(from: text.startIndex, to: $0) } + [text.utf8.count])
-        let bytes = Array(text.utf8)
-        for (index, cut) in cuts.enumerated() {
-            let next = cut.at + cut.separator.utf8.count
-            let valid =
-                boundaries.contains(next)
-                && (boundaries.contains(cut.at) || (cut.separator == "\n" && bytes[cut.at - 1] == 0x0D))
-            guard valid else {
-                let around = String(decoding: bytes[max(0, cut.at - 12)..<min(bytes.count, cut.at + 12)], as: UTF8.self)
-                Issue.record("\(context): cut \(index) at byte \(cut.at) splits a cluster: \(around.unicodeScalars.map { String($0.value, radix: 16) })")
-                return
-            }
-        }
-        for piece in pieces where piece.count > 1 {
-            #expect(piece.utf8.count <= TranscriptRowChunker.maxUserMessageBytes, "\(context): chunk over its byte limit")
-            #expect(piece.utf8.reduce(1) { $0 + ($1 == 0x0A ? 1 : 0) } <= TranscriptRowChunker.maxUserMessageLines + 1)
-        }
-    }
-
     // MARK: Tiling
 
     /// Drawn bands always cover what was asked, sit on the tile grid inside
@@ -514,7 +382,12 @@ nonisolated struct TranscriptInvariantFuzzTests {
         let survived = await Task.detached(priority: .userInitiated) {
             for source in sources {
                 let blocks = MarkdownPlanner.blocks(from: source)
-                let rows = TranscriptRowChunker.assistantRows(messageID: "m", turnID: "t", blocks: blocks)
+                let rows = blocks.indices.map { index in
+                    TranscriptRow(
+                        id: "m#\(index)", sourceID: "m",
+                        kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
+                        messageID: "m", role: .assistant, turnID: "t")
+                }
                 var hasher = Hasher()
                 for row in rows {
                     _ = HeightEstimator.estimate(row.kind, width: 700, style: style)
@@ -526,8 +399,13 @@ nonisolated struct TranscriptInvariantFuzzTests {
                     hasher.combine(row.kind)
                 }
                 // Parsed again: equal values in other storage compare all the way down.
-                let again = TranscriptRowChunker.assistantRows(
-                    messageID: "m", turnID: "t", blocks: MarkdownPlanner.blocks(from: source))
+                let blocksAgain = MarkdownPlanner.blocks(from: source)
+                let again = blocksAgain.indices.map { index in
+                    TranscriptRow(
+                        id: "m#\(index)", sourceID: "m",
+                        kind: .markdownBlock(blocksAgain[index], .of(index, in: blocksAgain)),
+                        messageID: "m", role: .assistant, turnID: "t")
+                }
                 guard zip(rows, again).allSatisfy({ $0.kind == $1.kind }) else { return false }
                 var parser = StreamingMarkdownParser()
                 _ = parser.update(source)

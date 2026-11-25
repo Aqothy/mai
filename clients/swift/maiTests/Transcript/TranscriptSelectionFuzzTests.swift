@@ -29,8 +29,8 @@ struct TranscriptSelectionFuzzTests {
                 kind = .markdownBlock(
                     .table(MarkdownTable(alignments: cells.map { _ in .leading }, header: cells, rows: [cells, cells])),
                     .single)
-            case 3: kind = .userMessage(source: text(&rng, 300))
-            case 4: kind = .thought(text(&rng, 300))
+            case 3: kind = .userMessage(MarkdownPlanner.blocks(from: text(&rng, 300)))
+            case 4: kind = .thought(MarkdownPlanner.blocks(from: text(&rng, 300)))
             case 5: kind = .activity(summary: "Read files")
             default: kind = .markdownBlock(.heading(level: 2, [MarkdownInline(text: text(&rng, 40))]), .single)
             }
@@ -76,13 +76,13 @@ struct TranscriptSelectionFuzzTests {
             controller.setHeights(heights)
             let context = "seed \(seed) iteration \(iteration)"
 
-            // The model: selectable rows' texts joined by their separators.
+            // The model: selectable rows' texts joined by newlines.
             var model = ""
             var starts: [String: Int] = [:]
             var selectable: [(index: Int, text: String)] = []
             for index in controller.rows.indices {
                 guard let rowText = controller.selectableText(ofRowAt: index) else { continue }
-                if !selectable.isEmpty { model += controller.rows[index].separatorBefore }
+                if !selectable.isEmpty { model += "\n" }
                 starts[controller.rows[index].id] = model.utf16.count
                 model += rowText
                 selectable.append((index, rowText))

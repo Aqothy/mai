@@ -42,13 +42,12 @@ extension TranscriptController {
                         isExpanded: false))
             default:
                 guard let text = selectableText(ofRowAt: index), !text.isEmpty else { continue }
-                let isFirstUserChunk: Bool
-                if case .userMessage(_, let position) = row.kind {
-                    isFirstUserChunk = !position.joinsAbove
-                } else {
-                    isFirstUserChunk = false
+                let speaker: String
+                switch row.kind {
+                case .userMessage: speaker = "You: "
+                case .pendingMessage(let message, _) where message.kind == .user: speaker = "You: "
+                default: speaker = ""
                 }
-                let speaker = isFirstUserChunk ? "You: " : ""
                 result.append(
                     AccessibleRow(
                         id: row.id, index: index, frame: frame, text: speaker + text, expandsTurnID: nil,

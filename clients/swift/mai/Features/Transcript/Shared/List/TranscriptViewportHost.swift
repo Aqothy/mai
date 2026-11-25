@@ -30,6 +30,10 @@ protocol TranscriptViewportHost: AnyObject {
     func setNeedsFrameUpdates(_ needed: Bool)
     /// The selection changed: redraw its highlight on the mounted rows.
     func setNeedsSelectionDisplay()
+    /// A streaming message is about to update text under an active selection
+    /// (UIKit `UITextInputDelegate.textWillChange` / `textDidChange`).
+    func selectedTextWillChange()
+    func selectedTextDidChange()
     /// Whether a jump to the end animates (iOS) or lands at once (Mac).
     var animatesJumps: Bool { get }
     /// Ends a fling where it is, before an animated jump takes over.
@@ -39,6 +43,8 @@ protocol TranscriptViewportHost: AnyObject {
 extension TranscriptViewportHost {
     var colorSpace: CGColorSpace { RowLayer.colorSpace }
     func setNeedsSelectionDisplay() {}
+    func selectedTextWillChange() {}
+    func selectedTextDidChange() {}
     var animatesJumps: Bool { false }
     func stopDeceleration() {}
 }

@@ -96,6 +96,14 @@ final class ThreadStore {
         sessionsByID[threadID]?.savedTranscriptPlace = place
     }
 
+    func transcriptMeasuredHeights(for threadID: String) -> TranscriptMeasuredHeights? {
+        sessionsByID[threadID]?.transcriptMeasuredHeights
+    }
+
+    func setTranscriptMeasuredHeights(_ heights: TranscriptMeasuredHeights?, for threadID: String) {
+        sessionsByID[threadID]?.transcriptMeasuredHeights = heights
+    }
+
     private let rpc: any ThreadRPCClient
     private let connection: RPCConnectionCoordinator
     /// Chats a read command is on its way for, so a burst of updates sends

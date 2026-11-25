@@ -395,29 +395,23 @@ nonisolated final class RowLayer: CALayer {
 
     private func configureShape(palette: TextPalette) {
         switch content {
-        case .bubble(_, let frame, _, let position):
+        case .bubble(_, let frame, _):
             shape.isHidden = false
             shape.frame = frame
             shape.backgroundColor = palette.bubble
             shape.cornerRadius = TextStyle.bubbleCornerRadius
-            shape.maskedCorners = Self.maskedCorners(for: position)
+            shape.maskedCorners = Self.allCorners
             shape.borderWidth = 0
             masksToBounds = false
-        case .code(let code, let frame):
+        case .code(_, let frame):
             shape.isHidden = false
-            // Bleed 1 pt past joined edges and clip at the row bounds so
-            // adjacent chunks of a split code block share a seamless border.
-            let joinTop: CGFloat = code.position.joinsAbove ? 1 : 0
-            let joinBottom: CGFloat = code.position.joinsBelow ? 1 : 0
-            shape.frame = CGRect(
-                x: frame.minX, y: frame.minY - joinTop,
-                width: frame.width, height: frame.height + joinTop + joinBottom)
+            shape.frame = frame
             shape.backgroundColor = palette.codeBackground
             shape.cornerRadius = TextStyle.codeCornerRadius
-            shape.maskedCorners = Self.maskedCorners(for: code.position)
+            shape.maskedCorners = Self.allCorners
             shape.borderWidth = 1
             shape.borderColor = palette.codeBorder
-            masksToBounds = code.position.joinsAbove || code.position.joinsBelow
+            masksToBounds = false
         case .notice(_, let frame, _):
             shape.isHidden = false
             shape.frame = frame
@@ -435,16 +429,4 @@ nonisolated final class RowLayer: CALayer {
     private static let allCorners: CACornerMask = [
         .layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
     ]
-
-    private static func maskedCorners(for position: TranscriptBlockPosition) -> CACornerMask {
-        if !position.joinsAbove && !position.joinsBelow { return allCorners }
-        // Both iOS and macOS (`rowsView.rowsLayer.isGeometryFlipped = true`)
-        // lay rows out top-down so `minY` is the visual top edge.
-        let top: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        let bottom: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        var mask: CACornerMask = []
-        if !position.joinsAbove { mask.formUnion(top) }
-        if !position.joinsBelow { mask.formUnion(bottom) }
-        return mask
-    }
 }

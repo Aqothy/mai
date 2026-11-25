@@ -30,13 +30,13 @@ extension TranscriptController {
         }
     }
 
-    func cacheParsedMessage(id: String, source: String, blocks: [MarkdownBlock]) {
+    func cacheParsedMessage(id: String, source: String, blocks: [MarkdownBlock], metrics: [TextMetrics] = []) {
         if let existing = parsedMessages[id] {
             parsedMessageBytes -= existing.source.utf8.count
         } else {
             parsedMessageOrder.append(id)
         }
-        parsedMessages[id] = (source, blocks)
+        parsedMessages[id] = (source, blocks, metrics)
         parsedMessageBytes += source.utf8.count
         evictParsedMessagesIfNeeded()
     }
@@ -116,6 +116,7 @@ extension TranscriptController {
         let style = TextStyle.current()
         guard style.version != self.style.version else { return }
         self.style = style
+        measuredRowHeights.removeAll()
         guard configuration.laysOutRows else { return }
         scheduleWork()
         host?.setNeedsRowPlacement()
@@ -134,7 +135,13 @@ extension TranscriptController {
     func widthDidChange(_ viewportWidth: CGFloat) {
         let width = Self.columnWidth(for: viewportWidth)
         guard width != columnWidth else { return }
+        let wasInitial = columnWidth == 0
         columnWidth = width
+        if wasInitial {
+            applyRememberedHeightsIfMatching()
+        } else {
+            measuredRowHeights.removeAll()
+        }
         scheduleWork()
     }
 
@@ -168,10 +175,10 @@ extension TranscriptController {
 
     private func job(for index: Int, priority: Int) -> LayoutQueue.Job? {
         let row = rows[index]
-        if case .pendingMessage(let source) = row.kind, let messageID = row.messageID {
+        if case .pendingMessage(let message, let source) = row.kind {
             return LayoutQueue.Job(
-                id: "parse|\(messageID)",
-                work: .parseAndLayout(messageID: messageID, source: source, width: columnWidth, style: style),
+                id: "parse|\(message.pendingRowID)",
+                work: .parseAndLayout(message: message, source: source, width: columnWidth, style: style),
                 priority: priority)
         }
         guard layouts[row.id]?.key != currentKey(row) else { return nil }
@@ -205,9 +212,10 @@ extension TranscriptController {
     }
 
     private struct ParsedBatchItem {
-        let messageID: String
+        let message: TranscriptMessage
         let source: String
         let blocks: [MarkdownBlock]
+        let metrics: [TextMetrics]
         let layouts: [RowLayout]?
     }
 
@@ -224,22 +232,23 @@ extension TranscriptController {
         let keep = keptWindow()
         for result in results {
             switch result {
-            case .parsedAndLaidOut(let messageID, let source, let blocks, let blockLayouts):
-                guard parsedMessages[messageID]?.source != source else { continue }
-                cacheParsedMessage(id: messageID, source: source, blocks: blocks)
+            case .parsedAndLaidOut(let message, let source, let blocks, let metrics, let blockLayouts):
+                guard parsedMessages[message.id]?.source != source else { continue }
+                cacheParsedMessage(id: message.id, source: source, blocks: blocks, metrics: metrics)
                 let matchingLayouts =
                     !blockLayouts.isEmpty
                     && blockLayouts.first.map { $0.key.width == columnWidth && $0.key.styleVersion == style.version }
                         == true
                 newlyParsed.append(
                     ParsedBatchItem(
-                        messageID: messageID, source: source, blocks: blocks,
+                        message: message, source: source, blocks: blocks, metrics: metrics,
                         layouts: matchingLayouts ? blockLayouts : nil))
             case .layout(let layout):
                 guard let index = geometry.index(for: layout.rowID), layout.key == currentKey(rows[index]) else {
                     continue
                 }
                 heights[layout.rowID] = layout.height
+                measuredRowHeights[layout.rowID] = layout.height
                 heightDeltaSum += abs(layout.height - geometry.height(at: index))
                 let frame = geometry.frame(at: index)
                 if keep.map({ frame.minY < $0.upperBound && frame.minY + frame.height > $0.lowerBound }) ?? true {
@@ -273,17 +282,15 @@ extension TranscriptController {
         var byIndex: [Int: (rows: [TranscriptRow], layouts: [RowLayout]?)] = [:]
         var needsFullRebuild = false
         for item in parsed {
-            guard let index = geometry.index(for: "\(item.messageID)#pending"),
+            guard let index = geometry.index(for: item.message.pendingRowID),
                 rows.indices.contains(index),
-                case .pendingMessage(let currentSource) = rows[index].kind,
-                currentSource == item.source
+                case .pendingMessage(let currentMessage, let currentSource) = rows[index].kind,
+                currentMessage == item.message, currentSource == item.source
             else {
-                if geometry.index(for: "\(item.messageID)#0") == nil { needsFullRebuild = true }
+                if geometry.index(for: item.message.firstParsedRowID) == nil { needsFullRebuild = true }
                 continue
             }
-            let blockRows = TranscriptRowChunker.assistantRows(
-                messageID: item.messageID, turnID: rows[index].turnID, blocks: item.blocks)
-            byIndex[index] = (blockRows, item.layouts)
+            byIndex[index] = (item.message.rows(from: item.blocks, metrics: item.metrics), item.layouts)
         }
         if needsFullRebuild {
             rebuildRows()
@@ -303,6 +310,7 @@ extension TranscriptController {
                     if let prebuilt = replacement.layouts, offset < prebuilt.count {
                         let layout = prebuilt[offset]
                         replacementHeights[blockRow.id] = layout.height
+                        measuredRowHeights[blockRow.id] = layout.height
                         storeLayout(layout)
                     }
                     replacementRows.append(blockRow)

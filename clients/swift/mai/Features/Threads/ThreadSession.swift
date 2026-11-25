@@ -29,6 +29,9 @@ struct ThreadSession {
     /// Saved reading place for the new transcript engine for this app run;
     /// nil when following the end and removed when the thread is deleted.
     var savedTranscriptPlace: TranscriptSavedPlace?
+    /// Remembered measured row heights keyed by `(columnWidth, styleVersion)`
+    /// so reopening a thread starts with exact geometry (zero scrollbar jump).
+    var transcriptMeasuredHeights: TranscriptMeasuredHeights?
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
     /// Events that arrived while the snapshot was on its way.

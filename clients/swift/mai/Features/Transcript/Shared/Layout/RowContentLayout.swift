@@ -4,8 +4,8 @@ import Foundation
 /// A row's laid-out content, in row coordinates (the column's top left).
 nonisolated enum RowContentLayout: Sendable {
     case text(TextLayout, origin: CGPoint)
-    /// A user message: its bubble (or chunk slice) and the text inside it.
-    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint, position: TranscriptBlockPosition = .single)
+    /// A user message: its bubble and the text inside it.
+    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint)
     case code(CodeLayout, frame: CGRect)
     /// A wide code block's lines alone, in its horizontal scroller.
     case codeBody(CodeLayout)
@@ -27,7 +27,7 @@ nonisolated extension RowContentLayout {
     /// reason: one line of a minified file holds megabytes of glyphs).
     var retainedBytes: Int {
         switch self {
-        case .text(let layout, _), .bubble(let layout, _, _, _), .header(let layout, _, _), .notice(let layout, _, _):
+        case .text(let layout, _), .bubble(let layout, _, _), .header(let layout, _, _), .notice(let layout, _, _):
             layout.retainedBytes
         case .code(let code, _), .codeBody(let code):
             code.body.retainedBytes + code.label.retainedBytes

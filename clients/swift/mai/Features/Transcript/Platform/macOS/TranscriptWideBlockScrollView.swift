@@ -16,10 +16,8 @@
         weak var transcriptScrollView: NSScrollView?
         private let body = TranscriptWideBlockBodyView()
         private(set) var rowID: String?
-        /// The block the body belongs to: its scrollers share one offset.
-        private(set) var group: String?
         /// The reader scrolled this block sideways (never called for
-        /// `scroll(toX:)`, so scrollers kept in step do not echo).
+        /// `scroll(toX:)`, so restored offsets do not echo).
         var onReaderScroll: ((TranscriptWideBlockScrollView) -> Void)?
         private var isSettingOffset = false
         /// The axis the trackpad gesture in progress was latched to.
@@ -67,14 +65,12 @@
         /// Shows `wide` for `rowID`; a row new to this scroller starts at its
         /// block's offset.
         func show(
-            rowID: String, group: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
+            rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID
-            self.group = group
-            if hasHorizontalScroller != wide.showsScroller { hasHorizontalScroller = wide.showsScroller }
             let target = NSRect(x: 0, y: 0, width: max(frame.width, wide.contentWidth), height: wide.frame.height)
             let resized = body.frame != target
             if resized { body.frame = target }
@@ -97,7 +93,6 @@
 
         func resetForReuse() {
             rowID = nil
-            group = nil
             onReaderScroll = nil
             gestureAxis = nil
             body.resetForReuse()

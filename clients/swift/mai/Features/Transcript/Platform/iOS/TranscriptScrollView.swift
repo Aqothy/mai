@@ -47,6 +47,7 @@
         private var accessoryPool: [TranscriptAccessoryControl] = []
         let tapDelegate = TranscriptTapGestureDelegate()
         private var keyboardTransition: KeyboardTransition?
+        private var lastNotifiedSelectionRects: [CGRect] = []
 
         /// The keyboard's own animation, so insets change with it and the
         /// transcript's end rises and falls with the keyboard.
@@ -273,7 +274,27 @@
             CATransaction.setDisableActions(true)
             mounter.showSelection(controller)
             CATransaction.commit()
+            lastNotifiedSelectionRects = currentSelectionRects()
             selectionDidChange()
+        }
+
+        func selectedTextWillChange() {
+            contentView.inputDelegate?.textWillChange(contentView)
+        }
+
+        func selectedTextDidChange() {
+            contentView.inputDelegate?.textDidChange(contentView)
+            lastNotifiedSelectionRects = currentSelectionRects()
+        }
+
+        private func currentSelectionRects() -> [CGRect] {
+            guard let selection = controller.selection, !selection.isEmpty,
+                let anchorFirst = controller.isBefore(selection.anchor, selection.focus)
+            else { return [] }
+            let start = anchorFirst ? selection.anchor : selection.focus
+            let end = anchorFirst ? selection.focus : selection.anchor
+            return controller.selectionRects(
+                from: start, to: end, columnX: columnX, scrollX: { [weak self] id in self?.wideBlocks[id]?.scrollX ?? 0 })
         }
 
         var animatesJumps: Bool { window != nil }
@@ -320,14 +341,23 @@
                     controller, visible: visibleRect, documentWidth: bounds.width, palette: palette, scale: scale,
                     colorSpace: colorSpace, showsContent: isContentVisible)
             }
-            // Rows laid out again move the selection's rects.
-            if controller.selection != nil { contentView.selectionGeometryDidChange() }
+            // Notify UIKit only when the selection's highlight rects actually
+            // moved or changed layout, not unconditionally on every scroll placement.
+            if controller.selection != nil {
+                let current = currentSelectionRects()
+                if current != lastNotifiedSelectionRects {
+                    lastNotifiedSelectionRects = current
+                    contentView.selectionGeometryDidChange()
+                }
+            } else if !lastNotifiedSelectionRects.isEmpty {
+                lastNotifiedSelectionRects = []
+            }
         }
 
         // MARK: TranscriptRowMounterDelegate
 
         func showWideBlock(
-            rowID: String, group: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
+            rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScroller()
@@ -347,20 +377,17 @@
             let localDrawn = drawn.offsetBy(dx: -frame.minX, dy: -frame.minY)
             let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -frame.minX, dy: -frame.minY)
             scroller.show(
-                rowID: rowID, group: group, offset: controller.wideBlockOffsets[group] ?? 0, body: body, key: key,
+                rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
                 streamed: streamed)
         }
 
-        /// The reader scrolled a wide block: its offset is kept, and the
-        /// other chunks of its block follow.
+        /// The reader scrolled a wide block: keep its sideways offset across
+        /// remounts (browser `scrollLeft`).
         private func wideBlockDidScroll(_ scroller: TranscriptWideBlockScroller) {
-            guard let group = scroller.group else { return }
-            controller.wideBlockOffsets[group] = scroller.scrollX
-            for other in wideBlocks.values where other !== scroller && other.group == group {
-                other.scroll(toX: scroller.scrollX)
-            }
+            guard let rowID = scroller.rowID else { return }
+            controller.wideBlockOffsets[rowID] = scroller.scrollX
         }
 
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {

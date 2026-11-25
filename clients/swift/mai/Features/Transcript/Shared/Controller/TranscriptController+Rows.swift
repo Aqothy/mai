@@ -16,6 +16,7 @@ extension TranscriptController {
         if let saved = store.savedTranscriptPlace(for: threadID) {
             restoreSavedPlace(saved)
         }
+        rememberedHeights = store.transcriptMeasuredHeights(for: threadID)
         observeStore()
         // Rule 9's readiness waits at most a second; check again then even
         // if nothing else arrives.
@@ -100,7 +101,7 @@ extension TranscriptController {
     func rebuildRows(fromTurnIndex firstChangedTurn: Int = 0) {
         let builder = TranscriptBuilder(
             blocks: { [self] messageID, source in blocks(forMessage: messageID, source: source) },
-            isStreaming: { [self] messageID in streams[messageID] != nil },
+            metrics: { [self] messageID in parsedMessages[messageID]?.metrics },
             expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase)
         guard !rows.isEmpty else {
             setRows(builder.rows(for: turns))
@@ -190,13 +191,6 @@ extension TranscriptController {
         return nil
     }
 
-    /// Whether `row` belongs to a message still streaming: it grows at its
-    /// bottom.
-    func isStreaming(_ row: TranscriptRow) -> Bool {
-        guard let messageID = row.messageID, !streams.isEmpty else { return false }
-        return streams[messageID] != nil
-    }
-
     func updateFrameUpdates() {
         host?.setNeedsFrameUpdates(!streams.isEmpty || endJump != nil)
     }
@@ -239,7 +233,8 @@ extension TranscriptController {
         stream.isInFlight = false
         if result.isFinished {
             streams[result.messageID] = nil
-            cacheParsedMessage(id: result.messageID, source: stream.entryText, blocks: result.blocks)
+            cacheParsedMessage(
+                id: result.messageID, source: stream.entryText, blocks: result.blocks, metrics: result.metrics)
             updateFrameUpdates()
         } else {
             guard result.textLength >= stream.shownLength else {
@@ -268,18 +263,21 @@ extension TranscriptController {
             }
         }
         let turnID = existing.first.flatMap { rows[$0].turnID } ?? messageID.split(separator: "|", maxSplits: 1).first.map(String.init)
-        let newRows: [TranscriptRow]
-        if result.isFinished {
-            newRows = TranscriptRowChunker.assistantRows(messageID: messageID, turnID: turnID, blocks: result.blocks)
-        } else {
-            newRows = result.blocks.enumerated().map { index, block in
-                TranscriptRow(
-                    id: "\(messageID)#\(index)", sourceID: messageID,
-                    kind: .markdownBlock(block, .of(index, in: result.blocks)),
-                    messageID: messageID, role: .assistant, turnID: turnID)
-            }
+        let newRows = result.blocks.enumerated().map { index, block in
+            let rowMetrics = index < result.metrics.count ? result.metrics[index] : nil
+            return TranscriptRow(
+                id: "\(messageID)#\(index)", sourceID: messageID,
+                kind: .markdownBlock(block, .of(index, in: result.blocks)),
+                messageID: messageID, role: .assistant, turnID: turnID, metrics: rowMetrics)
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
+        let selectionTouchesStream: Bool = {
+            guard let ordered = orderedSelection(), let first = existing.first, let last = existing.last else {
+                return false
+            }
+            return ordered.start.index <= last && ordered.end.index >= first
+        }()
+        if selectionTouchesStream { host?.selectedTextWillChange() }
         // Laid out at a width or text size the column no longer has (a resize
         // or Dynamic Type change meanwhile): the rows still change, their
         // layouts come from the layout queue.
@@ -287,6 +285,7 @@ extension TranscriptController {
         var heights: [String: CGFloat] = [:]
         for row in laidOut where row.index < newRows.count && newRows[row.index].kind == row.kind {
             heights[newRows[row.index].id] = row.layout.height
+            measuredRowHeights[newRows[row.index].id] = row.layout.height
         }
         let sameIDs = existing.count == newRows.count && zip(existing, newRows).allSatisfy { rows[$0].id == $1.id }
         if sameIDs {
@@ -322,6 +321,7 @@ extension TranscriptController {
             self.selection = selection
             host?.setNeedsSelectionDisplay()
         }
+        if selectionTouchesStream { host?.selectedTextDidChange() }
         host?.setNeedsRowPlacement()
     }
 

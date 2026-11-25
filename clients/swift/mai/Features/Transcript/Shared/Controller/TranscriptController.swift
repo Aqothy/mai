@@ -75,6 +75,12 @@ final class TranscriptController {
     /// to be). Others are dropped by row count and total retained bytes.
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
     @ObservationIgnored var cachedLayoutBytes = 0
+    /// Measured heights recorded at `(columnWidth, style.version)` during this
+    /// controller's lifetime; persisted onto `ThreadSession` on detach.
+    @ObservationIgnored var measuredRowHeights: [String: CGFloat] = [:]
+    /// Remembered heights from a prior open of this thread, seeded when
+    /// `(columnWidth, style.version)` matches.
+    @ObservationIgnored var rememberedHeights: TranscriptMeasuredHeights?
     @ObservationIgnored let layoutInbox = LayoutInbox()
     @ObservationIgnored var urgentGeneration = 0
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
@@ -93,10 +99,9 @@ final class TranscriptController {
         }
     }
 
-    /// How far each wide block is scrolled sideways, by block
-    /// (`wideBlockGroup`): the chunks of a split code block scroll together,
-    /// and a block scrolled out of view comes back where it was left, as a
-    /// browser keeps an element's `scrollLeft`.
+    /// How far each wide block is scrolled sideways, keyed by row ID so a
+    /// block scrolled out of view comes back where it was left, as a browser
+    /// keeps an element's `scrollLeft`.
     @ObservationIgnored var wideBlockOffsets: [String: CGFloat] = [:]
 
     /// The reader's selection (PLAN 5), state: it outlives the rows'
@@ -114,9 +119,11 @@ final class TranscriptController {
     /// changes only when the agent starts something new.
     @ObservationIgnored var workingPhrase = ChatWorkingPhrases.next(after: nil)
     @ObservationIgnored var workingActivityKey: String?
-    /// Parsed assistant messages: rows are state (PLAN 3.1 rule 9). Bounded by
-    /// `maxParsedMessageBytes` so multi-tens-of-MB sessions stay within budget.
-    @ObservationIgnored var parsedMessages: [String: (source: String, blocks: [MarkdownBlock])] = [:]
+    /// Parsed messages (user, assistant, reasoning): rows are state (PLAN 3.1
+    /// rule 9). Bounded by `maxParsedMessageBytes` so multi-tens-of-MB sessions
+    /// stay within budget. Metrics are cached alongside blocks so rebuilds stay
+    /// O(blocks) on the main thread.
+    @ObservationIgnored var parsedMessages: [String: (source: String, blocks: [MarkdownBlock], metrics: [TextMetrics])] = [:]
     @ObservationIgnored var parsedMessageOrder: [String] = []
     @ObservationIgnored var parsedMessageBytes = 0
     @ObservationIgnored var streams: [String: TranscriptStream] = [:]
@@ -249,7 +256,10 @@ final class TranscriptController {
             let width = columnWidth > 0 ? columnWidth : 600
             geometry.replace(
                 ids: versioned.map(\.id), sources: versioned.map(\.sourceID), measured: measuredHeights
-            ) { HeightEstimator.estimate(versioned[$0].kind, width: width, style: style) }
+            ) { index in
+                rememberedHeight(for: versioned[index])
+                    ?? HeightEstimator.estimate(versioned[index], width: width, style: style)
+            }
         }
         scheduleWork()
     }
@@ -282,7 +292,8 @@ final class TranscriptController {
             }
             newHeights.append(
                 heights[id] ?? (sameKind ? previous?.height : nil)
-                    ?? HeightEstimator.estimate(versioned[index].kind, width: width, style: style))
+                    ?? rememberedHeight(for: versioned[index])
+                    ?? HeightEstimator.estimate(versioned[index], width: width, style: style))
         }
         // Drop cached layouts for rows leaving the transcript so a reused ID
         // (such as `"working"` on the next turn) cannot collide at contentVersion 0.
@@ -437,20 +448,11 @@ final class TranscriptController {
         updateEndVisibility()
     }
 
-    /// The block row `index`'s wide body belongs to: the first chunk of a
-    /// split code block, else the row itself.
-    func wideBlockGroup(forRowAt index: Int) -> String {
-        var first = index
-        while first > 0, case .markdownBlock(.code, let position) = rows[first].kind, position.joinsAbove { first -= 1 }
-        return rows[first].id
-    }
-
     /// Resolves the clipboard text for a copy accessory action.
     func copyText(for action: RowAccessory.Action) -> String {
         switch action {
         case .copy(let text, _): text
         case .copyReply(let turnID): replyMarkdown(forTurnID: turnID)
-        case .copyChunkedCode(let rowID): fullCodeText(startingAtRowID: rowID)
         case .fork: ""
         }
     }
@@ -463,21 +465,6 @@ final class TranscriptController {
             .filter { $0.kind == .assistantMessage && !$0.text.isEmpty }
             .map(\.text)
             .joined(separator: "\n\n")
-    }
-
-    /// Lazily joins all consecutive chunks of a split code block starting at
-    /// `rowID` only when the user clicks Copy Code.
-    func fullCodeText(startingAtRowID rowID: String) -> String {
-        guard let start = geometry.index(for: rowID) else { return "" }
-        var parts: [String] = []
-        var index = start
-        while index < rows.count {
-            guard case .markdownBlock(.code(_, let code), let position) = rows[index].kind else { break }
-            parts.append(code)
-            if !position.joinsBelow { break }
-            index += 1
-        }
-        return parts.joined(separator: "\n")
     }
 
     /// Rule 2: viewport moves the controller causes, including the
@@ -507,13 +494,80 @@ final class TranscriptController {
         pendingRestorePlace = saved
     }
 
-    /// Saves the reader's position into the store's session cache on detach:
-    /// every way a chat leaves (another chat selected, a pop, its window
-    /// closing) takes its view out of the window. Never overwrites a saved
-    /// place while still hidden waiting for initial alignment.
+    /// Saves the reader's position and measured heights into the store's
+    /// session cache on detach: every way a chat leaves (another chat selected,
+    /// a pop, its window closing) takes its view out of the window. Never
+    /// overwrites a saved place while still hidden waiting for initial alignment.
     private func persistSavedPlace() {
-        guard let store, let threadID, !isAwaitingInitialEnd else { return }
+        guard let store, let threadID else { return }
+        if let snapshot = snapshotMeasuredHeights() {
+            store.setTranscriptMeasuredHeights(snapshot, for: threadID)
+        }
+        guard !isAwaitingInitialEnd else { return }
         store.setSavedTranscriptPlace(savedPlace(), for: threadID)
+    }
+
+    /// Remembered height for `row` when `(columnWidth, style.version)` matches.
+    func rememberedHeight(for row: TranscriptRow) -> CGFloat? {
+        if let height = measuredRowHeights[row.id] { return height }
+        guard let remembered = rememberedHeights, columnWidth > 0,
+            remembered.width == columnWidth, remembered.styleVersion == style.version
+        else { return nil }
+        if let height = remembered.rowHeights[row.id] { return height }
+        if case .pendingMessage = row.kind { return remembered.sourceHeights[row.sourceID] }
+        return nil
+    }
+
+    /// Seeds remembered heights onto already-loaded rows once the initial
+    /// column width is known (handles `start(store:threadID:)` running before
+    /// `attach(host)`).
+    func applyRememberedHeightsIfMatching() {
+        guard let remembered = rememberedHeights, columnWidth > 0,
+            remembered.width == columnWidth, remembered.styleVersion == style.version, !rows.isEmpty
+        else { return }
+        var updates: [String: CGFloat] = [:]
+        for row in rows where layouts[row.id] == nil && measuredRowHeights[row.id] == nil {
+            if let height = remembered.rowHeights[row.id] {
+                updates[row.id] = height
+            } else if case .pendingMessage = row.kind, let height = remembered.sourceHeights[row.sourceID] {
+                updates[row.id] = height
+            }
+        }
+        if !updates.isEmpty { setHeights(updates) }
+    }
+
+    /// Snapshots all measured row and message-source heights at the current
+    /// `(columnWidth, style.version)` for persistence on `ThreadSession`.
+    func snapshotMeasuredHeights() -> TranscriptMeasuredHeights? {
+        guard columnWidth > 0 else { return nil }
+        var rowHeights: [String: CGFloat] = [:]
+        var sourceHeights: [String: CGFloat] = [:]
+        if let remembered = rememberedHeights,
+            remembered.width == columnWidth, remembered.styleVersion == style.version
+        {
+            rowHeights = remembered.rowHeights
+            sourceHeights = remembered.sourceHeights
+        }
+        for (id, height) in measuredRowHeights { rowHeights[id] = height }
+        guard !rowHeights.isEmpty || !sourceHeights.isEmpty else { return nil }
+        // Sum measured heights per sourceID so unparsed `.pendingMessage` rows
+        // on the next open start with the exact total height of their blocks.
+        var totals: [String: (sum: CGFloat, complete: Bool)] = [:]
+        for row in rows {
+            if case .pendingMessage = row.kind { continue }
+            var entry = totals[row.sourceID] ?? (0, true)
+            if let height = rowHeights[row.id] {
+                entry.sum += height
+            } else {
+                entry.complete = false
+            }
+            totals[row.sourceID] = entry
+        }
+        for (sourceID, entry) in totals where entry.complete && entry.sum > 0 {
+            sourceHeights[sourceID] = entry.sum
+        }
+        return TranscriptMeasuredHeights(
+            width: columnWidth, styleVersion: style.version, rowHeights: rowHeights, sourceHeights: sourceHeights)
     }
 
     /// Where initial alignment wants the viewport: the restored saved place if

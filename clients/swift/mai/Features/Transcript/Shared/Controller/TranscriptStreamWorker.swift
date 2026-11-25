@@ -43,6 +43,8 @@ actor TranscriptStreamWorker {
         let textLength: Int
         let isFinished: Bool
         let blocks: [MarkdownBlock]
+        /// Precomputed text metrics per block (counted off-main).
+        let metrics: [TextMetrics]
         /// The width and style version the rows were laid out at.
         let width: CGFloat
         let styleVersion: Int
@@ -128,8 +130,11 @@ actor TranscriptStreamWorker {
                 width: update.width, styleVersion: update.style.version, stableCount: nextStable,
                 parserResetCount: parser.committedResetCount, rows: current)
         }
+        let metrics = blocks.indices.map { index in
+            TextMetrics(.markdownBlock(blocks[index], .of(index, in: blocks)))
+        }
         return Result(
             messageID: update.messageID, textLength: update.text.utf8.count, isFinished: update.isFinished,
-            blocks: blocks, width: update.width, styleVersion: update.style.version, rows: changed)
+            blocks: blocks, metrics: metrics, width: update.width, styleVersion: update.style.version, rows: changed)
     }
 }

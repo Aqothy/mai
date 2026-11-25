@@ -17,13 +17,15 @@ actor LayoutQueue {
     enum Work: Sendable {
         case layout(RowLayoutRequest)
         /// Parses a `.pendingMessage` entering the viewport window and, for
-        /// small messages, lays out its blocks in one worker task.
-        case parseAndLayout(messageID: String, source: String, width: CGFloat, style: TextStyle)
+        /// small messages, lays out its rows in one worker task.
+        case parseAndLayout(message: TranscriptMessage, source: String, width: CGFloat, style: TextStyle)
     }
 
     enum Result: Sendable {
         case layout(RowLayout)
-        case parsedAndLaidOut(messageID: String, source: String, blocks: [MarkdownBlock], layouts: [RowLayout])
+        case parsedAndLaidOut(
+            message: TranscriptMessage, source: String, blocks: [MarkdownBlock], metrics: [TextMetrics],
+            layouts: [RowLayout])
     }
 
     struct Job: Sendable {
@@ -89,20 +91,23 @@ actor LayoutQueue {
         switch work {
         case .layout(let request):
             return .layout(RowLayoutBuilder.layout(request))
-        case .parseAndLayout(let messageID, let source, let width, let style):
+        case .parseAndLayout(let message, let source, let width, let style):
             let blocks = MarkdownPlanner.blocks(from: source)
-            let chunkedRows = TranscriptRowChunker.assistantRows(messageID: messageID, blocks: blocks)
+            let rows = message.rows(from: blocks)
+            let metrics = rows.map(\.metrics)
             guard source.utf8.count <= eagerParseLayoutByteLimit,
-                chunkedRows.count <= eagerParseLayoutBlockLimit
+                rows.count <= eagerParseLayoutBlockLimit
             else {
-                return .parsedAndLaidOut(messageID: messageID, source: source, blocks: blocks, layouts: [])
+                return .parsedAndLaidOut(
+                    message: message, source: source, blocks: blocks, metrics: metrics, layouts: [])
             }
             let key = RowLayoutKey(contentVersion: 0, width: width, styleVersion: style.version)
-            let layouts = chunkedRows.map { row in
+            let layouts = rows.map { row in
                 RowLayoutBuilder.layout(
                     RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
             }
-            return .parsedAndLaidOut(messageID: messageID, source: source, blocks: blocks, layouts: layouts)
+            return .parsedAndLaidOut(
+                message: message, source: source, blocks: blocks, metrics: metrics, layouts: layouts)
         }
     }
 }
