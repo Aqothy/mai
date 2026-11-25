@@ -1,31 +1,6 @@
-import SwiftUI
+import Foundation
 
-/// The "agent is working" row: a sparkle and a whimsical verb. The verb
-/// advances only when the agent starts something new (`activityKey` changes,
-/// e.g. a fresh tool call or message row); a long-lived phrase is fine.
-struct ChatWorkingIndicator: View {
-    var activityKey: String?
-
-    @State private var phrase = ChatWorkingPhrases.next(after: nil)
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkle")
-                .font(.caption)
-
-            Text(phrase)
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Agent working")
-        .onChange(of: activityKey) { _, _ in
-            phrase = ChatWorkingPhrases.next(after: phrase)
-        }
-    }
-}
-
+/// Rotating whimsical verbs shown on the running turn's working row.
 enum ChatWorkingPhrases {
     static func next(after current: String?) -> String {
         var phrase = all.randomElement() ?? "Working…"
@@ -130,10 +105,3 @@ enum ChatWorkingPhrases {
         "Cherry-picking the commits…",
     ]
 }
-
-#if DEBUG
-    #Preview("Working Indicator") {
-        ChatWorkingIndicator()
-            .padding()
-    }
-#endif

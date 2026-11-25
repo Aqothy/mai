@@ -19,14 +19,7 @@ struct ThreadSession {
     }
 
     var detail: ThreadDetail?
-    /// Presentation caches survive short navigation round trips and are
-    /// discarded when subscription maintenance evicts this session.
-    var markdownSegmentCache = ChatMarkdownSegmentCache()
-    var textLayoutStore = ChatTextLayoutStore()
-    /// Incremental section projection for the chat timeline. Every turn
-    /// change below invalidates it; the chat projects lazily in `body`.
-    var timelineProjection = ChatTimelineProjection()
-    /// Saved reading place for the new transcript engine for this app run;
+    /// Saved reading place for the transcript for this app run;
     /// nil when following the end and removed when the thread is deleted.
     var savedTranscriptPlace: TranscriptSavedPlace?
     /// Remembered measured row heights keyed by `(columnWidth, styleVersion)`
@@ -59,16 +52,6 @@ struct ThreadSession {
         guard detail != nil else { return EventApplication() }
         let wasProtected = isProtected
         let change = detail?.apply(event) ?? .none
-        switch change {
-        case .turns(let index):
-            timelineProjection.invalidate(fromTurn: index)
-        case .text(let turnID, _, _):
-            if let index = detail?.turns.lastIndex(where: { $0.id == turnID }) {
-                timelineProjection.invalidate(fromTurn: index)
-            }
-        case .none, .thread, .refresh, .removed:
-            break
-        }
         return EventApplication(change: change, protectionChanged: isProtected != wasProtected)
     }
 }

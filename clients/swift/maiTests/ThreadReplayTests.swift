@@ -20,8 +20,17 @@ struct ThreadReplayTests {
         #expect(answer.entries.map(\.itemKind) == [.envelope, .userMessage, .reasoning, .assistantMessage])
         #expect(answer.entries.first?.envelopeKind == .handoff)
         #expect(answer.entries.last?.text == "ok two")
-        let rows = ChatTimelineLayout.rows(sections: ChatTimelineLayout.sections(turns: live.turns), expandedSectionIDs: [])
-        #expect(rows.filter { if case .handoff = $0 { true } else { false } }.count == 1)
+        let rows = TranscriptBuilder(blocks: { _, _ in nil }, expandedTurnIDs: [], workingPhrase: "Working…")
+            .rows(for: live.turns.map(TranscriptTurn.init))
+        #expect(
+            rows.filter {
+                if case .notice(title: "Continued from an earlier conversation", _) = $0.kind {
+                    true
+                } else {
+                    false
+                }
+            }.count == 1
+        )
     }
 
     @Test @MainActor

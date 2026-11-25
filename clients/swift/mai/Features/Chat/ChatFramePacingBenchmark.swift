@@ -468,12 +468,10 @@ final class ChatBenchmarkModel {
                 }
             }
             window.setContentSize(startSize)
-            if TranscriptEngine.isNewEngineEnabled {
-                ChatBenchmarkAutoRun.trace(
-                    "resize reflow staleFrames=\(staleFrames) of \(frames) longestStaleRun=\(longestStaleRun)"
-                        + " laggingFrames=\(laggingFrames) longestLagRun=\(longestLagRun)"
-                        + " meanLag=\(Int(lagSum / CGFloat(max(1, frames))))")
-            }
+            ChatBenchmarkAutoRun.trace(
+                "resize reflow staleFrames=\(staleFrames) of \(frames) longestStaleRun=\(longestStaleRun)"
+                    + " laggingFrames=\(laggingFrames) longestLagRun=\(longestLagRun)"
+                    + " meanLag=\(Int(lagSum / CGFloat(max(1, frames))))")
             if encounteredOcclusion { Self.note("invalid measurement: visible=false during resize") }
             return finish(monitor, label: label)
         }
@@ -564,9 +562,7 @@ final class ChatBenchmarkModel {
         label: String
     ) -> ChatFramePacingReport? {
         guard var report = monitor.stop(label: label) else { return nil }
-        if TranscriptEngine.isNewEngineEnabled {
-            report.misplacedRows = TranscriptDebugCounters.misplacedRows - misplacedRowsAtStart
-        }
+        report.misplacedRows = TranscriptDebugCounters.misplacedRows - misplacedRowsAtStart
         Self.logger.notice("\(report.summary, privacy: .public)")
         Self.logger.notice(
             "CHAT_BENCHMARK_RESULT \(report.machineReadable, privacy: .public)"

@@ -42,12 +42,6 @@ struct MaiApp: App {
                 guard !usesSyntheticBenchmarkStore else { return }
                 await connection.start()
             }
-            .task(priority: .utility) {
-                // Only warm highlight.js/JSC for the legacy transcript; the new
-                // engine renders plain code until the replacement highlighter lands.
-                guard !TranscriptEngine.isNewEngineEnabled else { return }
-                await ChatCodeHighlighter.shared.warmUp()
-            }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     guard !usesSyntheticBenchmarkStore else { return }

@@ -291,7 +291,7 @@ private struct ChatMessageOtherAttachmentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let destination = ChatMarkdownLinkPolicy.url(for: attachment.uri) {
+            if let destination = TranscriptLinkPolicy.url(for: attachment.uri) {
                 Link(destination: destination) {
                     ChatMessageAttachmentLabel(attachment: attachment)
                 }

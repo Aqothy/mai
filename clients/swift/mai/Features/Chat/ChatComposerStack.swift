@@ -34,6 +34,16 @@ struct ChatComposerStack: View {
                 ChatHoldView(model: chatModel, hold: hold)
             }
 
+            if let threadID = state.threadID, !state.openRequests.isEmpty {
+                ForEach(state.openRequests) { request in
+                    ChatRequestRow(request: request, threadID: threadID, store: store)
+                        .id("\(threadID)|\(request.id)")
+                        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                }
+            }
+
             if chatModel != nil, state.exists, !state.acceptsInput {
                 Label("The agent that started this subagent directs it.", systemImage: "person.2")
                     .font(.callout)
@@ -172,6 +182,7 @@ struct ChatComposerStack: View {
 /// turns uniquely owned while text streams into the running one.
 private struct ChatComposerThreadState {
     let exists: Bool
+    let threadID: String?
     /// A native subagent its provider gives no input to only shows what its
     /// parent agent has it do.
     let acceptsInput: Bool
@@ -181,9 +192,11 @@ private struct ChatComposerThreadState {
     let slashCommands: [SlashCommand]
     let skills: [Skill]
     let hasQueue: Bool
+    let openRequests: [ChatRequest]
 
     init(thread: ThreadDetail?) {
         exists = thread != nil
+        threadID = thread?.id
         acceptsInput = thread?.summary.origin.acceptsInput == true
         isRunning = thread?.status == .running
         hold = thread?.summary.holdReason
@@ -191,6 +204,7 @@ private struct ChatComposerThreadState {
         slashCommands = participant?.commands ?? []
         skills = participant?.skills ?? []
         hasQueue = thread?.queue.isEmpty == false
+        openRequests = (thread?.requests ?? []).map(ChatRequest.init(open:))
     }
 }
 

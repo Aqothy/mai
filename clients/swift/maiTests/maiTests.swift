@@ -192,27 +192,15 @@ struct ThreadStoreTests {
         store.selectThread("thread-0")
         await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
 
-        weak var originalSegments: ChatMarkdownSegmentCache?
-        weak var originalLayouts: ChatTextLayoutStore?
-        weak var preparedLayout: ChatTextLayout?
-        do {
-            let segments = try #require(store.selectedThreadMarkdownSegmentCache)
-            let layouts = try #require(store.selectedThreadTextLayoutStore)
-            originalSegments = segments
-            originalLayouts = layouts
-            preparedLayout = layouts.layout(
-                id: "reply", content: .source("A retained **rich** reply."), width: 320)
-            _ = segments.segments(messageID: "reply", source: "A retained **rich** reply.")
-        }
-        #expect(originalSegments?.entryCount == 1)
-        #expect(preparedLayout != nil)
+        let measured = TranscriptMeasuredHeights(
+            width: 320, styleVersion: 1, rowHeights: ["reply": 84], sourceHeights: ["reply": 84])
+        store.setTranscriptMeasuredHeights(measured, for: "thread-0")
+        #expect(store.transcriptMeasuredHeights(for: "thread-0") == measured)
 
         store.selectThread("thread-1")
         await waitUntil { store.subscribedThreadIDs.contains("thread-1") }
         store.selectThread("thread-0")
-        #expect(store.selectedThreadMarkdownSegmentCache === originalSegments)
-        #expect(store.selectedThreadTextLayoutStore === originalLayouts)
-        #expect(preparedLayout != nil)
+        #expect(store.transcriptMeasuredHeights(for: "thread-0") == measured)
 
         for threadID in threadIDs.dropFirst() {
             store.selectThread(threadID)
@@ -224,9 +212,7 @@ struct ThreadStoreTests {
         #expect(store.inactiveSubscribedThreadIDs == Set(threadIDs[1...5]))
         #expect(store.subscribedThreadIDs == Set(threadIDs[1...6]))
         #expect(store.cachedThreadIDs == Set(threadIDs[1...6]))
-        #expect(originalSegments == nil)
-        #expect(originalLayouts == nil)
-        #expect(preparedLayout == nil)
+        #expect(store.transcriptMeasuredHeights(for: "thread-0") == nil)
 
         // Reopening loads it rather than showing what went stale.
         let subscriptionCount = rpc.subscriptionCount(for: "thread-0")
@@ -235,8 +221,7 @@ struct ThreadStoreTests {
         await waitUntil { rpc.subscriptionCount(for: "thread-0") == subscriptionCount + 1 }
         await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
         #expect(store.selectedThread?.id == "thread-0")
-        let freshSegments = try #require(store.selectedThreadMarkdownSegmentCache)
-        #expect(freshSegments.entryCount == 0)
+        #expect(store.transcriptMeasuredHeights(for: "thread-0") == nil)
     }
 
     /// A chat is caught up with its agent's session before it shows, and

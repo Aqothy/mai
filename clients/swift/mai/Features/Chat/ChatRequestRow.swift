@@ -46,19 +46,10 @@ struct ChatRequestRow: View {
                 .font(.callout)
             }
 
-            if request.isOpen {
-                ChatRequestForm(model: model)
-                    // Answered here or by another client; the agent hasn't
-                    // taken the answer yet.
-                    .disabled(request.actionID != nil)
-            } else {
-                ForEach(model.submittedAnswers(request.answers ?? [:])) { answer in
-                    LabeledContent(answer.title, value: answer.answer)
-                }
-                Text(resolutionLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            ChatRequestForm(model: model)
+                // Answered here or by another client; the agent hasn't
+                // taken the answer yet.
+                .disabled(request.actionID != nil)
 
             if let errorMessage = model.errorMessage {
                 Text(errorMessage)
@@ -73,19 +64,5 @@ struct ChatRequestRow: View {
 
     private var asksQuestions: Bool {
         !(request.ask.questions ?? []).isEmpty || request.ask.url != nil
-    }
-
-    /// What was chosen, named after the action unless it accepted by
-    /// submitting answers or opening a link; a request that ended without a
-    /// choice was cancelled.
-    private var resolutionLabel: String {
-        guard let actionID = request.actionID,
-            let action = request.ask.actions.first(where: { $0.id == actionID })
-        else { return String(localized: "Cancelled") }
-        if action.approvalDecision == .accept {
-            if action.submit == true { return String(localized: "Answered") }
-            if request.ask.url != nil { return String(localized: "Link opened") }
-        }
-        return action.label
     }
 }

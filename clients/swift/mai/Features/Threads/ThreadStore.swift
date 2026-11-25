@@ -61,33 +61,6 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.detail
     }
 
-    var selectedThreadMarkdownSegmentCache: ChatMarkdownSegmentCache? {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return nil }
-        return sessionsByID[selectedThreadID]?.markdownSegmentCache
-    }
-
-    var selectedThreadTextLayoutStore: ChatTextLayoutStore? {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return nil }
-        return sessionsByID[selectedThreadID]?.textLayoutStore
-    }
-
-    var selectedThreadTimelineProjection: ChatTimelineProjection? {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return nil }
-        return sessionsByID[selectedThreadID]?.timelineProjection
-    }
-
-    func resetSelectedThreadTextLayoutStore() {
-        guard let selectedThreadID,
-            var session = sessionsByID[selectedThreadID]
-        else { return }
-        session.textLayoutStore = ChatTextLayoutStore()
-        sessionsByID[selectedThreadID] = session
-        noteSelectedSessionChanged(selectedThreadID)
-    }
-
     func savedTranscriptPlace(for threadID: String) -> TranscriptSavedPlace? {
         sessionsByID[threadID]?.savedTranscriptPlace
     }
@@ -135,11 +108,6 @@ final class ThreadStore {
     @ObservationIgnored private var isLoadingRegistryList = false
     @ObservationIgnored private var bufferedRegistryList: ACPRegistryList?
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
-    /// Whole entries read on demand, by thread and row ID, with the entry
-    /// revision they were read at.
-    private var entryDetailsByID: [EntryDetailID: CachedEntryDetail] = [:]
-    /// Counts each entry's events, so a detail read during one isn't kept.
-    @ObservationIgnored private var entryRevisions: [EntryDetailID: Int] = [:]
     @ObservationIgnored private var refreshingProviderIDs: Set<String> = []
     private var maintenanceTask: Task<Void, Never>?
 
@@ -846,34 +814,12 @@ final class ThreadStore {
             let page = try await rpc.threadTurns(ThreadTurnsParams(before: older, limit: nil, thread: threadID))
             guard sessionsByID[threadID]?.detail?.older == older else { return }
             sessionsByID[threadID]?.detail?.prepend(page)
-            sessionsByID[threadID]?.timelineProjection.invalidateAll()
             noteSelectedSessionChanged(threadID)
         } catch is CancellationError {
             return
         } catch {
             if selectedThreadID == threadID {
                 selectedThreadLoadErrorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    /// An entry whole: a tool's full input and output, a handoff's text.
-    func entryDetail(threadID: String, item: ChatItem) async throws -> Entry {
-        let id = EntryDetailID(threadID: threadID, rowID: item.id)
-        while true {
-            let revision = entryRevisions[id, default: 0]
-            if let cached = entryDetailsByID[id], cached.revision == revision {
-                return cached.entry
-            }
-            let entry = try await rpc.threadEntry(ThreadEntryParams(ref: item.ref, thread: threadID))
-            guard entry.ref == item.ref else {
-                throw ThreadStoreError.invalidEntryDetail
-            }
-            // Entry events and RPC responses are independent writes: an
-            // event during the read may be newer than what it returned.
-            if entryRevisions[id, default: 0] == revision {
-                entryDetailsByID[id] = CachedEntryDetail(entry: entry, revision: revision)
-                return entry
             }
         }
     }
@@ -1270,10 +1216,8 @@ final class ThreadStore {
         // Unwatched, its content goes stale: reopening it waits for the
         // daemon's caught-up snapshot rather than showing it first.
         session.detail = nil
-        session.markdownSegmentCache = ChatMarkdownSegmentCache()
-        session.textLayoutStore = ChatTextLayoutStore()
+        session.transcriptMeasuredHeights = nil
         sessionsByID[id] = session
-        removeEntryDetails(for: id)
         streamingTextByThreadID[id] = nil
 
         guard connectionState == .connected else { return }
@@ -1304,11 +1248,6 @@ final class ThreadStore {
     private func finishSubscriptionTask(_ id: String, operationID: UUID) {
         guard subscriptionTasks[id]?.id == operationID else { return }
         subscriptionTasks[id] = nil
-    }
-
-    private func removeEntryDetails(for threadID: String) {
-        entryDetailsByID = entryDetailsByID.filter { $0.key.threadID != threadID }
-        entryRevisions = entryRevisions.filter { $0.key.threadID != threadID }
     }
 
     private func scheduleMaintenance() {
@@ -1387,11 +1326,8 @@ final class ThreadStore {
         session: inout ThreadSession
     ) {
         let threadID = snapshot.thread.id
-        removeEntryDetails(for: threadID)
         streamingTextByThreadID[threadID] = nil
         session.detail = ThreadDetail(snapshot)
-        // The turns were replaced, not appended to.
-        session.timelineProjection.invalidateAll()
     }
 
     #if DEBUG
@@ -1435,7 +1371,6 @@ final class ThreadStore {
             if let turn = event.turn, let entry = event.entry {
                 let rowID = "\(turn.id)|\(entry.ref)"
                 streamingTextByThreadID[threadID]?[rowID] = nil
-                entryRevisions[EntryDetailID(threadID: threadID, rowID: rowID), default: 0] += 1
             }
             if event.turn?.turnState?.isSettled == true {
                 streamingTextByThreadID[threadID] = nil
@@ -1459,7 +1394,6 @@ final class ThreadStore {
     private func removeThread(_ threadID: String) {
         sessionsByID[threadID] = nil
         streamingTextByThreadID[threadID] = nil
-        removeEntryDetails(for: threadID)
         if selectedThreadID == threadID {
             selectedThreadID = nil
             selectedThreadLoadErrorMessage = nil
@@ -1611,25 +1545,12 @@ final class ThreadStore {
 
     private enum ThreadStoreError: LocalizedError {
         case invalidSnapshot
-        case invalidEntryDetail
 
         var errorDescription: String? {
             switch self {
             case .invalidSnapshot:
                 "maiD returned an invalid authoritative thread snapshot"
-            case .invalidEntryDetail:
-                "maiD returned an invalid entry"
             }
         }
     }
-}
-
-private struct EntryDetailID: Hashable {
-    let threadID: String
-    let rowID: String
-}
-
-private struct CachedEntryDetail {
-    let entry: Entry
-    let revision: Int
 }
