@@ -214,47 +214,31 @@
 
         override func keyDown(with event: NSEvent) {
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let hasCommand = modifiers.contains(.command)
-            let hasControlOrOption = modifiers.contains(.control) || modifiers.contains(.option)
-            guard !hasControlOrOption else {
-                super.keyDown(with: event)
+            if !modifiers.contains(.command), !modifiers.contains(.control), !modifiers.contains(.option),
+                event.charactersIgnoringModifiers == " "
+            {
+                scrollBy(deltaY: pageScrollDistance * (modifiers.contains(.shift) ? -1 : 1))
                 return
             }
-            if let specialKey = event.specialKey {
-                switch specialKey {
-                case .upArrow:
-                    if hasCommand { scrollToTop() } else { scrollBy(deltaY: -40) }
-                    return
-                case .downArrow:
-                    if hasCommand { controller.jumpToEnd(animated: false) } else { scrollBy(deltaY: 40) }
-                    return
-                case .pageUp where !hasCommand:
-                    scrollBy(deltaY: -pageScrollDistance)
-                    return
-                case .pageDown where !hasCommand:
-                    scrollBy(deltaY: pageScrollDistance)
-                    return
-                case .home where !hasCommand:
-                    scrollToTop()
-                    return
-                case .end where !hasCommand:
-                    controller.jumpToEnd(animated: false)
-                    return
-                default:
-                    break
-                }
-            }
-            switch event.charactersIgnoringModifiers {
-            case "\u{1B}" where !hasCommand:  // Escape
-                if controller.selection != nil {
-                    controller.setSelection(nil)
-                } else {
-                    super.keyDown(with: event)
-                }
-            case " " where !hasCommand:
-                scrollBy(deltaY: pageScrollDistance * (modifiers.contains(.shift) ? -1 : 1))
-            default:
-                super.keyDown(with: event)
+            interpretKeyEvents([event])
+        }
+
+        override func moveUp(_ sender: Any?) { scrollBy(deltaY: -40) }
+        override func moveDown(_ sender: Any?) { scrollBy(deltaY: 40) }
+        override func pageUp(_ sender: Any?) { scrollBy(deltaY: -pageScrollDistance) }
+        override func pageDown(_ sender: Any?) { scrollBy(deltaY: pageScrollDistance) }
+        override func scrollPageUp(_ sender: Any?) { scrollBy(deltaY: -pageScrollDistance) }
+        override func scrollPageDown(_ sender: Any?) { scrollBy(deltaY: pageScrollDistance) }
+        override func scrollToBeginningOfDocument(_ sender: Any?) { scrollToTop() }
+        override func scrollToEndOfDocument(_ sender: Any?) { controller.jumpToEnd(animated: false) }
+        override func moveToBeginningOfDocument(_ sender: Any?) { scrollToTop() }
+        override func moveToEndOfDocument(_ sender: Any?) { controller.jumpToEnd(animated: false) }
+
+        override func cancelOperation(_ sender: Any?) {
+            if controller.selection != nil {
+                controller.setSelection(nil)
+            } else {
+                nextResponder?.tryToPerform(#selector(cancelOperation(_:)), with: sender)
             }
         }
 
