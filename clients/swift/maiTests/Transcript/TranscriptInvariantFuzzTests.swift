@@ -322,8 +322,9 @@ nonisolated struct TranscriptInvariantFuzzTests {
     // MARK: Pathological Markdown
 
     /// cmark's pathological inputs parse in linear time: four times the
-    /// input takes well under sixteen times as long.
-    @Test(arguments: [
+    /// input takes well under sixteen times as long. Serialized: cases timed
+    /// in parallel skew each other's ratios past the bound.
+    @Test(.serialized, arguments: [
         "nested strong emph", "emph closers", "emph openers", "link closers", "link openers", "mismatched",
         "multiple of 3", "link openers emph closers", "[ (](", "![[]()", "nested brackets", "backticks",
         "unclosed links A", "unclosed links B", "unclosed <!--", "many references", "table cells", "autolinks",

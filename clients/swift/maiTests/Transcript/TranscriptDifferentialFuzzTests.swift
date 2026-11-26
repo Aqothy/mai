@@ -44,7 +44,12 @@ nonisolated struct TranscriptDifferentialFuzzTests {
             let width = CGFloat(rng.int(in: 180..<760))
             let worker = TranscriptStreamWorker()
             var shown: [Int: RowLayout] = [:]
-            let maxStep = max(16, document.utf8.count / rng.int(in: 8..<20))
+            let maxStep =
+                if document.utf8.count < 2_000 {
+                    rng.pick([3, 16, 40])
+                } else {
+                    max(16, document.utf8.count / rng.int(in: 8..<20))
+                }
             let cuts = TranscriptFuzz.prefixes(of: document, &rng, maxStep: maxStep)
             for (step, text) in cuts.enumerated() {
                 let isFinished = step == cuts.count - 1
