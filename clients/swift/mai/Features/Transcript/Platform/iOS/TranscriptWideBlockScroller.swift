@@ -49,8 +49,10 @@
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateHorizontalTilesIfNeeded()
-            onHorizontalScroll?()
-            if !isSettingOffset { onReaderScroll?(self) }
+            if !isSettingOffset {
+                onHorizontalScroll?()
+                onReaderScroll?(self)
+            }
         }
 
         /// Scrolls to `x` (clamped to the content) without reporting it.
@@ -67,7 +69,7 @@
         func show(
             rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval = 0
+            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID

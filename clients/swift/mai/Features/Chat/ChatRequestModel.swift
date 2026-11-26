@@ -125,29 +125,6 @@ final class ChatRequestModel {
         )
     }
 
-    /// One submitted answer as shown once the question is resolved.
-    struct SubmittedAnswer: Identifiable {
-        let id: String
-        let title: String
-        let answer: String
-    }
-
-    /// Submitted answers in question order, each with its question's title and
-    /// the chosen options' labels (typed answers as written).
-    func submittedAnswers(_ answers: [String: [String]]) -> [SubmittedAnswer] {
-        questions.compactMap { question in
-            guard let values = answers[question.id], !values.isEmpty else { return nil }
-            let labels = values.map { value in
-                question.options?.first { $0.value == value }?.label ?? value
-            }
-            return SubmittedAnswer(
-                id: question.id,
-                title: question.title ?? question.id,
-                answer: labels.formatted(.list(type: .and))
-            )
-        }
-    }
-
     /// Sends the action, with the answers when it submits them. Reports
     /// whether it was sent. Once sent, the request takes no other answer.
     @discardableResult

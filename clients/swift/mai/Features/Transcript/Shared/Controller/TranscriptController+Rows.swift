@@ -105,6 +105,7 @@ extension TranscriptController {
         let builder = TranscriptBuilder(
             blocks: { [self] messageID, source in blocks(forMessage: messageID, source: source) },
             metrics: { [self] messageID in streams[messageID]?.metrics ?? parsedMessages[messageID]?.metrics },
+            hasStreamedBlocks: { [self] messageID in streams[messageID]?.blocks.isEmpty == false },
             expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase, plan: plan)
         guard !rows.isEmpty else {
             setRows(builder.rows(for: turns))
@@ -162,16 +163,18 @@ extension TranscriptController {
 
     // MARK: Streaming
 
-    /// Assistant messages of the running turn stream; a message whose turn
-    /// ended gets one final parse.
+    /// Assistant messages and reasoning entries of the running turn stream;
+    /// a message whose turn ended gets one final parse.
     private func updateStreams() {
         guard let store, let threadID else { return }
         var live: Set<String> = []
         for turn in turns where turn.isRunning {
-            for entry in turn.entries where entry.kind == .assistantMessage {
+            for entry in turn.entries where entry.kind == .assistantMessage || entry.kind == .reasoning {
+                let kind: TranscriptMessage.Kind = entry.kind == .reasoning ? .thought : .assistant
                 let messageID = "\(turn.id)|\(entry.ref)"
                 live.insert(messageID)
-                var stream = streams[messageID] ?? TranscriptStream(text: nil, entryText: entry.text)
+                var stream = streams[messageID] ?? TranscriptStream(kind: kind, text: nil, entryText: entry.text)
+                stream.kind = kind
                 stream.text = store.streamingText(threadID: threadID, rowID: messageID)
                 stream.entryText = entry.text
                 streams[messageID] = stream
@@ -221,12 +224,12 @@ extension TranscriptController {
             stream.isInFlight = true
             streams[messageID] = stream
             let drawing = palette.map { palette in
-                TranscriptStreamWorker.Drawing(
+                DrawnBands.Drawing(
                     palette: palette, scale: host?.scale ?? 2, colorSpace: host?.colorSpace ?? RowLayer.colorSpace)
             }
             let update = TranscriptStreamWorker.Update(
-                messageID: messageID, text: released, isFinished: stream.isFinishing, width: columnWidth, style: style,
-                codeColors: [:], isDark: palette?.isDark, drawing: drawing)
+                messageID: messageID, kind: stream.kind, text: released, isFinished: stream.isFinishing,
+                width: columnWidth, style: style, codeColors: [:], isDark: palette?.isDark, drawing: drawing)
             let worker = streamWorker
             Task { [weak self] in
                 let result = await worker.run(update)
@@ -265,23 +268,28 @@ extension TranscriptController {
     /// when blocks were added.
     private func applyStreamRows(_ result: TranscriptStreamWorker.Result) {
         let messageID = result.messageID
+        let parts = messageID.split(separator: "|", maxSplits: 1)
+        let parsedTurnID = parts.first.map(String.init) ?? ""
+        let parsedRef = parts.count > 1 ? String(parts[1]) : messageID
+        let message = TranscriptMessage(kind: result.kind, turnID: parsedTurnID, ref: parsedRef)
+        let firstID = message.parsedRowID(at: 0)
         // The message's rows are contiguous from its first block.
         var existing: [Int] = []
-        if let first = geometry.index(for: "\(messageID)#0") {
+        if let first = geometry.index(for: firstID) {
             var index = first
-            while index < rows.count, rows[index].sourceID == messageID, rows[index].role == .assistant {
+            while index < rows.count, rows[index].sourceID == messageID, rows[index].role == message.role {
                 existing.append(index)
                 index += 1
             }
         }
-        let turnID = existing.first.flatMap { rows[$0].turnID } ?? messageID.split(separator: "|", maxSplits: 1).first.map(String.init)
-        let kinds = TranscriptBlockFlattener.kinds(for: result.blocks, kind: .assistant)
+        let turnID = existing.first.flatMap { rows[$0].turnID } ?? (parsedTurnID.isEmpty ? nil : parsedTurnID)
+        let kinds = TranscriptBlockFlattener.kinds(for: result.blocks, kind: result.kind)
         let newRows = kinds.enumerated().map { index, kind in
             let rowMetrics = index < result.metrics.count ? result.metrics[index] : nil
             return TranscriptRow(
-                id: "\(messageID)#\(index)", sourceID: messageID,
+                id: message.parsedRowID(at: index), sourceID: messageID,
                 kind: kind,
-                messageID: messageID, role: .assistant, turnID: turnID, metrics: rowMetrics)
+                messageID: message.messageID, role: message.role, turnID: turnID, metrics: rowMetrics)
         }
         let selectionFollows = selectionEnd(atEndOf: existing)
         let selectionTouchesStream: Bool = {
@@ -324,6 +332,7 @@ extension TranscriptController {
             if let drawn = row.drawn { preDrawnBands[id] = (layout, drawn) }
         }
         if isAwaitingInitialEnd { alignInitialEndIfPossible() }
+        var selectionGrew = false
         if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),
             let length = selectableLength(ofRowAt: index), var selection
         {
@@ -332,9 +341,10 @@ extension TranscriptController {
             let end = TextPosition(rowID: last.id, offset: length)
             if selectionFollows == .anchor { selection.anchor = end } else { selection.focus = end }
             self.selection = selection
-            host?.setNeedsSelectionDisplay()
+            selectionGrew = true
         }
         if selectionTouchesStream { host?.selectedTextDidChange() }
+        if selectionGrew { host?.setNeedsSelectionDisplay() }
         host?.setNeedsRowPlacement()
     }
 

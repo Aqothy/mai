@@ -184,49 +184,59 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             if let data = try? JSONSerialization.data(withJSONObject: payload) {
                 let target = baseURL.appending(path: file)
                 if (try? data.write(to: target)) != nil {
-                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(target.path) bytes=\(data.count) turns=\(turns.count)")
+                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(target.path()) bytes=\(data.count) turns=\(turns.count)")
                 } else {
                     let fallback = FileManager.default.temporaryDirectory.appending(path: file)
                     try? data.write(to: fallback)
-                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(fallback.path) bytes=\(data.count) turns=\(turns.count)")
+                    ChatBenchmarkAutoRun.trace("exported \(file) path=\(fallback.path()) bytes=\(data.count) turns=\(turns.count)")
                 }
             }
         }
     }
 
+    private func measureOpenCheckpoint(
+        threadID: String, label: String, buildMs: Double, extra: [String: Any] = [:]
+    ) async -> Bool {
+        ChatBenchmarkAutoRun.isTranscriptWarm = false
+        ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
+        let started = ContinuousClock.now
+        selectThread(threadID)
+
+        guard await waitUntilAligned(timeoutSeconds: 30) else {
+            ChatBenchmarkAutoRun.trace("invalid measurement: \(label) initial alignment timed out")
+            return false
+        }
+        let visibleMs = Self.milliseconds(started.duration(to: .now))
+        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
+        let settledMs = Self.milliseconds(started.duration(to: .now))
+        let memory = ChatBenchmarkModel.processMemoryMB()
+        var payload: [String: Any] = [
+            "label": label,
+            "measurementKind": "openCheckpoint",
+            "visibleMilliseconds": visibleMs,
+            "settledMilliseconds": settledMs,
+            "threadBuildMilliseconds": buildMs,
+            "footprintMB": memory.footprint,
+            "peakFootprintMB": memory.peakFootprint,
+            "residentMB": memory.resident,
+            "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+            "visible": isAppWindowVisible,
+        ]
+        for (key, value) in extra { payload[key] = value }
+        emitJSON(payload)
+        return true
+    }
+
     /// Measures time to visible, footprint, scrolling frame pacing, and live
-    /// resize on the 4 giant single-block fixtures (Phase 2 Step 1).
+    /// resize on the giant single-block fixtures.
     private func runGiantSuite() async {
         for (name, detail) in ChatSyntheticBenchmarkThread.giantFixtureThreads() {
             let buildStarted = ContinuousClock.now
             store.insertSyntheticBenchmarkThread(detail)
             let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
-
-            ChatBenchmarkAutoRun.isTranscriptWarm = false
-            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-            let started = ContinuousClock.now
-            selectThread(detail.id)
-
-            guard await waitUntilAligned(timeoutSeconds: 30) else {
-                ChatBenchmarkAutoRun.trace("invalid measurement: open-\(name) initial alignment timed out")
+            guard await measureOpenCheckpoint(threadID: detail.id, label: "open-\(name)", buildMs: buildMs) else {
                 return
             }
-            let visibleMs = Self.milliseconds(started.duration(to: .now))
-            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
-            let settledMs = Self.milliseconds(started.duration(to: .now))
-            let memory = ChatBenchmarkModel.processMemoryMB()
-            emitJSON([
-                "label": "open-\(name)",
-                "measurementKind": "openCheckpoint",
-                "visibleMilliseconds": visibleMs,
-                "settledMilliseconds": settledMs,
-                "threadBuildMilliseconds": buildMs,
-                "footprintMB": memory.footprint,
-                "peakFootprintMB": memory.peakFootprint,
-                "residentMB": memory.resident,
-                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                "visible": isAppWindowVisible,
-            ])
 
             try? await Task.sleep(for: .milliseconds(32))
             _ = await benchmark.runScrollBenchmark(
@@ -250,32 +260,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         let detail = ChatSyntheticBenchmarkThread.extremeMegaThread()
         store.insertSyntheticBenchmarkThread(detail)
         let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
-
-        ChatBenchmarkAutoRun.isTranscriptWarm = false
-        ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-        let started = ContinuousClock.now
-        selectThread(detail.id)
-
-        guard await waitUntilAligned(timeoutSeconds: 30) else {
-            ChatBenchmarkAutoRun.trace("invalid measurement: open-extreme-20mb initial alignment timed out")
+        guard await measureOpenCheckpoint(threadID: detail.id, label: "open-extreme-20mb", buildMs: buildMs) else {
             return
         }
-        let visibleMs = Self.milliseconds(started.duration(to: .now))
-        await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
-        let settledMs = Self.milliseconds(started.duration(to: .now))
-        let memory = ChatBenchmarkModel.processMemoryMB()
-        emitJSON([
-            "label": "open-extreme-20mb",
-            "measurementKind": "openCheckpoint",
-            "visibleMilliseconds": visibleMs,
-            "settledMilliseconds": settledMs,
-            "threadBuildMilliseconds": buildMs,
-            "footprintMB": memory.footprint,
-            "peakFootprintMB": memory.peakFootprint,
-            "residentMB": memory.resident,
-            "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-            "visible": isAppWindowVisible,
-        ])
 
         try? await Task.sleep(for: .milliseconds(32))
         _ = await benchmark.runScrollBenchmark(
@@ -338,33 +325,10 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turnCount, identity: identity)
             store.insertSyntheticBenchmarkThread(thread)
             let buildMs = Self.milliseconds(buildStarted.duration(to: .now))
-
-            ChatBenchmarkAutoRun.isTranscriptWarm = false
-            ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-            let started = ContinuousClock.now
-            selectThread(identity)
-
-            guard await waitUntilAligned(timeoutSeconds: 30) else {
-                ChatBenchmarkAutoRun.trace("invalid measurement: open-\(step) initial alignment timed out")
-                return nil
-            }
-            let visibleMs = Self.milliseconds(started.duration(to: .now))
-            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 60)
-            let settledMs = Self.milliseconds(started.duration(to: .now))
-            let memory = ChatBenchmarkModel.processMemoryMB()
-            emitJSON([
-                "label": "open-\(step)",
-                "measurementKind": "openCheckpoint",
-                "loadedChats": step + 1,
-                "visibleMilliseconds": visibleMs,
-                "settledMilliseconds": settledMs,
-                "threadBuildMilliseconds": buildMs,
-                "footprintMB": memory.footprint,
-                "peakFootprintMB": memory.peakFootprint,
-                "residentMB": memory.resident,
-                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
-                "visible": isAppWindowVisible,
-            ])
+            guard
+                await measureOpenCheckpoint(
+                    threadID: identity, label: "open-\(step)", buildMs: buildMs, extra: ["loadedChats": step + 1])
+            else { return nil }
             lastID = identity
         }
         return lastID

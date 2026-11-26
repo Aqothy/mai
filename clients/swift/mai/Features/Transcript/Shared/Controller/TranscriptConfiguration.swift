@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// How a transcript runs. A DEBUG launch argument switches the lever the

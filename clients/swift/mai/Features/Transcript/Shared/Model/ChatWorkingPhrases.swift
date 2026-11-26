@@ -1,7 +1,7 @@
 import Foundation
 
 /// Rotating whimsical verbs shown on the running turn's working row.
-enum ChatWorkingPhrases {
+nonisolated enum ChatWorkingPhrases {
     static func next(after current: String?) -> String {
         var phrase = all.randomElement() ?? "Working…"
         while phrase == current, all.count > 1 {
@@ -10,7 +10,7 @@ enum ChatWorkingPhrases {
         return phrase
     }
 
-    static let all: [String] = [
+    private static let all: [String] = [
         // Short
         "Combobulating…",
         "Channelling…",

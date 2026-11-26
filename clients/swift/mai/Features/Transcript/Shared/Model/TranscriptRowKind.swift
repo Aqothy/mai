@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// What a row shows. Each case carries everything its layout needs, as

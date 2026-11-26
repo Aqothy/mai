@@ -10,18 +10,6 @@ import Testing
 /// sends the next splice through `rebuildIndex`, rehashing every row
 /// (`geometry-10k-50-splices`, Profile: 0.5 ms -> 26 ms when it did).
 nonisolated struct TranscriptGeometryShiftLogTests {
-    private func stored(_ name: String, in geometry: TranscriptGeometry) -> Any? {
-        Mirror(reflecting: geometry).children.first { $0.label == name }?.value
-    }
-
-    private func pendingEditCount(_ geometry: TranscriptGeometry) -> Int {
-        stored("edits", in: geometry).map { Mirror(reflecting: $0).children.count } ?? -1
-    }
-
-    private func flagsNonContiguousSources(_ geometry: TranscriptGeometry) -> Bool? {
-        stored("hasNonContiguousSources", in: geometry) as? Bool
-    }
-
     /// `applyParsedMessages`: a pending message mid-history becomes its
     /// blocks, and the next row is another message's first row. Sources stay
     /// contiguous, so consecutive drains must stay on the shift log.
@@ -35,10 +23,10 @@ nonisolated struct TranscriptGeometryShiftLogTests {
             geometry.replaceRows(
                 index..<(index + 1), ids: ["m\(message)#0", "m\(message)#1"],
                 sources: ["m\(message)", "m\(message)"], heights: [30, 40])
-            #expect(flagsNonContiguousSources(geometry) == false, "after parsing m\(message)")
+            #expect(!geometry.debugHasNonContiguousSources, "after parsing m\(message)")
         }
         // One pending edit per splice; a rehash in between empties the log.
-        #expect(pendingEditCount(geometry) == 3)
+        #expect(geometry.debugPendingEditCount == 3)
     }
 
     /// `applyStreamRows`: a streamed message gains a block while the working
@@ -51,9 +39,23 @@ nonisolated struct TranscriptGeometryShiftLogTests {
             geometry.replaceRows(
                 2_000..<(2_000 + blocks - 1), ids: (0..<blocks).map { "t|m#\($0)" },
                 sources: Array(repeating: "t|m", count: blocks), heights: Array(repeating: 40, count: blocks))
-            #expect(flagsNonContiguousSources(geometry) == false, "after block \(blocks)")
+            #expect(!geometry.debugHasNonContiguousSources, "after block \(blocks)")
         }
-        #expect(pendingEditCount(geometry) == 3)
+        #expect(geometry.debugPendingEditCount == 3)
+    }
+
+    /// Same-size (`delta == 0`) splices shift no surviving rows and must not
+    /// grow the edit log or trigger premature compaction.
+    @Test func sameSizeSplicesDoNotAppendToTheShiftLog() {
+        let ids = (0..<200).map { "r\($0)" }
+        var geometry = TranscriptGeometry()
+        geometry.replace(ids: ids, sources: ids) { _ in 40 }
+        for step in 0..<80 {
+            geometry.replaceRows(100..<101, ids: ["s\(step)"], sources: ["s\(step)"], heights: [42])
+        }
+        #expect(geometry.debugPendingEditCount == 0)
+        #expect(geometry.index(for: "s79") == 100)
+        #expect(geometry.index(for: "r199") == 199)
     }
 
     /// Arbitrary splices (removals, insertions, shared and reused sources,

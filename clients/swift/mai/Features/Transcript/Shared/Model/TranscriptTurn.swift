@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// One turn as the transcript shows it, copied out of `TurnView`.
@@ -17,7 +16,7 @@ nonisolated struct TranscriptTurn: Sendable {
         startedAt = turn.startedAt
         settledAt = turn.settledAt
         error = turn.error
-        var failed = state == .failed
+        var failed = false
         var mapped: [TranscriptEntry] = []
         mapped.reserveCapacity(turn.entries.count)
         for entry in turn.entries {

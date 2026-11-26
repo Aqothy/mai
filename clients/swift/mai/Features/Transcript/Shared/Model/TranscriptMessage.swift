@@ -28,25 +28,20 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
         }
     }
 
-    /// The ID of the message's first row once parsed.
-    var firstParsedRowID: String {
-        switch kind {
-        case .assistant: "\(id)#0"
-        case .user: "user|\(id)"
-        case .thought: "thought|\(id)"
-        }
-    }
-
-    /// Row ID for the `index`-th parsed row of this message. Preserves the
+    /// Row ID for the `index`-th parsed row of a message. Preserves the
     /// single-row IDs `"user|\(id)"` and `"thought|\(id)"` for row 0 so saved
     /// places and pending-row lookups stay stable whether a message is 1 row
     /// or flattened into bounded slices.
-    func parsedRowID(at index: Int) -> String {
+    static func parsedRowID(kind: Kind, id: String, at index: Int) -> String {
         switch kind {
         case .assistant: "\(id)#\(index)"
         case .user: index == 0 ? "user|\(id)" : "user|\(id)#\(index)"
         case .thought: index == 0 ? "thought|\(id)" : "thought|\(id)#\(index)"
         }
+    }
+
+    func parsedRowID(at index: Int) -> String {
+        Self.parsedRowID(kind: kind, id: id, at: index)
     }
 
     /// The message a Comment on its text belongs to: thoughts are no one's.
@@ -69,8 +64,7 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
     }
 
     /// Turns parsed Markdown `blocks` into this message's bounded rows via
-    /// `TranscriptBlockFlattener` (every prose unit `<= 8 KB` across user,
-    /// assistant, and thought messages). Pass precomputed `metrics` (counted
+    /// `TranscriptBlockFlattener`. Pass precomputed `metrics` (counted
     /// off-main) so rebuilding rows on the main thread never scans text.
     func rows(from blocks: [MarkdownBlock], metrics: [TextMetrics]? = nil) -> [TranscriptRow] {
         let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: kind)

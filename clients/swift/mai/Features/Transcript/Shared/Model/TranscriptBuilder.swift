@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// The transcript's rows from its turns, by the chat's rules:
@@ -20,6 +19,9 @@ nonisolated struct TranscriptBuilder {
     /// Precomputed per-row text metrics for a parsed message, so rebuilding
     /// rows on the main thread never scans text.
     var metrics: (String) -> [TextMetrics]? = { _ in nil }
+    /// Whether `messageID` has non-empty live streamed blocks (covers a
+    /// streaming reasoning entry whose initial snapshot text was whitespace).
+    var hasStreamedBlocks: (String) -> Bool = { _ in false }
     let expandedTurnIDs: Set<String>
     /// The working row's verb.
     let workingPhrase: String
@@ -72,7 +74,10 @@ nonisolated struct TranscriptBuilder {
                 guard !entry.text.isEmpty else { continue }
                 blocks.append(Block(item: .message(entry), isFoldable: true))
             case .reasoning:
-                guard entry.text.contains(where: { !$0.isWhitespace }) else { continue }
+                guard entry.text.contains(where: { !$0.isWhitespace }) || hasStreamedBlocks("\(turn.id)|\(entry.ref)")
+                else {
+                    continue
+                }
                 blocks.append(Block(item: .thought(entry), isFoldable: true))
             case .warning, .error:
                 let title = entry.title ?? (entry.kind == .error ? "Error" : "Warning")
@@ -148,7 +153,7 @@ nonisolated struct TranscriptBuilder {
         if turn.state == .interrupted, let error = turn.error, !error.isEmpty {
             rows.append(TranscriptRow(id: "stop|\(turn.id)", kind: .notice(title: error, text: nil), turnID: turn.id))
         }
-        if turn.state.map({ $0 != .running }) == true {
+        if turn.state?.isSettled == true {
             let hasReply = turn.entries.contains { $0.kind == .assistantMessage && !$0.text.isEmpty }
             rows.append(
                 TranscriptRow(
@@ -166,9 +171,8 @@ nonisolated struct TranscriptBuilder {
             appendMessage(
                 TranscriptMessage(kind: .assistant, turnID: turnID, ref: entry.ref), source: entry.text, to: &rows)
         case .thought(let entry):
-            let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
-            appendMessage(TranscriptMessage(kind: .thought, turnID: turnID, ref: entry.ref), source: text, to: &rows)
+            appendMessage(
+                TranscriptMessage(kind: .thought, turnID: turnID, ref: entry.ref), source: entry.text, to: &rows)
         case .activity(let entries):
             guard let first = entries.first else { return }
             rows.append(

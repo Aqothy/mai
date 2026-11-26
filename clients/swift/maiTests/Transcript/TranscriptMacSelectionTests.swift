@@ -241,6 +241,18 @@
                     isARepeat: false, keyCode: 53))
             fixture.document.keyDown(with: esc)
             #expect(fixture.controller.selection == nil)
+
+            // Tab must forward to super.keyDown instead of being swallowed
+            // inside `interpretKeyEvents`.
+            fixture.window.makeFirstResponder(fixture.document)
+            let tab = try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: fixture.window.windowNumber,
+                    context: nil, characters: "\t", charactersIgnoringModifiers: "\t",
+                    isARepeat: false, keyCode: 48))
+            fixture.document.keyDown(with: tab)
+            #expect(!fixture.document.didHandleKeyCommand)
         }
     }
 #endif

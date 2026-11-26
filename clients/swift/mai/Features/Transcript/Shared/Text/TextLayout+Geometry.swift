@@ -97,13 +97,14 @@ nonisolated extension TextLayout {
                 let selStart = max(range.lowerBound, line.range.lowerBound)
                 let selEnd = min(range.upperBound, line.range.upperBound)
                 var lineRects: [CGRect] = []
+                var runLeft = line.x
                 for runIndex in line.runs {
                     let run = runs[runIndex]
+                    let runRight = runLeft + run.visualWidth
+                    defer { runLeft = runRight }
                     let lo = max(selStart, run.range.lowerBound)
                     let hi = min(selEnd, run.range.upperBound)
-                    guard lo < hi, let firstPos = run.positions.first else { continue }
-                    let runLeft = firstPos.x
-                    let runRight = firstPos.x + run.visualWidth
+                    guard lo < hi else { continue }
                     let loX: CGFloat
                     let hiX: CGFloat
                     if lo == run.range.lowerBound {
@@ -127,6 +128,9 @@ nonisolated extension TextLayout {
                     }
                 }
                 if !lineRects.isEmpty {
+                    if line.endsWithNewline, range.upperBound >= line.range.upperBound {
+                        lineRects[lineRects.count - 1].size.width += line.height / 3
+                    }
                     rects.append(contentsOf: lineRects)
                     continue
                 }
@@ -146,14 +150,24 @@ nonisolated extension TextLayout {
         guard !links.isEmpty, let index = lineIndex(nearestY: point.y) else { return nil }
         let line = lines[index]
         guard point.y >= line.top, point.y < line.bottom else { return nil }
+        var runLeft = line.x
         for runIndex in line.runs {
             let run = runs[runIndex]
+            let runRight = runLeft + run.visualWidth
+            defer { runLeft = runRight }
             guard let link = run.linkIndex, links.indices.contains(link) else { continue }
-            let from = run.range.lowerBound - line.range.lowerBound
-            let to = run.range.upperBound - line.range.lowerBound
-            guard line.caretOffsets.indices.contains(from), line.caretOffsets.indices.contains(to) else { continue }
-            let minX = min(line.caretOffsets[from], line.caretOffsets[to])
-            let maxX = max(line.caretOffsets[from], line.caretOffsets[to])
+            let minX: CGFloat
+            let maxX: CGFloat
+            if line.hasComplexBiDi {
+                minX = runLeft
+                maxX = runRight
+            } else {
+                let from = run.range.lowerBound - line.range.lowerBound
+                let to = run.range.upperBound - line.range.lowerBound
+                guard line.caretOffsets.indices.contains(from), line.caretOffsets.indices.contains(to) else { continue }
+                minX = min(line.caretOffsets[from], line.caretOffsets[to])
+                maxX = max(line.caretOffsets[from], line.caretOffsets[to])
+            }
             if point.x >= minX, point.x < maxX { return links[link] }
         }
         return nil

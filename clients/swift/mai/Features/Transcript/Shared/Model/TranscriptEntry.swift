@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// What the transcript needs of one entry, copied out of `EntryView` so the
@@ -7,7 +6,6 @@ import Foundation
 nonisolated struct TranscriptEntry: Sendable {
     let ref: String
     let kind: MaidItemKind?
-    let status: MaidItemStatus?
     let text: String
     let title: String?
     let envelopeKind: MaidEnvelopeKind?
@@ -21,13 +19,11 @@ nonisolated struct TranscriptEntry: Sendable {
     init(_ entry: EntryView) {
         ref = entry.ref
         kind = entry.itemKind
-        status = entry.itemStatus
         text = entry.text ?? ""
         title = entry.title
-        let envelope = entry.envelope
-        envelopeKind = envelope.flatMap { MaidEnvelopeKind(rawValue: $0.kind) }
-        envelopeFrom = envelope?.from
-        envelopeBody = envelope?.body
+        envelopeKind = entry.envelopeKind
+        envelopeFrom = entry.envelope?.from
+        envelopeBody = entry.envelope?.body
         activityPhrase = TranscriptActivityPhrase(entry)
         isRunningInBackground = entry.itemStatus == .inProgress && entry.tool?.background == true
         hasRequestRecord = entry.request != nil

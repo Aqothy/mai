@@ -10,15 +10,21 @@
     /// Differential oracle against live WebKit (`WKWebView`, Safari's engine):
     /// compares our Markdown text/block structure, word/paragraph selection
     /// ranges, and RTL `dir="auto"` alignment directly against a real browser.
-    @MainActor
     struct TranscriptWebKitOracleTests {
         private final class NavigationWaiter: NSObject, WKNavigationDelegate {
             var continuation: CheckedContinuation<Void, Never>?
 
-            func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
+            private func finish() {
                 continuation?.resume()
                 continuation = nil
             }
+
+            func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) { finish() }
+            func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: any Error) { finish() }
+            func webView(
+                _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: any Error
+            ) { finish() }
+            func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish() }
         }
 
         private func makeWebView(width: CGFloat = 600, height: CGFloat = 800) -> (WKWebView, NavigationWaiter) {

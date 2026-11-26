@@ -3,8 +3,8 @@ import Foundation
 
 /// A message streaming into the transcript: where its text comes from and
 /// what the stream worker last made of it.
-@MainActor
 struct TranscriptStream {
+    var kind: TranscriptMessage.Kind = .assistant
     /// The store's live text for the message, which grows without
     /// publishing a change (only the first chunk does).
     var text: ThreadStreamingText?

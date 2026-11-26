@@ -39,6 +39,11 @@
         private var displayLink: CADisplayLink?
         private var needsFrames = false
         private var isContentVisible = false
+        var didHandleKeyCommand = false
+
+        private static let registerServicesSendTypes: Void = {
+            NSApp?.registerServicesMenuSendTypes([.string], returnTypes: [])
+        }()
 
         // Constant, so AppKit's frequent calls skip the main-actor check.
         nonisolated override var isFlipped: Bool { true }
@@ -96,6 +101,7 @@
             let link = displayLink(target: self, selector: #selector(frameDidTick(_:)))
             link.add(to: .main, forMode: .common)
             displayLink = link
+            _ = Self.registerServicesSendTypes
             controller.attach(self)
             updateFrameLink()
         }

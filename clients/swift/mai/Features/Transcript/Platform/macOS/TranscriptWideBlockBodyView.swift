@@ -35,7 +35,7 @@
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
             colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect,
-            horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?, syncDeadline: CFTimeInterval = 0
+            horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?, syncDeadline: CFTimeInterval
         ) {
             let height = body.frame.height
             let layout = RowLayout(rowID: rowID, key: key, height: height, content: body.content)

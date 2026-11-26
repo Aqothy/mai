@@ -112,6 +112,8 @@ nonisolated struct MarkdownBlockParser {
     private var containers: [Container] = []
     private var leaf: RecordKind = .none
     private var leafRecordIndex: Int = -1
+    private var paragraphClearedBlank = false
+    private var paragraphMadeListLoose = false
     private var codeFenceChar: UInt8 = 0
     private var codeFenceLength: Int = 0
     private var codeFenceIndent: Int = 0
@@ -793,8 +795,11 @@ nonisolated struct MarkdownBlockParser {
                 return
             }
             if isBlank {
-                if !containers.isEmpty, containers[containers.count &- 1].children > 0 {
-                    containers[containers.count &- 1].sawBlankAfterChild = true
+                if !containers.isEmpty {
+                    let idx = containers.count &- 1
+                    if containers[idx].children > 0 || containers[idx].kind == .liOpen {
+                        containers[idx].sawBlankAfterChild = true
+                    }
                 }
                 return
             }
@@ -822,12 +827,14 @@ nonisolated struct MarkdownBlockParser {
         let idx = containers.count &- 1
         if containers[idx].sawBlankAfterChild {
             containers[idx].sawBlankAfterChild = false
-            if containers[idx].kind == .ulOpen || containers[idx].kind == .olOpen {
-                containers[idx].isLoose = true
-            } else if containers[idx].kind == .liOpen, idx > 0,
-                containers[idx &- 1].kind == .ulOpen || containers[idx &- 1].kind == .olOpen
-            {
-                containers[idx &- 1].isLoose = true
+            if containers[idx].children > 0 {
+                if containers[idx].kind == .ulOpen || containers[idx].kind == .olOpen {
+                    containers[idx].isLoose = true
+                } else if containers[idx].kind == .liOpen, idx > 0,
+                    containers[idx &- 1].kind == .ulOpen || containers[idx &- 1].kind == .olOpen
+                {
+                    containers[idx &- 1].isLoose = true
+                }
             }
         }
         containers[idx].children &+= 1
@@ -837,6 +844,23 @@ nonisolated struct MarkdownBlockParser {
         leafRecordIndex = records.count
         records.append(Record(kind: kind, lineStart: Int32(lines.count), lineCount: 0))
         leaf = kind
+        paragraphClearedBlank = false
+        paragraphMadeListLoose = false
+        if kind == .paragraph, !containers.isEmpty {
+            let idx = containers.count &- 1
+            if containers[idx].sawBlankAfterChild {
+                paragraphClearedBlank = true
+                if containers[idx].children > 0 {
+                    if containers[idx].kind == .ulOpen || containers[idx].kind == .olOpen {
+                        paragraphMadeListLoose = !containers[idx].isLoose
+                    } else if containers[idx].kind == .liOpen, idx > 0,
+                        containers[idx &- 1].kind == .ulOpen || containers[idx &- 1].kind == .olOpen
+                    {
+                        paragraphMadeListLoose = !containers[idx &- 1].isLoose
+                    }
+                }
+            }
+        }
         noteChildAdded()
     }
 
@@ -887,7 +911,23 @@ nonisolated struct MarkdownBlockParser {
             extractTaskMarkerIfPresent()
             if records[leafRecordIndex].lineCount == 0 {
                 records[leafRecordIndex].kind = .none
+                // CommonMark §5.3: a link-reference-definition-only paragraph is
+                // not a block, so undo the child/looseness bookkeeping from `openLeaf`.
+                if !containers.isEmpty {
+                    let idx = containers.count &- 1
+                    containers[idx].children = max(0, containers[idx].children &- 1)
+                    if paragraphClearedBlank { containers[idx].sawBlankAfterChild = true }
+                    if paragraphMadeListLoose {
+                        if containers[idx].kind == .ulOpen || containers[idx].kind == .olOpen {
+                            containers[idx].isLoose = false
+                        } else if containers[idx].kind == .liOpen, idx > 0 {
+                            containers[idx &- 1].isLoose = false
+                        }
+                    }
+                }
             }
+            paragraphClearedBlank = false
+            paragraphMadeListLoose = false
         }
     }
 

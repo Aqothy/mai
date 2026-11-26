@@ -107,8 +107,12 @@
         /// Single-fixture threads for Phase 2 Step 1 giant-block measurements
         /// (`-ChatAutoBenchmark giant`).
         static func giantFixtureThreads() -> [(name: String, detail: ThreadDetail)] {
+            giantFixtureCatalog().map { ($0.name, $0.build()) }
+        }
+
+        private static func giantFixtureCatalog() -> [(name: String, build: () -> ThreadDetail)] {
             let base = Date(timeIntervalSince1970: 1_800_000_000)
-            func makeThread(name: String, entries: [EntryView]) -> (String, ThreadDetail) {
+            func makeThread(name: String, entries: [EntryView]) -> ThreadDetail {
                 let id = "synthetic-benchmark-giant-\(name)"
                 let summary = ThreadFixtures.summary(
                     id: id, title: "Giant \(name)", cwd: "/Users/example/Project",
@@ -116,66 +120,103 @@
                 let turn = ThreadFixtures.turn(
                     id: "\(id)-turn-0", participant: summary.participants[0].id,
                     startedAt: base, settledAt: base.addingTimeInterval(5), entries: entries)
-                return (name, ThreadFixtures.detail(summary: summary, turns: [turn]))
+                return ThreadFixtures.detail(summary: summary, turns: [turn])
             }
             let paraUnit = "performance "
-            let para1MB = String(repeating: paraUnit, count: 1_048_576 / paraUnit.utf8.count)
-            let code25k =
-                "```swift\n"
-                + (0..<25_000).map { "let value\($0) = compute(\($0), \"step\") // ok" }.joined(separator: "\n")
-                + "\n```"
-            let code1MBLine =
-                "```json\n"
-                + String(repeating: #"{"k":"value","n":12345},"#, count: 1_048_576 / 24)
-                + "\n```"
-            let list5000 = (0..<5_000).map { "- List item \($0) with details for rendering." }.joined(separator: "\n")
-            let listItem1MB = "- " + para1MB
-            let quoteLine = "> Quoted analysis line with **bold** and `inline_code` for stress testing.\n"
-            let quote500KB = String(repeating: quoteLine, count: 500_000 / quoteLine.utf8.count)
-            let logLine = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
-            let user500KB = String(repeating: logLine, count: 500_000 / logLine.utf8.count)
             return [
-                makeThread(
-                    name: "para-1mb",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB paragraph."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: para1MB),
-                    ]),
-                makeThread(
-                    name: "code-25k",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 25,000-line code block."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: code25k),
-                    ]),
-                makeThread(
-                    name: "code-1mb-line",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB single code line."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: code1MBLine),
-                    ]),
-                makeThread(
-                    name: "list-5000",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 5,000-item list."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: list5000),
-                    ]),
-                makeThread(
-                    name: "list-item-1mb",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB single list item."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: listItem1MB),
-                    ]),
-                makeThread(
-                    name: "quote-500kb",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 500 KB blockquote."),
-                        ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: quote500KB),
-                    ]),
-                makeThread(
-                    name: "user-500kb",
-                    entries: [
-                        ThreadFixtures.entry(ref: "u", kind: .userMessage, text: user500KB),
-                    ]),
+                (
+                    "para-1mb",
+                    {
+                        let para1MB = String(repeating: paraUnit, count: 1_048_576 / paraUnit.utf8.count)
+                        return makeThread(
+                            name: "para-1mb",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB paragraph."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: para1MB),
+                            ])
+                    }
+                ),
+                (
+                    "code-25k",
+                    {
+                        let code25k =
+                            "```swift\n"
+                            + (0..<25_000).map { "let value\($0) = compute(\($0), \"step\") // ok" }
+                                .joined(separator: "\n")
+                            + "\n```"
+                        return makeThread(
+                            name: "code-25k",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 25,000-line code block."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: code25k),
+                            ])
+                    }
+                ),
+                (
+                    "code-1mb-line",
+                    {
+                        let code1MBLine =
+                            "```json\n"
+                            + String(repeating: #"{"k":"value","n":12345},"#, count: 1_048_576 / 24)
+                            + "\n```"
+                        return makeThread(
+                            name: "code-1mb-line",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB single code line."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: code1MBLine),
+                            ])
+                    }
+                ),
+                (
+                    "list-5000",
+                    {
+                        let list5000 = (0..<5_000).map { "- List item \($0) with details for rendering." }
+                            .joined(separator: "\n")
+                        return makeThread(
+                            name: "list-5000",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 5,000-item list."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: list5000),
+                            ])
+                    }
+                ),
+                (
+                    "list-item-1mb",
+                    {
+                        let listItem1MB = "- " + String(repeating: paraUnit, count: 1_048_576 / paraUnit.utf8.count)
+                        return makeThread(
+                            name: "list-item-1mb",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 1 MB single list item."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: listItem1MB),
+                            ])
+                    }
+                ),
+                (
+                    "quote-500kb",
+                    {
+                        let quoteLine = "> Quoted analysis line with **bold** and `inline_code` for stress testing.\n"
+                        let quote500KB = String(repeating: quoteLine, count: 500_000 / quoteLine.utf8.count)
+                        return makeThread(
+                            name: "quote-500kb",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: "Show 500 KB blockquote."),
+                                ThreadFixtures.entry(ref: "a", kind: .assistantMessage, text: quote500KB),
+                            ])
+                    }
+                ),
+                (
+                    "user-500kb",
+                    {
+                        let logLine = "[2026-11-23 22:00:00] INFO worker=3 processed batch_id=987654321 duration_ms=12\n"
+                        let user500KB = String(repeating: logLine, count: 500_000 / logLine.utf8.count)
+                        return makeThread(
+                            name: "user-500kb",
+                            entries: [
+                                ThreadFixtures.entry(ref: "u", kind: .userMessage, text: user500KB),
+                            ])
+                    }
+                ),
             ]
         }
 
@@ -260,9 +301,9 @@
         }
 
         /// Reproduces the remaining scenarios that can still briefly blank on
-        /// cold fast scrollbar scrubs: >128 KB unparsed `.pendingMessage` turns,
-        /// giant >64-cell Markdown tables, rapid 80-turn cold jumps that exhaust
-        /// a 4–8 ms sync deadline, and a 20 KB single non-ASCII code line.
+        /// cold fast scrollbar scrubs: >32 KB unparsed `.pendingMessage` turns,
+        /// giant >32-cell Markdown tables, rapid 80-turn cold jumps that exhaust
+        /// the 4 ms sync deadline, and a 20 KB single non-ASCII code line.
         static func blankingStressThread(identity: String = "synthetic-benchmark-blanking") -> ThreadDetail {
             let base = Date(timeIntervalSince1970: 1_800_000_000)
             let summary = ThreadFixtures.summary(
@@ -295,9 +336,9 @@
                 let prompt: String
                 let answer: String
                 if turn < 10 {
-                    // Ten ~220 KB unparsed turns (> 128 KB sync parse limit).
-                    prompt = "Blanking repro turn \(turn + 1): >128 KB unparsed message"
-                    var built = "## Unparsed >128 KB Turn \(turn + 1)\n\n"
+                    // Ten ~220 KB unparsed turns (> 32 KB sync parse limit).
+                    prompt = "Blanking repro turn \(turn + 1): >32 KB unparsed message"
+                    var built = "## Unparsed >32 KB Turn \(turn + 1)\n\n"
                     var idx = turn
                     while built.utf8.count < 220_000 {
                         built += fixtures[idx % fixtures.count] + "\n\n"
@@ -308,7 +349,7 @@
                     prompt = "Blanking repro: 20 KB single non-ASCII code line"
                     answer = giantNonASCIILine
                 } else if turn.isMultiple(of: 16) {
-                    prompt = "Blanking repro: 120-row (720-cell) table (>64-cell sync limit)"
+                    prompt = "Blanking repro: 120-row (720-cell) table (>32-cell sync limit)"
                     answer = "### Giant Table (Turn \(turn + 1))\n\n" + giantTable
                 } else {
                     prompt = userPrompt(turn: turn)
@@ -355,17 +396,11 @@
                     { thread(turnCount: 1_000, uniqueAnswers: true) }
                 ),
             ]
-            let giantNames = [
-                "para-1mb", "code-25k", "code-1mb-line", "list-5000", "list-item-1mb", "quote-500kb", "user-500kb",
-            ]
-            for (index, name) in giantNames.enumerated() {
-                let id = "synthetic-benchmark-giant-\(name)"
+            for (index, fixture) in giantFixtureCatalog().enumerated() {
+                let id = "synthetic-benchmark-giant-\(fixture.name)"
                 catalog.append((
-                    summary(id: id, title: "Giant \(name)", offset: Double(700 - index * 50)),
-                    {
-                        giantFixtureThreads().first(where: { $0.name == name })?.detail
-                            ?? thread(turnCount: 1, identity: id)
-                    }
+                    summary(id: id, title: "Giant \(fixture.name)", offset: Double(700 - index * 50)),
+                    fixture.build
                 ))
             }
             return catalog

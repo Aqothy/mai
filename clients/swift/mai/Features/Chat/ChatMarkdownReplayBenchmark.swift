@@ -14,7 +14,7 @@
     /// bands), plus the one-shot parse. One `CHAT_BENCHMARK_RESULT` line per
     /// fixture, chunk size and mode.
     enum ChatMarkdownReplayBenchmark {
-        @MainActor static func run() async {
+        static func run() async {
             if UserDefaults.standard.bool(forKey: "ChatMarkdownReplayEngine") {
                 await runExtremeEngineBenchmarks()
                 return
@@ -44,7 +44,7 @@
             #else
                 let palette = TextPalette.resolve(for: UITraitCollection(userInterfaceStyle: .dark))
             #endif
-            let drawing = TranscriptStreamWorker.Drawing(palette: palette, scale: 2, colorSpace: RowLayer.colorSpace)
+            let drawing = DrawnBands.Drawing(palette: palette, scale: 2, colorSpace: RowLayer.colorSpace)
             for fixture in fixtures {
                 let bytes = fixture.text.utf8.count
                 let started = ContinuousClock.now
@@ -75,7 +75,7 @@
         /// Per-update durations of streaming `text` in `chunk`-byte appends
         /// (whole characters), ending with the final parse.
         private static func replay(
-            _ text: String, chunk: Int, style: TextStyle, drawing: TranscriptStreamWorker.Drawing?
+            _ text: String, chunk: Int, style: TextStyle, drawing: DrawnBands.Drawing?
         ) async -> [Double] {
             let worker = TranscriptStreamWorker()
             let utf8 = text.utf8
@@ -277,7 +277,7 @@
         /// Inputs past normal use, each the median of 5 runs: long pasted
         /// text, large code chunks and lines, non-Latin paragraphs, streaming a
         /// megabyte, and what off-screen layouts keep in memory.
-        @MainActor private static func runStressBenchmarks(
+        private static func runStressBenchmarks(
             style: TextStyle, palette: TextPalette, emit: (String, Double, [String: Any]) -> Void
         ) async {
             func median(_ body: () -> Void) -> Double {
@@ -288,9 +288,6 @@
                     times.append(milliseconds(start.duration(to: .now)))
                 }
                 return times.sorted()[2]
-            }
-            func bytes(_ layout: TextLayout) -> Int {
-                layout.lines.reduce(0) { $0 + $1.caretOffsets.count * 8 } + layout.runs.reduce(0) { $0 + $1.glyphs.count * 18 }
             }
             let key = RowLayoutKey(contentVersion: 0, width: 728, styleVersion: style.version)
             func layout(_ kind: TranscriptRowKind) -> RowLayout {

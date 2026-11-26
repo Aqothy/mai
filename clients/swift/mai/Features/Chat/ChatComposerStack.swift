@@ -35,13 +35,7 @@ struct ChatComposerStack: View {
             }
 
             if let threadID = state.threadID, !state.openRequests.isEmpty {
-                ForEach(state.openRequests) { request in
-                    ChatRequestRow(request: request, threadID: threadID, store: store)
-                        .id("\(threadID)|\(request.id)")
-                        .frame(maxWidth: ChatContentMetrics.maximumWidth)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal)
-                }
+                ChatOpenRequestsView(requests: state.openRequests, threadID: threadID, store: store)
             }
 
             if chatModel != nil, state.exists, !state.acceptsInput {
@@ -174,6 +168,33 @@ struct ChatComposerStack: View {
         promptText.wrappedValue = promptCompletion.textByPresentingFileCompletion(
             in: promptText.wrappedValue
         )
+    }
+}
+
+private struct ChatOpenRequestsView: View {
+    private static let maximumHeight: CGFloat = 280
+
+    let requests: [ChatRequest]
+    let threadID: String
+    let store: ThreadStore
+
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                ForEach(requests) { request in
+                    ChatRequestRow(request: request, threadID: threadID, store: store)
+                        .id("\(threadID)|\(request.id)")
+                        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxHeight: contentHeight > 0 ? min(contentHeight, Self.maximumHeight) : Self.maximumHeight)
     }
 }
 

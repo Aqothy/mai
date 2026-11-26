@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// A row's selectable text without its layout: what copy reads for rows far
@@ -13,10 +12,8 @@ nonisolated enum RowSelectableText {
             return TableLayout.tabSeparatedText(table)
         case .markdownBlock(let block, _, let context):
             return AttributedTextBuilder.build([block], style: style, context: context).string.string
-        case .userMessage(let blocks):
+        case .userMessage(let blocks), .thought(let blocks):
             return AttributedTextBuilder.build(blocks, style: style).string.string
-        case .thought(let blocks):
-            return AttributedTextBuilder.build(blocks, style: style, color: .secondary).string.string
         case .pendingMessage(_, let source):
             return source
         case .notice(let title, let text):
@@ -34,10 +31,12 @@ nonisolated enum RowSelectableText {
         let blocks = MarkdownPlanner.blocks(from: source)
         let rows = message.rows(from: blocks)
         var result = ""
-        for (index, row) in rows.enumerated() {
+        var hasPart = false
+        for row in rows {
             guard let part = string(for: row.kind, style: style) else { continue }
-            if index > 0 { result += row.kind.separatorBefore }
+            if hasPart { result += row.kind.separatorBefore }
             result += part
+            hasPart = true
         }
         return result
     }

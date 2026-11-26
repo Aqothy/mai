@@ -52,6 +52,17 @@ extension TranscriptController {
         return TextPosition(rowID: rows[index].id, offset: offset)
     }
 
+    private func strictLocalPoint(
+        for point: CGPoint, inRowAt index: Int, layout: RowLayout, columnX: CGFloat, scrollX: (String) -> CGFloat
+    ) -> CGPoint? {
+        var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
+        if let body = layout.content.wideBody, local.y >= body.frame.minY {
+            guard local.x >= body.frame.minX, local.x <= body.frame.maxX else { return nil }
+            local.x += scrollX(rows[index].id)
+        }
+        return local
+    }
+
     /// Strict text hit test: returns a position only when `point` actually
     /// lands inside a selectable row's text segment (never snapping from
     /// margins or chrome to an adjacent row). Used for right-click context
@@ -60,14 +71,10 @@ extension TranscriptController {
         atDocumentPoint point: CGPoint, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
     ) -> TextPosition? {
         guard point.y >= 0, point.y < geometry.totalHeight, let index = geometry.index(at: point.y),
-            rows[index].kind.isSelectable, let layout = layouts[rows[index].id]
+            rows[index].kind.isSelectable, let layout = layouts[rows[index].id],
+            let local = strictLocalPoint(for: point, inRowAt: index, layout: layout, columnX: columnX, scrollX: scrollX),
+            let offset = layout.content.strictTextOffset(at: local)
         else { return nil }
-        var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
-        if let body = layout.content.wideBody, local.y >= body.frame.minY {
-            guard local.x >= body.frame.minX, local.x <= body.frame.maxX else { return nil }
-            local.x += scrollX(rows[index].id)
-        }
-        guard let offset = layout.content.strictTextOffset(at: local) else { return nil }
         return TextPosition(rowID: rows[index].id, offset: offset)
     }
 
@@ -75,14 +82,9 @@ extension TranscriptController {
     func link(
         atDocumentPoint point: CGPoint, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
     ) -> URL? {
-        guard point.y >= 0, let index = geometry.index(at: point.y), let layout = layouts[rows[index].id] else {
-            return nil
-        }
-        var local = CGPoint(x: point.x - columnX, y: point.y - geometry.offset(at: index))
-        if let body = layout.content.wideBody, local.y >= body.frame.minY {
-            guard local.x >= body.frame.minX, local.x <= body.frame.maxX else { return nil }
-            local.x += scrollX(rows[index].id)
-        }
+        guard point.y >= 0, let index = geometry.index(at: point.y), let layout = layouts[rows[index].id],
+            let local = strictLocalPoint(for: point, inRowAt: index, layout: layout, columnX: columnX, scrollX: scrollX)
+        else { return nil }
         return layout.content.link(at: local)
     }
 
@@ -140,10 +142,6 @@ extension TranscriptController {
             ? text(from: selection.anchor, to: selection.focus) : text(from: selection.focus, to: selection.anchor)
     }
 
-    private func separatorBefore(rowAt index: Int) -> String {
-        rows[index].kind.separatorBefore
-    }
-
     /// The text from `start` to `end` (in order), rows joined by their
     /// separators. Unparsed `.pendingMessage` rows render their Markdown on
     /// demand so copied text never depends on scroll history.
@@ -175,7 +173,7 @@ extension TranscriptController {
             let utf16 = text.utf16
             let lower = utf16.index(utf16.startIndex, offsetBy: from)
             let upper = utf16.index(utf16.startIndex, offsetBy: to)
-            if hasPart { result += separatorBefore(rowAt: index) }
+            if hasPart { result += row.kind.separatorBefore }
             result += text[lower..<upper]
             hasPart = true
         }
@@ -210,12 +208,12 @@ extension TranscriptController {
                 guard let previous = rows[..<index].lastIndex(where: \.kind.isSelectable),
                     let previousLength = selectableLength(ofRowAt: previous)
                 else { return nil }
-                let sep = separatorBefore(rowAt: index).utf16.count
+                let sep = rows[index].kind.separatorBefore.utf16.count
                 offset += previousLength + sep
                 index = previous
             } else if offset > length {
                 guard let next = rows[(index + 1)...].firstIndex(where: \.kind.isSelectable) else { return nil }
-                let sep = separatorBefore(rowAt: next).utf16.count
+                let sep = rows[next].kind.separatorBefore.utf16.count
                 offset -= length + sep
                 index = next
             } else {
@@ -236,9 +234,10 @@ extension TranscriptController {
     func positionVertically(
         from position: TextPosition, lineOffset: Int, columnX: CGFloat, scrollX: (String) -> CGFloat = { _ in 0 }
     ) -> TextPosition? {
-        guard lineOffset != 0, var rowIndex = geometry.index(for: position.rowID),
+        guard var rowIndex = geometry.index(for: position.rowID),
             let caret = caretRect(for: position, columnX: columnX, scrollX: scrollX)
         else { return nil }
+        guard lineOffset != 0 else { return position }
         let targetX = caret.minX
         var remaining = abs(lineOffset)
         let step = lineOffset > 0 ? 1 : -1
@@ -262,6 +261,10 @@ extension TranscriptController {
             }
         }
 
+        func columnKey(of segment: TextSegment) -> CGFloat {
+            segment.hitRect?.minX ?? segment.origin.x
+        }
+
         func rowLines(in rowIndex: Int, matchingColumnX: CGFloat? = nil) -> RowLines? {
             guard let layout = layouts[rows[rowIndex].id] else { return nil }
             let rowTop = geometry.offset(at: rowIndex)
@@ -269,9 +272,27 @@ extension TranscriptController {
                 return virtual.lineCount > 0 ? .virtualized(body: virtual, bodyTop: rowTop + origin.y) : nil
             }
             let segments = layout.content.textSegments
+            let activeColumnX: CGFloat?
+            if let matchingColumnX {
+                activeColumnX = matchingColumnX
+            } else if segments.count > 1 {
+                // Entering a multi-column table from outside: pick the column
+                // closest to `targetX` so horizontal sibling cells are never
+                // counted as separate vertical lines.
+                let localX = targetX - columnX + (layout.content.wideBody != nil ? scrollX(rows[rowIndex].id) : 0)
+                activeColumnX = segments.min { a, b in
+                    let aDist = a.hitRect.map { localX < $0.minX ? $0.minX - localX : (localX > $0.maxX ? localX - $0.maxX : 0) }
+                        ?? abs(a.origin.x - localX)
+                    let bDist = b.hitRect.map { localX < $0.minX ? $0.minX - localX : (localX > $0.maxX ? localX - $0.maxX : 0) }
+                        ?? abs(b.origin.x - localX)
+                    return aDist < bDist
+                }.map(columnKey(of:))
+            } else {
+                activeColumnX = nil
+            }
             var result: [(TextSegment, TextLine, CGFloat, CGFloat)] = []
             for segment in segments {
-                if let colX = matchingColumnX, segments.count > 1, abs(segment.origin.x - colX) > 1 {
+                if let colX = activeColumnX, segments.count > 1, abs(columnKey(of: segment) - colX) > 1 {
                     continue
                 }
                 for line in segment.layout.lines {
@@ -286,7 +307,7 @@ extension TranscriptController {
             guard let segments = layouts[rows[rowIndex].id]?.content.textSegments, segments.count > 1,
                 let seg = segments.first(where: { position.offset >= $0.start && position.offset <= $0.end })
             else { return nil }
-            return seg.origin.x
+            return columnKey(of: seg)
         }()
 
         guard var currentLines = rowLines(in: rowIndex, matchingColumnX: currentColumnX) else { return nil }
@@ -318,7 +339,8 @@ extension TranscriptController {
                 var nextRow = rowIndex + step
                 while rows.indices.contains(nextRow), !rows[nextRow].kind.isSelectable { nextRow += step }
                 guard rows.indices.contains(nextRow) else {
-                    return step < 0 ? firstTextPosition : lastTextPosition
+                    let boundary = step < 0 ? firstTextPosition : lastTextPosition
+                    return boundary == position ? nil : boundary
                 }
                 guard let nextLines = rowLines(in: nextRow) else {
                     let length = selectableLength(ofRowAt: nextRow) ?? 0
@@ -358,9 +380,9 @@ extension TranscriptController {
         if second < first { return -offset(from: b, to: a) }
         var count = (selectableLength(ofRowAt: first) ?? 0) - a.offset
         for index in (first + 1)..<second where rows[index].kind.isSelectable {
-            count += separatorBefore(rowAt: index).utf16.count + (selectableLength(ofRowAt: index) ?? 0)
+            count += rows[index].kind.separatorBefore.utf16.count + (selectableLength(ofRowAt: index) ?? 0)
         }
-        return count + separatorBefore(rowAt: second).utf16.count + b.offset
+        return count + rows[second].kind.separatorBefore.utf16.count + b.offset
     }
 
     /// Highlight rects from `start` to `end` (document coordinates) for rows
@@ -381,29 +403,28 @@ extension TranscriptController {
         var result: [(rect: CGRect, isStart: Bool, isEnd: Bool)] = []
         for index in first...last where rows[index].kind.isSelectable {
             guard let layout = layouts[rows[index].id], let length = selectableLength(ofRowAt: index) else { continue }
+            let top = geometry.offset(at: index)
+            let wideBody = layout.content.wideBody
+            let clip = wideBody.map { $0.frame.offsetBy(dx: columnX, dy: top) }
             // A selection made before the text shrank (a re-parse) ends past it.
             let from = index == first ? min(start.offset, length) : 0
             let to = index == last ? min(end.offset, length) : length
             guard from < to else {
                 if first < last {
-                    if index == first, let caret = caretRect(for: start, columnX: columnX, scrollX: scrollX) {
-                        result.append((
-                            rect: CGRect(x: caret.minX, y: caret.minY, width: 0, height: caret.height),
-                            isStart: true, isEnd: false
-                        ))
-                    } else if index == last, let caret = caretRect(for: end, columnX: columnX, scrollX: scrollX) {
-                        result.append((
-                            rect: CGRect(x: caret.minX, y: caret.minY, width: 0, height: caret.height),
-                            isStart: false, isEnd: true
-                        ))
+                    let isStartEndpoint = index == first
+                    let endpoint = isStartEndpoint ? start : end
+                    if isStartEndpoint || index == last,
+                        let caret = caretRect(for: endpoint, columnX: columnX, scrollX: scrollX)
+                    {
+                        let handleRect = CGRect(x: caret.minX, y: caret.minY, width: 0, height: caret.height)
+                        if clip.map({ handleRect.minX >= $0.minX && handleRect.minX <= $0.maxX }) ?? true {
+                            result.append((rect: handleRect, isStart: isStartEndpoint, isEnd: !isStartEndpoint))
+                        }
                     }
                 }
                 continue
             }
-            let top = geometry.offset(at: index)
-            let wideBody = layout.content.wideBody
             let dx = columnX - (wideBody != nil ? scrollX(rows[index].id) : 0)
-            let clip = wideBody.map { $0.frame.offsetBy(dx: columnX, dy: top) }
             var rowRects: [CGRect] = []
             for rect in layout.content.selectionRects(for: from..<to) {
                 var shifted = rect.offsetBy(dx: dx, dy: top)
@@ -428,6 +449,16 @@ extension TranscriptController {
         from start: TextPosition, to end: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat
     ) -> [CGRect] {
         taggedSelectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX).map(\.rect)
+    }
+
+    /// Highlight rects for the current selection in document order.
+    func currentSelectionRects(columnX: CGFloat, scrollX: (String) -> CGFloat) -> [CGRect] {
+        guard let selection, !selection.isEmpty, let anchorFirst = isBefore(selection.anchor, selection.focus) else {
+            return []
+        }
+        let start = anchorFirst ? selection.anchor : selection.focus
+        let end = anchorFirst ? selection.focus : selection.anchor
+        return selectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX)
     }
 
     /// The caret before `position` (document coordinates), when its row has

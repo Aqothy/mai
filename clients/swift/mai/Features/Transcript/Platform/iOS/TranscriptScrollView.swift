@@ -270,10 +270,6 @@
         }
 
         func setNeedsSelectionDisplay() {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            mounter.showSelection(controller)
-            CATransaction.commit()
             lastNotifiedSelectionRects = currentSelectionRects()
             selectionDidChange()
         }
@@ -288,13 +284,15 @@
         }
 
         private func currentSelectionRects() -> [CGRect] {
-            guard let selection = controller.selection, !selection.isEmpty,
-                let anchorFirst = controller.isBefore(selection.anchor, selection.focus)
-            else { return [] }
-            let start = anchorFirst ? selection.anchor : selection.focus
-            let end = anchorFirst ? selection.focus : selection.anchor
-            return controller.selectionRects(
-                from: start, to: end, columnX: columnX, scrollX: { [weak self] id in self?.wideBlocks[id]?.scrollX ?? 0 })
+            controller.currentSelectionRects(columnX: columnX, scrollX: { wideBlocks[$0]?.scrollX ?? 0 })
+        }
+
+        private func notifySelectionGeometryIfChanged() {
+            guard controller.selection != nil else { return }
+            let current = currentSelectionRects()
+            guard current != lastNotifiedSelectionRects else { return }
+            lastNotifiedSelectionRects = current
+            contentView.selectionGeometryDidChange()
         }
 
         var animatesJumps: Bool { window != nil }
@@ -348,15 +346,7 @@
             }
             // Notify UIKit only when the selection's highlight rects actually
             // moved or changed layout, not unconditionally on every scroll placement.
-            if controller.selection != nil {
-                let current = currentSelectionRects()
-                if current != lastNotifiedSelectionRects {
-                    lastNotifiedSelectionRects = current
-                    contentView.selectionGeometryDidChange()
-                }
-            } else if !lastNotifiedSelectionRects.isEmpty {
-                lastNotifiedSelectionRects = []
-            }
+            notifySelectionGeometryIfChanged()
         }
 
         // MARK: TranscriptRowMounterDelegate
@@ -371,9 +361,7 @@
                 if scroller.superview == nil { contentView.addSubview(scroller) }
                 scroller.isHidden = false
                 scroller.onHorizontalScroll = { [weak self] in
-                    guard let self, self.controller.selection != nil else { return }
-                    self.lastNotifiedSelectionRects = self.currentSelectionRects()
-                    self.contentView.selectionGeometryDidChange()
+                    self?.notifySelectionGeometryIfChanged()
                 }
                 scroller.onReaderScroll = { [weak self] in self?.wideBlockDidScroll($0) }
             }

@@ -37,7 +37,7 @@
             if let turnID = controller.expandableTurn(atDocumentPoint: point, columnX: columnX) {
                 controller.toggleExpansion(turnID: turnID)
             } else if let url = controller.link(
-                atDocumentPoint: point, columnX: columnX, scrollX: { [weak self] id in self?.wideBlocks[id]?.scrollX ?? 0 })
+                atDocumentPoint: point, columnX: columnX, scrollX: { wideBlocks[$0]?.scrollX ?? 0 })
             {
                 UIApplication.shared.open(url)
             } else if controller.selection != nil {

@@ -249,37 +249,3 @@ struct ChatComposerAnnotationStrip: View {
         .accessibilityLabel("Pending annotations")
     }
 }
-
-struct ChatMessageAnnotationsView: View {
-    let annotations: [PromptAnnotation]
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            ForEach(annotations, id: \.id) { annotation in
-                VStack(alignment: .leading) {
-                    Label("Quoted context", systemImage: "text.quote")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(annotation.quote)
-                        .font(.callout)
-                        .lineLimit(4)
-
-                    if let note = annotation.note, !note.isEmpty {
-                        Text(note)
-                            .font(.callout)
-                            .bold()
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    .secondary.opacity(0.1),
-                    in: .rect(cornerRadius: 12)
-                )
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Message annotations")
-    }
-}

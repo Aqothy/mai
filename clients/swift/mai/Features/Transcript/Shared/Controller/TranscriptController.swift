@@ -184,6 +184,7 @@ final class TranscriptController {
         detachedTop = host.viewport != nil ? host.viewportTop : baselineTop
         detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
         persistSavedPlace()
+        preDrawnBands.removeAll()
         host.setNeedsFrameUpdates(false)
         self.host = nil
     }

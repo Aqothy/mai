@@ -10,6 +10,7 @@ import Foundation
 actor TranscriptStreamWorker {
     struct Update: Sendable {
         let messageID: String
+        var kind: TranscriptMessage.Kind = .assistant
         let text: String
         let isFinished: Bool
         let width: CGFloat
@@ -20,13 +21,7 @@ actor TranscriptStreamWorker {
         let isDark: Bool?
         /// What to draw with; nil until the host has a palette (the rows
         /// then draw their bands themselves).
-        let drawing: Drawing?
-    }
-
-    struct Drawing: Sendable {
-        let palette: TextPalette
-        let scale: CGFloat
-        let colorSpace: CGColorSpace
+        let drawing: DrawnBands.Drawing?
     }
 
     struct Row: Sendable {
@@ -38,6 +33,7 @@ actor TranscriptStreamWorker {
 
     struct Result: Sendable {
         let messageID: String
+        let kind: TranscriptMessage.Kind
         /// The text this result shows, so a newer one is never replaced by
         /// an older.
         let textLength: Int
@@ -72,7 +68,7 @@ actor TranscriptStreamWorker {
             blocks = snapshot.blocks
             parsers[update.messageID] = parser
         }
-        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: .assistant)
+        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: update.kind)
         let state = shown[update.messageID].flatMap {
             $0.width == update.width && $0.styleVersion == update.style.version ? $0 : nil
         }
@@ -87,7 +83,7 @@ actor TranscriptStreamWorker {
                 current.append(before)
                 continue
             }
-            let rowID = "\(update.messageID)#\(index)"
+            let rowID = TranscriptMessage.parsedRowID(kind: update.kind, id: update.messageID, at: index)
             var request = RowLayoutRequest(
                 rowID: rowID, kind: kind,
                 key: RowLayoutKey(contentVersion: -1, width: update.width, styleVersion: update.style.version),
@@ -115,7 +111,8 @@ actor TranscriptStreamWorker {
         }
         let metrics = kinds.map(TextMetrics.init)
         return Result(
-            messageID: update.messageID, textLength: update.text.utf8.count, isFinished: update.isFinished,
-            blocks: blocks, metrics: metrics, width: update.width, styleVersion: update.style.version, rows: changed)
+            messageID: update.messageID, kind: update.kind, textLength: update.text.utf8.count,
+            isFinished: update.isFinished, blocks: blocks, metrics: metrics, width: update.width,
+            styleVersion: update.style.version, rows: changed)
     }
 }

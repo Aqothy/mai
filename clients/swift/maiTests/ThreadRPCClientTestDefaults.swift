@@ -18,7 +18,6 @@ extension ThreadRPCClient {
     func unsubscribeThread(_ threadID: String) async throws {}
     func syncThread(_ threadID: String) async throws {}
     func threadTurns(_ input: ThreadTurnsParams) async throws -> ThreadTurnsResult { throw unavailable }
-    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry { throw unavailable }
     func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview { throw unavailable }
     func getAttachment(_ id: String) async throws -> Attachment { throw unavailable }
     func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws { throw unavailable }

@@ -71,20 +71,22 @@ nonisolated enum TextLayoutEngine {
         let resumeLine = previous.lines[keepCount]
         let resumeUTF16 = resumeLine.range.lowerBound
         // `paragraphIsRTL` (UAX #9 P2/P3) depends on the paragraph's start, not
-        // the suffix slice. Keep incremental layout only when the kept prefix
-        // already settled LTR; neutral or RTL prefixes fall back to one-shot.
-        var decidedLTR = false
-        var scanned = 0
-        for unit in previous.string.utf16 {
-            if scanned >= resumeUTF16 { break }
-            scanned += 1
-            if let direction = strongDirection(of: unit) {
-                guard direction == .ltr else { return nil }
-                decidedLTR = true
-                break
+        // the suffix slice. Keep incremental layout only when alignment doesn't
+        // use paragraph direction or when the kept prefix already settled LTR.
+        if options.wraps, options.alignsRTLToWidth, width.isFinite {
+            var decidedLTR = false
+            var scanned = 0
+            for unit in previous.string.utf16 {
+                if scanned >= resumeUTF16 { break }
+                scanned += 1
+                if let direction = strongDirection(of: unit) {
+                    guard direction == .ltr else { return nil }
+                    decidedLTR = true
+                    break
+                }
             }
+            guard decidedLTR else { return nil }
         }
-        guard decidedLTR else { return nil }
 
         let suffixNS = suffix.string.mutableString
         let paragraph = suffix.paragraphs.first
@@ -210,8 +212,8 @@ nonisolated enum TextLayoutEngine {
                 if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return .rtl }
             } else if unit == 0x200E {
                 return .ltr
-            } else if !isBiDiCodeUnit(unit) {
-                if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic { return .ltr }
+            } else if let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
+                return .ltr
             }
         } else if unit >= 0x00C0, let scalar = UnicodeScalar(unit), scalar.properties.isAlphabetic {
             return .ltr
@@ -236,10 +238,11 @@ nonisolated enum TextLayoutEngine {
     }
 
     /// Leading x for a line (`dir="auto"` flush-right alignment for RTL
-    /// paragraphs, matching browsers and `NSTextView`).
+    /// paragraphs within `[indent, availableWidth]`, matching browsers and
+    /// `NSTextView` without colliding with left-side quote bars or markers).
     static func lineOriginX(indent: CGFloat, lineWidth: CGFloat, availableWidth: CGFloat, isRTL: Bool) -> CGFloat {
         guard isRTL, availableWidth.isFinite else { return indent }
-        return max(0, availableWidth - indent - lineWidth)
+        return max(indent, availableWidth - lineWidth)
     }
 
     /// Lays `attributedString` out in typesetter windows of at most

@@ -295,14 +295,6 @@
             else { return nil }
             let boundStart = TextPosition(rowID: anchor.rowID, offset: bounds.lowerBound)
             let boundEnd = TextPosition(rowID: anchor.rowID, offset: bounds.upperBound)
-            // Disjoint from the anchor's block (e.g. tokenizer returned a word
-            // wholly in the previous/next row): return nil instead of expanding
-            // across the entire anchor row.
-            if controller.isBefore(rawRange.to.position, boundStart) != false
-                || controller.isBefore(boundEnd, rawRange.from.position) != false
-            {
-                return nil
-            }
             let clampedStart =
                 controller.isBefore(rawRange.from.position, boundStart) == true ? boundStart : rawRange.from.position
             let clampedEnd =

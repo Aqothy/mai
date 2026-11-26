@@ -18,13 +18,6 @@ nonisolated struct TextMetrics: Hashable, Sendable {
     /// `.pendingMessage` (computed lazily once if queried) and non-selectable rows.
     var selectableUTF16: Int?
 
-    init(bytes: Int = 0, lines: Int = 0, blocks: Int = 0, selectableUTF16: Int? = nil) {
-        self.bytes = bytes
-        self.lines = lines
-        self.blocks = blocks
-        self.selectableUTF16 = selectableUTF16
-    }
-
     init(_ kind: TranscriptRowKind) {
         switch kind {
         case .markdownBlock(let block, _, _):

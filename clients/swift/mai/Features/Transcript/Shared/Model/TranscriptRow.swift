@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// One row of the transcript: what it shows, the content it belongs to and

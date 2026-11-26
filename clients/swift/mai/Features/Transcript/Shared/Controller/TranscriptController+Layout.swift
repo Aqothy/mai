@@ -44,6 +44,7 @@ extension TranscriptController {
         if let removed = layouts.removeValue(forKey: rowID) {
             cachedLayoutBytes -= removed.content.retainedBytes
         }
+        preDrawnBands.removeValue(forKey: rowID)
     }
 
     func cacheParsedMessage(id: String, source: String, blocks: [MarkdownBlock], metrics: [TextMetrics] = []) {
@@ -128,10 +129,10 @@ extension TranscriptController {
         }
         guard hasMissing, CACurrentMediaTime() < deadline else { return }
 
-        // 1. Parse visible `.pendingMessage` rows up to 128 KB so their
-        // bounded <= 4 KB slices splice cleanly before mounting. Larger
-        // messages skip eager whole-message layout here so step 2 lays out
-        // strictly the 1–3 slices actually intersecting the viewport.
+        // 1. Parse visible `.pendingMessage` rows up to
+        // `syncFallbackParseByteLimit` so their rows splice cleanly before
+        // mounting. Larger messages skip eager whole-message layout here so
+        // step 2 lays out strictly the rows actually intersecting the viewport.
         var parsedBatch: [ParsedBatchItem] = []
         for index in range {
             guard CACurrentMediaTime() < deadline else { break }
@@ -198,6 +199,15 @@ extension TranscriptController {
         }
     }
 
+    /// Distance from row `index` to the visible viewport `[top, top + screen]`
+    /// (0 for every row intersecting the viewport).
+    private func viewportDistance(ofRowAt index: Int, top: CGFloat, screen: CGFloat) -> Int {
+        let frame = geometry.frame(at: index)
+        if frame.minY + frame.height < top { return Int(top - (frame.minY + frame.height)) }
+        if frame.minY > top + screen { return Int(frame.minY - (top + screen)) }
+        return 0
+    }
+
     /// The host is about to draw rows `indices`, which have no layout at
     /// all: lay them out first. Rows with an older layout show it meanwhile
     /// and are queued already (a new width or style schedules them), so a
@@ -205,10 +215,11 @@ extension TranscriptController {
     func prefetch(_ indices: [Int]) {
         guard configuration.laysOutRows, columnWidth > 0 else { return }
         let top = viewportTop
+        let screen = max(1, (host?.viewport ?? lastViewport)?.visibleHeight ?? 800)
         let drawing = currentDrawing
-        let nearLimit = Int(max(1, (host?.viewport ?? lastViewport)?.visibleHeight ?? 800))
+        let nearLimit = Int(screen)
         let jobs = indices.compactMap { index -> LayoutQueue.Job? in
-            let distance = Int(abs(geometry.offset(at: index) - top))
+            let distance = viewportDistance(ofRowAt: index, top: top, screen: screen)
             return job(for: index, priority: distance, drawing: distance <= nearLimit ? drawing : nil)
         }
         guard !jobs.isEmpty else { return }
@@ -274,13 +285,11 @@ extension TranscriptController {
         let minY = top - (downward ? 1 : 2) * screen
         let maxY = top + screen + (downward ? 2 : 1) * screen
         let drawing = currentDrawing
-        // In Low Power Mode keep speculative 1-hop pre-raster focused tightly
-        // on the visible screen so throttled cores don't paint offscreen rows.
-        let nearLimit = Int(ProcessInfo.processInfo.isLowPowerModeEnabled ? max(1, screen / 2) : screen)
+        let nearLimit = Int(screen / 2)
         var jobs: [LayoutQueue.Job] = []
         if let range = geometry.indices(overlapping: max(0, minY), maxY) {
             for index in range {
-                let distance = Int(abs(geometry.offset(at: index) - top))
+                let distance = viewportDistance(ofRowAt: index, top: top, screen: screen)
                 if let job = job(for: index, priority: distance, drawing: distance <= nearLimit ? drawing : nil) {
                     jobs.append(job)
                 }
@@ -433,21 +442,18 @@ extension TranscriptController {
     /// double `setFrameSize` bounce.
     private func applyParsedMessages(_ parsed: [ParsedBatchItem]) {
         var byIndex: [Int: (rows: [TranscriptRow], layouts: [RowLayout]?, drawn: [DrawnBands?])] = [:]
-        var needsFullRebuild = false
         for item in parsed {
             guard let index = geometry.index(for: item.message.pendingRowID),
                 rows.indices.contains(index),
                 case .pendingMessage(let currentMessage, let currentSource) = rows[index].kind,
                 currentMessage == item.message, currentSource == item.source
             else {
-                if geometry.index(for: item.message.firstParsedRowID) == nil { needsFullRebuild = true }
+                // Pending row is gone (e.g. its turn was collapsed while parse
+                // ran, or rows already spliced): `cacheParsedMessage` kept the
+                // result for when it expands again.
                 continue
             }
             byIndex[index] = (item.message.rows(from: item.blocks, metrics: item.metrics), item.layouts, item.drawn)
-        }
-        if needsFullRebuild {
-            rebuildRows()
-            return
         }
         guard let firstIndex = byIndex.keys.min(), let lastIndex = byIndex.keys.max() else { return }
         var replacementRows: [TranscriptRow] = []

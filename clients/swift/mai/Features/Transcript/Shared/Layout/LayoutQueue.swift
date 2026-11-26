@@ -1,6 +1,5 @@
 import CoreGraphics
 import Foundation
-import Synchronization
 
 /// Background layout for one transcript (PLAN 4.2): parses and lays out rows
 /// near the viewport, nearest first, on a few tasks at once. Off-screen history
@@ -14,10 +13,6 @@ actor LayoutQueue {
     /// visible and nearby rows.
     static let eagerParseLayoutByteLimit = 16_384
     static let eagerParseLayoutBlockLimit = 32
-
-    private final class GenerationBox: Sendable {
-        let value = Mutex<Int>(0)
-    }
 
     enum Work: Sendable {
         case layout(RowLayoutRequest, drawing: DrawnBands.Drawing? = nil)
@@ -45,13 +40,12 @@ actor LayoutQueue {
     }
 
     private enum WorkKey: Equatable {
-        case layout(key: RowLayoutKey, isHighlighted: Bool, colorsDark: Bool?)
+        case layout(key: RowLayoutKey, colorsDark: Bool?)
         case parse(message: TranscriptMessage, source: String, width: CGFloat, styleVersion: Int)
     }
 
     private var urgent: [String: Job] = [:]
     private var latestUrgentGeneration = 0
-    private let activeGeneration = GenerationBox()
     /// In-flight jobs keyed by `job.id` with the exact work parameters running,
     /// so duplicate `prefetch` submissions skip re-running identical work while
     /// newer widths/versions still queue behind the in-flight job.
@@ -67,9 +61,7 @@ actor LayoutQueue {
     private static func workKey(for work: Work) -> WorkKey {
         switch work {
         case .layout(let request, _):
-            .layout(
-                key: request.key, isHighlighted: request.codeColors != nil,
-                colorsDark: request.codeColors?.isDark)
+            .layout(key: request.key, colorsDark: request.codeColors?.isDark)
         case .parseAndLayout(let message, let source, let width, let style, _):
             .parse(message: message, source: source, width: width, styleVersion: style.version)
         }
@@ -80,10 +72,7 @@ actor LayoutQueue {
     /// overwrite a newer layout window.
     func submit(urgent jobs: [Job], generation: Int, replacingUrgent: Bool) {
         if generation < latestUrgentGeneration { return }
-        if generation > latestUrgentGeneration {
-            latestUrgentGeneration = generation
-            activeGeneration.value.withLock { $0 = generation }
-        }
+        if generation > latestUrgentGeneration { latestUrgentGeneration = generation }
         if replacingUrgent {
             urgent.removeAll(keepingCapacity: true)
         }
@@ -98,11 +87,8 @@ actor LayoutQueue {
     private func pump() {
         while running.count < concurrency, let job = takeNext() {
             running[job.id] = Self.workKey(for: job.work)
-            let expectedGeneration = latestUrgentGeneration
-            let generationBox = activeGeneration
             Task.detached(priority: .userInitiated) { [weak self] in
-                let result = Self.perform(
-                    job.work, expectedGeneration: expectedGeneration, activeGeneration: generationBox)
+                let result = Self.perform(job.work)
                 await self?.finish(job.id, result)
             }
         }
@@ -123,24 +109,11 @@ actor LayoutQueue {
         pump()
     }
 
-    private nonisolated static func isCurrentGeneration(_ expected: Int, box: GenerationBox) -> Bool {
-        box.value.withLock { $0 } == expected
-    }
-
-    private nonisolated static func perform(
-        _ work: Work, expectedGeneration: Int, activeGeneration: GenerationBox
-    ) -> Result {
+    private nonisolated static func perform(_ work: Work) -> Result {
         switch work {
         case .layout(let request, let drawing):
             let layout = RowLayoutBuilder.layout(request)
-            // Skip speculative 1-hop pre-raster if the viewport already moved on
-            // (eliminates wasted glyph painting during fast scrolling).
-            let drawn: DrawnBands? =
-                if let drawing, isCurrentGeneration(expectedGeneration, box: activeGeneration) {
-                    DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 2)
-                } else {
-                    nil
-                }
+            let drawn = drawing.flatMap { DrawnBands.drawInitial(layout, drawing: $0, maxBands: 2) }
             return .layout(layout, drawn: drawn)
         case .parseAndLayout(let message, let source, let width, let style, let drawing):
             let blocks = MarkdownPlanner.blocks(from: source)
@@ -158,13 +131,12 @@ actor LayoutQueue {
                     RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style))
             }
             var preDrawn: [DrawnBands?] = []
-            if let drawing, isCurrentGeneration(expectedGeneration, box: activeGeneration) {
+            if let drawing {
                 preDrawn.reserveCapacity(layouts.count)
                 var remainingBands = 4
                 for layout in layouts {
-                    if remainingBands > 0, isCurrentGeneration(expectedGeneration, box: activeGeneration),
-                        let bands = DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 1)
-                    {
+                    guard remainingBands > 0 else { break }
+                    if let bands = DrawnBands.drawInitial(layout, drawing: drawing, maxBands: 1) {
                         remainingBands -= bands.bands.count + bands.wideBands.count
                         preDrawn.append(bands)
                     } else {

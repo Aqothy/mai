@@ -154,25 +154,15 @@
             // reaches here without making this view first responder.
             let menu = NSMenu()
             if let linkURL {
-                let openAction = TranscriptMenuAction { NSWorkspace.shared.open(linkURL) }
-                let openItem = NSMenuItem(title: "Open Link", action: #selector(TranscriptMenuAction.run(_:)), keyEquivalent: "")
-                openItem.target = openAction
-                openItem.representedObject = openAction
-                menu.addItem(openItem)
-
-                let copyLinkAction = TranscriptMenuAction {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(linkURL.absoluteString, forType: .string)
-                }
-                let copyLinkItem = NSMenuItem(
-                    title: "Copy Link", action: #selector(TranscriptMenuAction.run(_:)), keyEquivalent: "")
-                copyLinkItem.target = copyLinkAction
-                copyLinkItem.representedObject = copyLinkAction
-                menu.addItem(copyLinkItem)
+                menu.addItem(Self.menuItem(title: "Open Link") { NSWorkspace.shared.open(linkURL) })
+                menu.addItem(
+                    Self.menuItem(title: "Copy Link") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(linkURL.absoluteString, forType: .string)
+                    })
                 if hasSelection { menu.addItem(.separator()) }
             }
             if hasSelection {
-                let text = controller.selectedText()
                 let lookUpItem = NSMenuItem(title: "Look Up", action: #selector(lookUp(_:)), keyEquivalent: "")
                 lookUpItem.target = self
                 menu.addItem(lookUpItem)
@@ -186,10 +176,19 @@
                     menu.addItem(commentItem)
                 }
                 menu.addItem(.separator())
-                let sharePicker = NSSharingServicePicker(items: [text])
+                let shareItem = LazySelectionShareItem { [weak self] in self?.controller.selectedText() ?? "" }
+                let sharePicker = NSSharingServicePicker(items: [shareItem])
                 menu.addItem(sharePicker.standardShareMenuItem)
             }
             return menu
+        }
+
+        private static func menuItem(title: String, action: @escaping () -> Void) -> NSMenuItem {
+            let handler = TranscriptMenuAction(action)
+            let item = NSMenuItem(title: title, action: #selector(TranscriptMenuAction.run(_:)), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = handler
+            return item
         }
 
         /// Force-Touch / three-finger tap / ⌃⌘D Look Up over a word or the
@@ -197,7 +196,7 @@
         override func quickLook(with event: NSEvent) {
             let point = convert(event.locationInWindow, from: nil)
             if let hit = controller.strictTextPosition(atDocumentPoint: point, columnX: columnX, scrollX: wideScrollX) {
-                if !isSelected(hit), let word = controller.wordRange(around: hit) {
+                if !isSelected(hit), !isPointNearSelection(point), let word = controller.wordRange(around: hit) {
                     let text = controller.text(from: word.anchor, to: word.focus)
                     guard !text.isEmpty else { return }
                     let anchor =
@@ -220,8 +219,33 @@
                 scrollBy(deltaY: pageScrollDistance * (modifiers.contains(.shift) ? -1 : 1))
                 return
             }
+            didHandleKeyCommand = false
             interpretKeyEvents([event])
+            if !didHandleKeyCommand {
+                super.keyDown(with: event)
+            }
         }
+
+        override func doCommand(by selector: Selector) {
+            switch selector {
+            case #selector(moveUp(_:)), #selector(moveDown(_:)),
+                #selector(pageUp(_:)), #selector(pageDown(_:)),
+                #selector(scrollPageUp(_:)), #selector(scrollPageDown(_:)),
+                #selector(scrollToBeginningOfDocument(_:)), #selector(scrollToEndOfDocument(_:)),
+                #selector(moveToBeginningOfDocument(_:)), #selector(moveToEndOfDocument(_:)):
+                didHandleKeyCommand = true
+                perform(selector, with: nil)
+            case #selector(cancelOperation(_:)):
+                if controller.hasValidSelection {
+                    didHandleKeyCommand = true
+                    controller.setSelection(nil)
+                }
+            default:
+                break
+            }
+        }
+
+        override func insertText(_ insertString: Any) {}
 
         override func moveUp(_ sender: Any?) { scrollBy(deltaY: -40) }
         override func moveDown(_ sender: Any?) { scrollBy(deltaY: 40) }
@@ -229,13 +253,13 @@
         override func pageDown(_ sender: Any?) { scrollBy(deltaY: pageScrollDistance) }
         override func scrollPageUp(_ sender: Any?) { scrollBy(deltaY: -pageScrollDistance) }
         override func scrollPageDown(_ sender: Any?) { scrollBy(deltaY: pageScrollDistance) }
-        override func scrollToBeginningOfDocument(_ sender: Any?) { scrollToTop() }
+        override func scrollToBeginningOfDocument(_ sender: Any?) { setViewportTop(0) }
         override func scrollToEndOfDocument(_ sender: Any?) { controller.jumpToEnd(animated: false) }
-        override func moveToBeginningOfDocument(_ sender: Any?) { scrollToTop() }
+        override func moveToBeginningOfDocument(_ sender: Any?) { setViewportTop(0) }
         override func moveToEndOfDocument(_ sender: Any?) { controller.jumpToEnd(animated: false) }
 
         override func cancelOperation(_ sender: Any?) {
-            if controller.selection != nil {
+            if controller.hasValidSelection {
                 controller.setSelection(nil)
             } else {
                 nextResponder?.tryToPerform(#selector(cancelOperation(_:)), with: sender)
@@ -243,28 +267,11 @@
         }
 
         private var pageScrollDistance: CGFloat {
-            let visible = controller.lastViewport?.visibleHeight ?? enclosingScrollView?.contentView.bounds.height ?? 400
-            return max(40, (visible * 0.9).rounded(.down))
+            max(40, ((viewport?.visibleHeight ?? 400) * 0.9).rounded(.down))
         }
 
         private func scrollBy(deltaY: CGFloat) {
-            guard let scrollView = enclosingScrollView else { return }
-            let clip = scrollView.contentView
-            var proposed = clip.bounds
-            proposed.origin.y += deltaY
-            let origin = clip.constrainBoundsRect(proposed).origin
-            clip.scroll(to: origin)
-            scrollView.reflectScrolledClipView(clip)
-        }
-
-        private func scrollToTop() {
-            guard let scrollView = enclosingScrollView else { return }
-            let clip = scrollView.contentView
-            let origin = clip.constrainBoundsRect(
-                NSRect(origin: NSPoint(x: 0, y: -clip.contentInsets.top), size: clip.bounds.size)
-            ).origin
-            clip.scroll(to: origin)
-            scrollView.reflectScrolledClipView(clip)
+            setViewportTop(viewportTop + deltaY)
         }
 
         // MARK: Cursor
@@ -393,13 +400,26 @@
             currentSelectionRects().contains { $0.insetBy(dx: -2, dy: -2).contains(point) }
         }
 
-        func currentSelectionRects() -> [CGRect] {
-            guard let selection = controller.selection, !selection.isEmpty,
-                let anchorFirst = controller.isBefore(selection.anchor, selection.focus)
-            else { return [] }
-            let start = anchorFirst ? selection.anchor : selection.focus
-            let end = anchorFirst ? selection.focus : selection.anchor
-            return controller.selectionRects(from: start, to: end, columnX: columnX, scrollX: wideScrollX)
+        private func currentSelectionRects() -> [CGRect] {
+            controller.currentSelectionRects(columnX: columnX, scrollX: wideScrollX)
+        }
+    }
+
+    /// Defers materializing multi-MB selected text until the user actually
+    /// invokes a Share service from the context menu.
+    private final class LazySelectionShareItem: NSObject, NSPasteboardWriting {
+        private let resolve: () -> String
+
+        init(_ resolve: @escaping () -> String) {
+            self.resolve = resolve
+        }
+
+        func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
+            [.string]
+        }
+
+        func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? {
+            type == .string ? resolve() : nil
         }
     }
 

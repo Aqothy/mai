@@ -17,7 +17,6 @@ nonisolated struct TranscriptGeometry {
     private(set) var heights: [CGFloat] = []
     private(set) var totalHeight: CGFloat = 0
     private struct Edit {
-        let at: Int
         let oldEnd: Int
         let delta: Int
     }
@@ -41,6 +40,10 @@ nonisolated struct TranscriptGeometry {
 
     var count: Int { ids.count }
     var isEmpty: Bool { ids.isEmpty }
+    #if DEBUG
+        var debugPendingEditCount: Int { edits.count }
+        var debugHasNonContiguousSources: Bool { hasNonContiguousSources }
+    #endif
 
     func height(at index: Int) -> CGFloat { heights[index] }
 
@@ -55,7 +58,7 @@ nonisolated struct TranscriptGeometry {
     }
 
     @inline(__always)
-    private func resolve(_ entry: IndexEntry) -> Int? {
+    private func resolve(_ entry: IndexEntry) -> Int {
         var idx = entry.index
         var epoch = entry.epoch
         let count = edits.count
@@ -63,8 +66,6 @@ nonisolated struct TranscriptGeometry {
             let edit = edits[epoch]
             if idx >= edit.oldEnd {
                 idx += edit.delta
-            } else if idx >= edit.at {
-                return nil
             }
             epoch += 1
         }
@@ -82,7 +83,7 @@ nonisolated struct TranscriptGeometry {
         var previous: [String: Int] = [:]
         previous.reserveCapacity(self.ids.count)
         for (id, entry) in indices {
-            if let resolved = resolve(entry) { previous[id] = resolved }
+            previous[id] = resolve(entry)
         }
         self.ids = ids
         self.sources = sources.count == ids.count ? sources : ids
@@ -112,30 +113,19 @@ nonisolated struct TranscriptGeometry {
         let delta = newIDs.count - range.count
         let newEnd = start + newIDs.count
         let clampedHeights = newHeights.map(Self.clamped)
+        let mustRebuild = hasDuplicateIDs || hasNonContiguousSources || edits.count >= Self.maxPendingEdits
 
-        if hasDuplicateIDs || hasNonContiguousSources || edits.count >= Self.maxPendingEdits {
-            ids.replaceSubrange(range, with: newIDs)
-            sources.replaceSubrange(range, with: newSources)
-            if delta == 0 {
-                for offset in 0..<clampedHeights.count {
-                    setHeight(clampedHeights[offset], at: start + offset)
+        if !mustRebuild {
+            // Remove entries belonging strictly to the replaced slice.
+            for index in range {
+                indices[ids[index]] = nil
+                let source = sources[index]
+                if let existing = sourceStart(for: source), range.contains(existing) {
+                    sourceStarts[source] = nil
                 }
-            } else {
-                heights.replaceSubrange(range, with: clampedHeights)
-                updateTreeAfterReplace(start: start)
             }
-            rebuildIndex()
-            return
         }
 
-        // Remove entries belonging strictly to the replaced slice.
-        for index in range {
-            indices[ids[index]] = nil
-            let source = sources[index]
-            if let existing = sourceStart(for: source), range.contains(existing) {
-                sourceStarts[source] = nil
-            }
-        }
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
         if delta == 0 {
@@ -144,9 +134,17 @@ nonisolated struct TranscriptGeometry {
             }
         } else {
             heights.replaceSubrange(range, with: clampedHeights)
+            updateTreeAfterReplace(start: start)
         }
 
-        edits.append(Edit(at: start, oldEnd: oldEnd, delta: delta))
+        if mustRebuild {
+            rebuildIndex()
+            return
+        }
+
+        if delta != 0 {
+            edits.append(Edit(oldEnd: oldEnd, delta: delta))
+        }
         let epoch = edits.count
 
         for index in start..<newEnd {
@@ -183,15 +181,13 @@ nonisolated struct TranscriptGeometry {
                 sourceStarts[tailSource] = IndexEntry(index: newEnd, epoch: epoch)
             }
         }
-        if delta != 0 {
-            updateTreeAfterReplace(start: start)
-        }
     }
 
     private mutating func updateTreeAfterReplace(start: Int) {
-        // Near-tail splices touch only the suffix; mid-history splices run an
-        // allocation-free in-place Fenwick rebuild (~10 µs for 4,000 rows).
-        guard ids.count - start <= 1_024 else {
+        // Streaming tail appends touch only the last few nodes; mid-history
+        // splices run an allocation-free in-place Fenwick rebuild (~10 µs for
+        // 4,000 rows).
+        guard ids.count - start <= 64 else {
             rebuildTree()
             return
         }

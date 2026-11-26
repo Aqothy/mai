@@ -225,7 +225,7 @@ struct TranscriptControllerScrollTests {
     }
 
     /// Bounded-budget sync fallback prepares normal-sized visible blank rows
-    /// synchronously within the deadline while leaving giant (> 8 KB) rows
+    /// synchronously within the deadline while leaving giant (> 2 KB) rows
     /// strictly off the main thread.
     @Test func syncFallbackPreparesNormalVisibleRowsAndSkipsGiantRows() {
         let controller = TranscriptController(configuration: .launch)
@@ -255,10 +255,10 @@ struct TranscriptControllerScrollTests {
         // Small visible pending row parsed and laid out synchronously.
         #expect(controller.rows.contains { $0.id == "\(smallMessage.id)#0" })
         #expect(controller.layouts["\(smallMessage.id)#0"] != nil)
-        // Giant > 128 KB pending row stayed untouched for off-main LayoutQueue.
+        // Giant > 32 KB pending row stayed untouched for off-main LayoutQueue.
         #expect(controller.rows.contains { $0.id == giantPending.id })
 
-        // A large Markdown table (metrics.bytes == 0, > 64 cells) must also be
+        // A large Markdown table (metrics.bytes == 0, > 32 cells) must also be
         // skipped by synchronous fallback, and rows under `topInset` must not
         // be skipped by step 2's raw-rect conversion.
         let header = (0..<4).map { [MarkdownInline(text: "H\($0)")] }

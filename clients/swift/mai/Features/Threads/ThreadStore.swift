@@ -172,24 +172,11 @@ final class ThreadStore {
             noteThreadsChanged()
         }
 
-        init(syntheticThreads: [(summary: ThreadSummary, build: () -> ThreadDetail)]) {
-            let rpc = RPCClient()
-            self.rpc = rpc
-            connection = RPCConnectionCoordinator(rpc: rpc, initiallyConnected: true)
-            now = Date.init
-            threads = syntheticThreads.map(\.summary)
+        convenience init(syntheticThreads: [(summary: ThreadSummary, build: () -> ThreadDetail)]) {
+            self.init(previewThreads: syntheticThreads.map(\.summary), selectedThread: syntheticThreads.first?.build())
             for item in syntheticThreads {
                 syntheticThreadProviders[item.summary.id] = item.build
             }
-            if let first = syntheticThreads.first {
-                selectedThreadID = first.summary.id
-                var session = ThreadSession(detail: first.build())
-                session.subscriptionState = .visible
-                session.shouldRestoreAfterReconnect = true
-                sessionsByID[first.summary.id] = session
-            }
-            rebuildProviderCaches()
-            noteThreadsChanged()
         }
     #endif
 
@@ -887,8 +874,15 @@ final class ThreadStore {
                     session.inactiveSince = nil
                     session.subscriptionState = .visible
                     sessionsByID[id] = session
-                    selectedSessionGeneration += 1
-                    recomputeSelectedThreadTitle()
+                    noteSelectedSessionChanged(id)
+                    performSubscriptionMaintenance(at: timestamp)
+                    return
+                }
+                if id.hasPrefix("synthetic-benchmark-"), var session = sessionsByID[id] {
+                    session.inactiveSince = nil
+                    session.subscriptionState = .visible
+                    sessionsByID[id] = session
+                    noteSelectedSessionChanged(id)
                     performSubscriptionMaintenance(at: timestamp)
                     return
                 }
@@ -1257,7 +1251,7 @@ final class ThreadStore {
         streamingTextByThreadID[id] = nil
 
         #if DEBUG
-            if syntheticThreadProviders[id] != nil { return }
+            if syntheticThreadProviders[id] != nil || id.hasPrefix("synthetic-benchmark-") { return }
         #endif
 
         guard connectionState == .connected else { return }

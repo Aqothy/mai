@@ -10,7 +10,6 @@ protocol ThreadRPCClient: RPCTransportClient {
     func unsubscribeThread(_ threadID: String) async throws
     func syncThread(_ threadID: String) async throws
     func threadTurns(_ input: ThreadTurnsParams) async throws -> ThreadTurnsResult
-    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry
     func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview
     func getAttachment(_ id: String) async throws -> Attachment
     func uploadAttachment(_ data: String) async throws -> String
@@ -74,10 +73,6 @@ extension RPCClient: ThreadRPCClient {
 
     func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview {
         try await call(MaidRPCMethod.threadForkPreview, params: input)
-    }
-
-    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry {
-        try await call(MaidRPCMethod.threadEntry, params: input)
     }
 
     func getAttachment(_ id: String) async throws -> Attachment {

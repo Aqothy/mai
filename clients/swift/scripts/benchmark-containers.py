@@ -111,7 +111,6 @@ def main():
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--turns", type=int, default=1000)
     parser.add_argument("--timeout", type=float, default=180)
-    parser.add_argument("--engine", choices=["new", "legacy"], default="new")
     parser.add_argument("--foreground", action="store_true", help="Activate and bring the benchmark window to the front.")
     parser.add_argument("--with-chrome", action="store_true", help="Keep sidebar, composer, and toolbar.")
     parser.add_argument("--app-arg", action="append", default=[], metavar="ARG",
@@ -150,7 +149,6 @@ def main():
         "plan": args.plan,
         "runs": args.runs,
         "syntheticTurns": args.turns,
-        "engine": args.engine,
         "background": background,
         "transcriptOnly": not args.with_chrome,
         "appArguments": args.app_arg,
@@ -170,7 +168,6 @@ def main():
             "-ChatBenchmarkSyntheticTurns", str(args.turns),
             "-ChatBenchmarkUniqueAnswers", "YES",
             "-ChatBenchmarkTranscriptOnly", "NO" if args.with_chrome else "YES",
-            "-ChatTranscriptEngine", args.engine,
             *args.app_arg,
         ]
         subprocess.run(open_flags, check=True)

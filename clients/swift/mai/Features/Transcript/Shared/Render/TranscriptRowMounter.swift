@@ -150,14 +150,7 @@ final class TranscriptRowMounter {
             var visibleWidthLag: CGFloat = 0
         #endif
         if let range = geometry.indices(overlapping: max(0, drawn.minY), drawn.maxY) {
-            // Walk from the scroll-leading edge so downward scrolls spend any
-            // remaining sync raster budget on entering bottom rows first
-            // instead of starving the lower half of the viewport.
-            let step = downward ? -1 : 1
-            var index = downward ? range.upperBound : range.lowerBound
-            while range.contains(index) {
-                let rowIndex = index
-                index += step
+            for rowIndex in range {
                 let (minY, height) = geometry.frame(at: rowIndex)
                 let frame = CGRect(x: 0, y: minY, width: documentWidth, height: height)
                 guard let layout = controller.layout(forRowAt: rowIndex) else {
@@ -210,7 +203,7 @@ final class TranscriptRowMounter {
                         if layer.hasAccessories, let layout = controller.layouts[id] {
                             layer.accessoriesOrigin = origin
                             delegate?.showAccessories(
-                                rowID: id, accessories: layout.content.accessories(forRowID: id), origin: origin)
+                                rowID: id, accessories: layout.content.accessories(), origin: origin)
                         }
                         if layer.hasWideBlock, let layout = controller.layouts[id],
                             let wideBody = layout.content.wideBody
@@ -287,7 +280,7 @@ final class TranscriptRowMounter {
         if layer.accessoriesKey != layout.key || layer.accessoriesOrigin != origin {
             layer.accessoriesKey = layout.key
             layer.accessoriesOrigin = origin
-            let accessories = layout.content.accessories(forRowID: row.id)
+            let accessories = layout.content.accessories()
             if !accessories.isEmpty {
                 layer.hasAccessories = true
                 delegate?.showAccessories(rowID: row.id, accessories: accessories, origin: origin)

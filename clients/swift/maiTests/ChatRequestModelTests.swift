@@ -62,19 +62,6 @@ struct ChatRequestModelTests {
     }
 
     @Test
-    func submittedAnswersShowOptionLabels() throws {
-        let model = ChatRequestModel(request: try request("""
-            {"actions":[],"message":"Pick","questions":[
-              {"id":"color","kind":"choice","title":"Color","options":[{"value":"b","label":"Blue"}]},
-              {"id":"note","kind":"text"}
-            ]}
-            """), send: { _, _ in })
-        let shown = model.submittedAnswers(["note": ["Thanks"], "color": ["b"]])
-        #expect(shown.map(\.title) == ["Color", "note"])
-        #expect(shown.map(\.answer) == ["Blue", "Thanks"])
-    }
-
-    @Test
     func urlRequestsOnlyAcceptWebLinks() throws {
         #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
         #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)

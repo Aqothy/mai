@@ -5,7 +5,7 @@ import Foundation
 /// on its header line, a table's in its toolbar, a finished turn's copy-reply
 /// button and fork menu at the start of its action row.
 nonisolated extension RowContentLayout {
-    func accessories(forRowID rowID: String) -> [RowAccessory] {
+    func accessories() -> [RowAccessory] {
         let size = RowAccessory.size
         switch self {
         case .code(let code, let frame):

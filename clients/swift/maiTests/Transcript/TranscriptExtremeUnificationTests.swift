@@ -165,46 +165,6 @@ nonisolated struct TranscriptExtremeUnificationTests {
         #expect(TextLayoutEngine.isBiDiCodeUnit(0xFEFC))
     }
 
-    @Test func staleLayoutGenerationSkipsSpeculativePreRaster() async throws {
-        let style = await makeStyle()
-        let palette = await makePalette()
-        let drawnFlags = Mutex<[Bool]>([])
-        let queue = LayoutQueue(concurrency: 1) { result in
-            if case .layout(_, let drawn) = result {
-                drawnFlags.withLock { $0.append(drawn != nil) }
-            }
-        }
-        let drawing = DrawnBands.Drawing(palette: palette, scale: 2, colorSpace: RowLayer.colorSpace)
-        let key = RowLayoutKey(contentVersion: 0, width: 400, styleVersion: style.version)
-        let longText = String(repeating: "benchmark word ", count: 200)
-        let job1 = LayoutQueue.Job(
-            id: "layout|r0",
-            work: .layout(
-                RowLayoutRequest(
-                    rowID: "r0", kind: .markdownBlock(.paragraph([MarkdownInline(text: longText)]), .single),
-                    key: key, style: style),
-                drawing: drawing),
-            priority: 0)
-        let job2 = LayoutQueue.Job(
-            id: "layout|r1",
-            work: .layout(
-                RowLayoutRequest(
-                    rowID: "r1", kind: .markdownBlock(.paragraph([MarkdownInline(text: "Fresh visible row")]), .single),
-                    key: key, style: style),
-                drawing: drawing),
-            priority: 0)
-
-        await queue.submit(urgent: [job1], generation: 1, replacingUrgent: true)
-        await queue.submit(urgent: [job2], generation: 2, replacingUrgent: true)
-
-        for _ in 0..<100 where drawnFlags.withLock({ $0.count }) < 2 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        let flags = drawnFlags.withLock { $0 }
-        // At least the fresh generation-2 job pre-rastered cleanly.
-        #expect(flags.last == true)
-    }
-
     // MARK: Review & blanking regression tests
 
     @Test func virtualizedCodeRendersSlicedColorsAndInvalidatesDiffOnColorChange() async {
