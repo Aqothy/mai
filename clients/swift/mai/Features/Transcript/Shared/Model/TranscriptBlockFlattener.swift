@@ -36,6 +36,10 @@ nonisolated struct TranscriptBlockContext: Hashable, Sendable {
     var joinsAbove: Bool = false
     /// True when a continuation slice follows immediately below.
     var joinsBelow: Bool = false
+    /// True when this slice continues the previous slice's text without a
+    /// consumed newline, so selection copy and UTF-16 offsets join with `""`
+    /// instead of inserting `"\n"`.
+    var joinsInline: Bool = false
     /// Spacing above when `joinsAbove` is true: `.none` (same paragraph/slice),
     /// `.tight` (tight list sibling), or `.block` (separate block inside a
     /// flattened quote, list item, or user bubble).
@@ -67,9 +71,9 @@ nonisolated struct TranscriptBlockContext: Hashable, Sendable {
     func spacingAbove(_ position: TranscriptBlockPosition, style: TextStyle) -> CGFloat {
         if joinsAbove {
             switch joinSpacingAbove {
-            case .none: return 0
-            case .tight: return style.listItemSpacing
-            case .block: return style.blockSpacing
+            case .none: return style.lineSpacing
+            case .tight: return style.lineSpacing + style.listItemSpacing
+            case .block: return style.lineSpacing + style.blockSpacing
             }
         }
         switch presentation {
@@ -101,12 +105,10 @@ nonisolated struct TranscriptBlockContext: Hashable, Sendable {
 /// Normal blocks (`<= 4 KB`) pass through untouched (zero extra rows for
 /// everyday chats). Giant lists, quotes, user messages, thoughts, and
 /// multi-hundred-KB single paragraphs/list items are recursively bounded into
-/// `<= 4 KB` slices so CoreText layout, cache retention, sync blanking
-/// fallback, and initial open stay strictly O(viewport) even on 20 MB+ chats.
+/// `<= 4 KB` slices so CoreText layout, cache retention, and initial open stay
+/// O(viewport) even on 20 MB+ chats; copy joins slices exactly (`joinsInline`).
 nonisolated enum TranscriptBlockFlattener {
-    /// Maximum UTF-8 bytes per prose row before flattening/slicing. Matched to
-    /// `TranscriptController.syncFallbackByteLimit` so every flattened slice is
-    /// eligible for bounded-budget synchronous fallback on fast scrollbar scrubs.
+    /// Maximum UTF-8 bytes per prose row before flattening/slicing.
     static let maxSliceBytes = 4_096
 
     /// Produces the row kinds for a parsed message's `blocks`.
@@ -316,19 +318,22 @@ nonisolated enum TranscriptBlockFlattener {
         var current: [MarkdownInline] = []
         var currentBytes = 0
         var isFirstSlice = true
+        var pendingJoinsInline = false
 
-        func emit() {
+        func emit(nextJoinsInline: Bool) {
             guard !current.isEmpty else { return }
             var sliceContext = context
             if !isFirstSlice {
                 sliceContext.listMarker = nil
                 sliceContext.joinsAbove = true
+                sliceContext.joinsInline = pendingJoinsInline
                 sliceContext.joinSpacingAbove = .none
             }
             let block: MarkdownBlock =
                 if let headingLevel { .heading(level: headingLevel, current) } else { .paragraph(current) }
             slices.append(Slice(block: block, context: sliceContext))
             isFirstSlice = false
+            pendingJoinsInline = nextJoinsInline
             current.removeAll(keepingCapacity: true)
             currentBytes = 0
         }
@@ -345,7 +350,7 @@ nonisolated enum TranscriptBlockFlattener {
             while cursor < text.endIndex {
                 let remainingAllowance = maxSliceBytes - currentBytes
                 if remainingAllowance <= 0 {
-                    emit()
+                    emit(nextJoinsInline: true)
                     continue
                 }
                 let remainingBytes = utf8.distance(from: cursor, to: text.endIndex)
@@ -360,7 +365,7 @@ nonisolated enum TranscriptBlockFlattener {
                 let split = splitPoint(in: text, from: cursor, upTo: target)
                 if split.end == cursor {
                     if !current.isEmpty {
-                        emit()
+                        emit(nextJoinsInline: true)
                         continue
                     }
                     // Single unbroken token longer than `maxSliceBytes`: cut at
@@ -371,7 +376,7 @@ nonisolated enum TranscriptBlockFlattener {
                     current.append(part)
                     currentBytes += utf8.distance(from: cursor, to: forced)
                     cursor = forced
-                    emit()
+                    emit(nextJoinsInline: true)
                     continue
                 }
                 var part = inline
@@ -379,10 +384,10 @@ nonisolated enum TranscriptBlockFlattener {
                 current.append(part)
                 currentBytes += utf8.distance(from: cursor, to: split.end)
                 cursor = split.next
-                emit()
+                emit(nextJoinsInline: split.end == split.next)
             }
         }
-        emit()
+        emit(nextJoinsInline: false)
         connectSlices(from: startIndex, to: slices.count, in: &slices)
     }
 
@@ -392,6 +397,7 @@ nonisolated enum TranscriptBlockFlattener {
         let startIndex = slices.count
         var cursor = code.startIndex
         var isFirst = true
+        var pendingJoinsInline = false
         while cursor < code.endIndex {
             let remaining = code.utf8.distance(from: cursor, to: code.endIndex)
             if remaining <= maxSliceBytes {
@@ -399,6 +405,7 @@ nonisolated enum TranscriptBlockFlattener {
                 if !isFirst {
                     sliceContext.listMarker = nil
                     sliceContext.joinsAbove = true
+                    sliceContext.joinsInline = pendingJoinsInline
                     sliceContext.joinSpacingAbove = .none
                 }
                 slices.append(
@@ -413,10 +420,12 @@ nonisolated enum TranscriptBlockFlattener {
                 if !isFirst {
                     sliceContext.listMarker = nil
                     sliceContext.joinsAbove = true
+                    sliceContext.joinsInline = pendingJoinsInline
                     sliceContext.joinSpacingAbove = .none
                 }
                 slices.append(Slice(block: .code(language: language, code: String(code[cursor..<sliceEnd])), context: sliceContext))
                 isFirst = false
+                pendingJoinsInline = sliceEnd == nextCursor
                 cursor = nextCursor
             }
         }

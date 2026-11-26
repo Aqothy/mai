@@ -140,21 +140,42 @@ extension TranscriptController {
             ? text(from: selection.anchor, to: selection.focus) : text(from: selection.focus, to: selection.anchor)
     }
 
-    /// The text from `start` to `end` (in order), rows joined by newlines.
+    private func separatorBefore(rowAt index: Int) -> String {
+        rows[index].kind.separatorBefore
+    }
+
+    /// The text from `start` to `end` (in order), rows joined by their
+    /// separators. Unparsed `.pendingMessage` rows render their Markdown on
+    /// demand so copied text never depends on scroll history.
     func text(from start: TextPosition, to end: TextPosition) -> String {
         guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
         else { return "" }
         var result = ""
         var hasPart = false
         for index in first...last {
-            guard let text = selectableText(ofRowAt: index) else { continue }
-            let utf16 = text.utf16
-            let from = index == first ? min(start.offset, utf16.count) : 0
-            let to = index == last ? min(end.offset, utf16.count) : utf16.count
+            let row = rows[index]
+            guard row.kind.isSelectable else { continue }
+            let text: String
+            let from: Int
+            let to: Int
+            if case .pendingMessage(let message, let source) = row.kind {
+                text = RowSelectableText.renderedPendingString(message: message, source: source, style: style)
+                let renderedCount = text.utf16.count
+                let sourceCount = source.utf16.count
+                from = index == first ? min(start.offset, renderedCount) : 0
+                to = index == last ? (end.offset >= sourceCount ? renderedCount : min(end.offset, renderedCount)) : renderedCount
+            } else {
+                guard let rowText = selectableText(ofRowAt: index) else { continue }
+                text = rowText
+                let count = text.utf16.count
+                from = index == first ? min(start.offset, count) : 0
+                to = index == last ? min(end.offset, count) : count
+            }
             guard from <= to else { continue }
+            let utf16 = text.utf16
             let lower = utf16.index(utf16.startIndex, offsetBy: from)
             let upper = utf16.index(utf16.startIndex, offsetBy: to)
-            if hasPart { result += "\n" }
+            if hasPart { result += separatorBefore(rowAt: index) }
             result += text[lower..<upper]
             hasPart = true
         }
@@ -189,11 +210,13 @@ extension TranscriptController {
                 guard let previous = rows[..<index].lastIndex(where: \.kind.isSelectable),
                     let previousLength = selectableLength(ofRowAt: previous)
                 else { return nil }
-                offset += previousLength + 1
+                let sep = separatorBefore(rowAt: index).utf16.count
+                offset += previousLength + sep
                 index = previous
             } else if offset > length {
                 guard let next = rows[(index + 1)...].firstIndex(where: \.kind.isSelectable) else { return nil }
-                offset -= length + 1
+                let sep = separatorBefore(rowAt: next).utf16.count
+                offset -= length + sep
                 index = next
             } else {
                 if direction != 0, offset > 0, offset < length, let text = selectableText(ofRowAt: index) {
@@ -335,9 +358,9 @@ extension TranscriptController {
         if second < first { return -offset(from: b, to: a) }
         var count = (selectableLength(ofRowAt: first) ?? 0) - a.offset
         for index in (first + 1)..<second where rows[index].kind.isSelectable {
-            count += 1 + (selectableLength(ofRowAt: index) ?? 0)
+            count += separatorBefore(rowAt: index).utf16.count + (selectableLength(ofRowAt: index) ?? 0)
         }
-        return count + 1 + b.offset
+        return count + separatorBefore(rowAt: second).utf16.count + b.offset
     }
 
     /// Highlight rects from `start` to `end` (document coordinates) for rows
@@ -347,7 +370,9 @@ extension TranscriptController {
     /// `isStart` is true only on the first rect of `start`'s actual row, and
     /// `isEnd` only on the last rect of `end`'s actual row — so when either
     /// endpoint scrolls off-screen and loses its layout, UIKit never attaches a
-    /// start/end grab handle to a mid-selection visible row.
+    /// start/end grab handle to a mid-selection visible row. When an endpoint
+    /// sits exactly on a row boundary (`from == to`), a zero-width caret rect
+    /// carries the `isStart`/`isEnd` tag so iOS still draws its grab handle.
     func taggedSelectionRects(
         from start: TextPosition, to end: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat
     ) -> [(rect: CGRect, isStart: Bool, isEnd: Bool)] {
@@ -359,7 +384,22 @@ extension TranscriptController {
             // A selection made before the text shrank (a re-parse) ends past it.
             let from = index == first ? min(start.offset, length) : 0
             let to = index == last ? min(end.offset, length) : length
-            guard from < to else { continue }
+            guard from < to else {
+                if first < last {
+                    if index == first, let caret = caretRect(for: start, columnX: columnX, scrollX: scrollX) {
+                        result.append((
+                            rect: CGRect(x: caret.minX, y: caret.minY, width: 0, height: caret.height),
+                            isStart: true, isEnd: false
+                        ))
+                    } else if index == last, let caret = caretRect(for: end, columnX: columnX, scrollX: scrollX) {
+                        result.append((
+                            rect: CGRect(x: caret.minX, y: caret.minY, width: 0, height: caret.height),
+                            isStart: false, isEnd: true
+                        ))
+                    }
+                }
+                continue
+            }
             let top = geometry.offset(at: index)
             let wideBody = layout.content.wideBody
             let dx = columnX - (wideBody != nil ? scrollX(rows[index].id) : 0)
@@ -511,11 +551,6 @@ extension TranscriptController {
             return layout.content.selectableLength
         }
         if let precomputed = row.metrics.selectableUTF16 { return precomputed }
-        if let cached = selectableLengths[row.id], cached.version == row.contentVersion {
-            return cached.length
-        }
-        guard let length = RowSelectableText.utf16Length(for: row.kind) else { return nil }
-        selectableLengths[row.id] = (row.contentVersion, length)
-        return length
+        return RowSelectableText.utf16Length(for: row.kind)
     }
 }

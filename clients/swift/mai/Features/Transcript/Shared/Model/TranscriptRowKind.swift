@@ -36,4 +36,12 @@ nonisolated extension TranscriptRowKind {
         case .activity, .turnHeader, .turnActions, .working: false
         }
     }
+
+    /// The text joining this row to the selectable row before it: `""` for a
+    /// flattened slice that continues the previous slice's text at a cut that
+    /// consumed nothing, `"\n"` for every other row.
+    var separatorBefore: String {
+        if case .markdownBlock(_, _, let context) = self, context.joinsInline { return "" }
+        return "\n"
+    }
 }

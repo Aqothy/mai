@@ -27,6 +27,21 @@ nonisolated enum RowSelectableText {
         }
     }
 
+    /// Parses an unparsed `.pendingMessage` on demand when the user copies it,
+    /// returning the exact same plain text it produces once scrolled near and
+    /// parsed (so copy never depends on scroll history).
+    static func renderedPendingString(message: TranscriptMessage, source: String, style: TextStyle) -> String {
+        let blocks = MarkdownPlanner.blocks(from: source)
+        let rows = message.rows(from: blocks)
+        var result = ""
+        for (index, row) in rows.enumerated() {
+            guard let part = string(for: row.kind, style: style) else { continue }
+            if index > 0 { result += row.kind.separatorBefore }
+            result += part
+        }
+        return result
+    }
+
     /// Exact UTF-16 length of `string(for:style:)` without building an
     /// `NSAttributedString` or touching Core Text fonts. Matches
     /// `RowContentLayout.selectableLength` for every selectable row kind.

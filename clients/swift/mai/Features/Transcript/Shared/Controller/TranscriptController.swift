@@ -63,9 +63,6 @@ final class TranscriptController {
     /// Bands pre-drawn off the main thread with a streamed or cold layout, for
     /// the row's next placement; cleared by it.
     @ObservationIgnored var preDrawnBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
-    /// Cached selectable UTF-16 lengths for rows without a layout or
-    /// precomputed `TextMetrics.selectableUTF16` (such as `.pendingMessage`).
-    @ObservationIgnored var selectableLengths: [String: (version: Int, length: Int)] = [:]
     #if DEBUG
         @ObservationIgnored var debugReaderMoves: [ScrollFollowPolicy.ReaderScroll] = []
     #endif
@@ -260,7 +257,6 @@ final class TranscriptController {
     /// height unless `measuredHeights` has one; a new row takes an estimate.
     func setRows(_ newRows: [TranscriptRow], measuredHeights: [String: CGFloat] = [:]) {
         let versioned = versioned(newRows)
-        selectableLengths.removeAll(keepingCapacity: true)
         changeGeometry {
             rows = versioned
             let width = columnWidth > 0 ? columnWidth : 600
@@ -314,12 +310,19 @@ final class TranscriptController {
         // Drop cached layouts and measured heights for rows leaving the
         // transcript so a reused ID (such as `"working"` on the next turn)
         // cannot collide at contentVersion 0 or reuse a stale height.
+        var remappedSelection: TranscriptSelection?
         if !old.isEmpty {
             let kept = Set(versioned.lazy.map(\.id))
             for id in old.keys where !kept.contains(id) {
                 removeLayout(for: id)
                 measuredRowHeights.removeValue(forKey: id)
-                selectableLengths.removeValue(forKey: id)
+            }
+            if let current = selection {
+                let newAnchor = remapRemovedPosition(current.anchor, old: old, kept: kept, replacement: versioned)
+                let newFocus = remapRemovedPosition(current.focus, old: old, kept: kept, replacement: versioned)
+                if newAnchor != current.anchor || newFocus != current.focus {
+                    remappedSelection = TranscriptSelection(anchor: newAnchor, focus: newFocus)
+                }
             }
         }
         changeGeometry(replacingRange: range) {
@@ -327,7 +330,46 @@ final class TranscriptController {
             geometry.replaceRows(
                 range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
         }
+        if let remappedSelection {
+            selection = remappedSelection
+            host?.setNeedsSelectionDisplay()
+        }
         scheduleWork()
+    }
+
+    /// Remaps a selection endpoint anchored on a replaced row (such as a
+    /// `.pendingMessage` expanding into its parsed blocks) onto the surviving
+    /// rows for the same `sourceID` so Select All and cross-row selections
+    /// survive lazy parsing.
+    private func remapRemovedPosition(
+        _ position: TextPosition,
+        old: [String: (row: TranscriptRow, height: CGFloat)],
+        kept: Set<String>,
+        replacement: [TranscriptRow]
+    ) -> TextPosition {
+        guard !kept.contains(position.rowID), let removed = old[position.rowID]?.row else { return position }
+        let matching = replacement.filter { $0.sourceID == removed.sourceID && $0.kind.isSelectable }
+        guard let first = matching.first, let last = matching.last else { return position }
+        if position.offset <= 0 {
+            return TextPosition(rowID: first.id, offset: 0)
+        }
+        if let oldLength = removed.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: removed.kind),
+            position.offset >= oldLength
+        {
+            let lastLength = last.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: last.kind) ?? 0
+            return TextPosition(rowID: last.id, offset: lastLength)
+        }
+        var remaining = position.offset
+        for (idx, row) in matching.enumerated() {
+            if idx > 0 { remaining = max(0, remaining - row.kind.separatorBefore.utf16.count) }
+            let len = row.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: row.kind) ?? 0
+            if remaining <= len {
+                return TextPosition(rowID: row.id, offset: remaining)
+            }
+            remaining -= len
+        }
+        let lastLength = last.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: last.kind) ?? 0
+        return TextPosition(rowID: last.id, offset: lastLength)
     }
 
     /// Updates rows in place whose IDs stay, with their new heights: a
