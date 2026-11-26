@@ -116,9 +116,15 @@ nonisolated struct TranscriptGeometry {
         if hasDuplicateIDs || hasNonContiguousSources || edits.count >= Self.maxPendingEdits {
             ids.replaceSubrange(range, with: newIDs)
             sources.replaceSubrange(range, with: newSources)
-            heights.replaceSubrange(range, with: clampedHeights)
+            if delta == 0 {
+                for offset in 0..<clampedHeights.count {
+                    setHeight(clampedHeights[offset], at: start + offset)
+                }
+            } else {
+                heights.replaceSubrange(range, with: clampedHeights)
+                updateTreeAfterReplace(start: start)
+            }
             rebuildIndex()
-            updateTreeAfterReplace(start: start)
             return
         }
 
@@ -132,7 +138,13 @@ nonisolated struct TranscriptGeometry {
         }
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
-        heights.replaceSubrange(range, with: clampedHeights)
+        if delta == 0 {
+            for offset in 0..<clampedHeights.count {
+                setHeight(clampedHeights[offset], at: start + offset)
+            }
+        } else {
+            heights.replaceSubrange(range, with: clampedHeights)
+        }
 
         edits.append(Edit(at: start, oldEnd: oldEnd, delta: delta))
         let epoch = edits.count
@@ -163,20 +175,23 @@ nonisolated struct TranscriptGeometry {
         // sources non-contiguous so future removals rebuild cleanly.
         if newEnd < sources.count {
             let tailSource = sources[newEnd]
-            if sourceStart(for: tailSource) == nil {
+            if let existing = sourceStart(for: tailSource) {
+                if existing < newEnd, newEnd > 0, sources[newEnd - 1] != tailSource {
+                    hasNonContiguousSources = true
+                }
+            } else {
                 sourceStarts[tailSource] = IndexEntry(index: newEnd, epoch: epoch)
-            } else if newEnd > 0, sources[newEnd - 1] != tailSource {
-                hasNonContiguousSources = true
             }
         }
-        updateTreeAfterReplace(start: start)
+        if delta != 0 {
+            updateTreeAfterReplace(start: start)
+        }
     }
 
     private mutating func updateTreeAfterReplace(start: Int) {
-        // Streaming tail appends touch only the last few nodes; mid-history
-        // splices run an allocation-free in-place Fenwick rebuild (~10 µs for
-        // 4,000 rows).
-        guard ids.count - start <= 64 else {
+        // Near-tail splices touch only the suffix; mid-history splices run an
+        // allocation-free in-place Fenwick rebuild (~10 µs for 4,000 rows).
+        guard ids.count - start <= 1_024 else {
             rebuildTree()
             return
         }
