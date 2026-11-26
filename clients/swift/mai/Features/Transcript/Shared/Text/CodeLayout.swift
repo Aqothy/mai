@@ -35,10 +35,6 @@ nonisolated struct CodeLayout: Sendable {
     /// The syntax colors drawn, kept so the same code laid out again (a new
     /// width or text size) keeps them; nil while plain.
     let colors: CodeColors?
-    /// True when `storage` was built by `MonospaceASCIIMetrics.materializeASCII`
-    /// rather than Core Text, so incremental Core Text suffix layout only runs
-    /// on Core Text prefixes.
-    let usedASCIIFastPath: Bool
 
     /// Materialized body when non-virtualized (nil for 2D-virtualized code).
     var materializedBody: TextLayout? {
@@ -92,25 +88,18 @@ nonisolated struct CodeLayout: Sendable {
             ?? TextLayoutEngine.layout(
                 AttributedTextBuilder.plain(display, role: .callout, color: .secondary, style: style),
                 width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
-        let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
         let storage: Body
         let bodyWidth: CGFloat
-        let usedASCIIFastPath: Bool
         if shouldVirtualize(code) {
+            let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
             let virtual = VirtualCodeBody(code: code, style: style, colors: colors, ascii: ascii)
             storage = .virtualized(virtual)
             bodyWidth = virtual.size.width
-            usedASCIIFastPath = false
-        } else if colors == nil, let fast = ascii.materializeASCII(code: code, style: style) {
-            storage = .materialized(fast)
-            bodyWidth = fast.size.width
-            usedASCIIFastPath = true
         } else {
             let bodyOptions = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
             var incremental: TextLayout?
             if colors == nil, let previous, previous.colors == nil, !previous.code.isEmpty,
                 case .materialized(let prevBody) = previous.storage,
-                !previous.usedASCIIFastPath,
                 code.hasPrefix(previous.code), prevBody.lines.count >= 3, !prevBody.hasComplexBiDi
             {
                 let keepCount = prevBody.lines.count - 1
@@ -131,7 +120,6 @@ nonisolated struct CodeLayout: Sendable {
                     options: bodyOptions)
             storage = .materialized(body)
             bodyWidth = body.size.width
-            usedASCIIFastPath = false
         }
         let headerHeight = style.codeHeaderHeight
         let contentWidth = ceil(bodyWidth + 2 * style.codeHorizontalInset)
@@ -139,8 +127,7 @@ nonisolated struct CodeLayout: Sendable {
         return CodeLayout(
             label: label, storage: storage, code: code, headerHeight: headerHeight, labelTop: style.codeHeaderTopInset,
             bodyOrigin: CGPoint(x: style.codeHorizontalInset, y: headerHeight),
-            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors,
-            usedASCIIFastPath: usedASCIIFastPath)
+            size: CGSize(width: width, height: height), contentWidth: contentWidth, colors: colors)
     }
 
     private static func shouldVirtualize(_ code: String) -> Bool {
@@ -176,7 +163,7 @@ nonisolated struct CodeLayout: Sendable {
         CodeLayout(
             label: label, storage: storage, code: code, headerHeight: headerHeight, labelTop: labelTop,
             bodyOrigin: bodyOrigin, size: CGSize(width: width, height: size.height), contentWidth: contentWidth,
-            colors: colors, usedASCIIFastPath: usedASCIIFastPath)
+            colors: colors)
     }
 
     func drawBody(at origin: CGPoint, clip: CGRect, palette: TextPalette, in context: CGContext) {

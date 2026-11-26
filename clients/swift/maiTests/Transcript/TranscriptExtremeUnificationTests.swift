@@ -11,7 +11,7 @@ import Testing
 @testable import mai
 
 /// Tests and fuzzers for the unified bounded-prose flattener, 2D-virtualized
-/// ASCII-fast `CodeLayout`, `U+FEFF` sliding-window fix, cancellable 1-hop
+/// `CodeLayout`, `U+FEFF` sliding-window fix, cancellable 1-hop
 /// raster, and iOS wide-block/inputView fixes.
 @MainActor
 struct TranscriptExtremeUnificationTests {
@@ -105,39 +105,7 @@ struct TranscriptExtremeUnificationTests {
         }
     }
 
-    // MARK: 2D-virtualized + ASCII-fast CodeLayout
-
-    @Test func asciiCodeFastPathMatchesCoreTextMetricsAndPixels() {
-        let sample = """
-            func compute(x: Int, y: Int) -> Int {
-            \tlet sum = x + y
-            \t\treturn sum * 2 // trailing check
-            }
-            """
-        let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
-        guard let fast = ascii.materializeASCII(code: sample, style: style) else {
-            Issue.record("expected ASCII fast path to handle pure ASCII code")
-            return
-        }
-        let coreText = TextLayoutEngine.layout(
-            CodeLayout.buildStyledCode(sample, colors: nil, style: style),
-            width: .greatestFiniteMagnitude,
-            options: .init(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight))
-
-        #expect(fast.lines.count == coreText.lines.count)
-        #expect(abs(fast.size.width - coreText.size.width) <= 1.0)
-        #expect(abs(fast.size.height - coreText.size.height) <= 0.01)
-        for (a, b) in zip(fast.lines, coreText.lines) {
-            #expect(a.range == b.range)
-            #expect(abs(a.top - b.top) <= 0.01)
-            #expect(abs(a.baseline - b.baseline) <= 0.5)
-            #expect(abs(a.width - b.width) <= 1.0)
-            #expect(a.caretOffsets.count == b.caretOffsets.count)
-            for (cx, cy) in zip(a.caretOffsets, b.caretOffsets) {
-                #expect(abs(cx - cy) <= 1.0)
-            }
-        }
-    }
+    // MARK: 2D-virtualized CodeLayout
 
     @Test func virtualizedCodeHandles50kLinesAnd1MBSingleHorizontalLineInOViewport() {
         // 1. 50,000 vertical lines

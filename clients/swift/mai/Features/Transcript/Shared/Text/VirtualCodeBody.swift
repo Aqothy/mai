@@ -57,90 +57,6 @@ nonisolated struct MonospaceASCIIMetrics: Sendable {
     func baselineOffset(fixedLineHeight: CGFloat) -> CGFloat {
         (fixedLineHeight - ascent - descent) / 2 + ascent
     }
-
-    /// Materializes a pure-ASCII code block into a `TextLayout` without
-    /// touching `NSAttributedString` or `CTTypesetter`. Returns `nil` if any
-    /// byte requires Core Text shaping (non-ASCII, control chars, or syntax colors).
-    func materializeASCII(code: String, style: TextStyle) -> TextLayout? {
-        guard isUniform else { return nil }
-        guard !code.isEmpty else { return .empty }
-        return code.utf8.withContiguousStorageIfAvailable { bytes -> TextLayout? in
-            materializeASCII(bytes: bytes, code: code, style: style)
-        } ?? materializeASCII(bytes: Array(code.utf8), code: code, style: style)
-    }
-
-    private func materializeASCII<C: RandomAccessCollection>(
-        bytes: C, code: String, style: TextStyle
-    ) -> TextLayout? where C.Element == UInt8, C.Index == Int {
-        // Verify pure fast ASCII + `\n` before allocating layout arrays.
-        for byte in bytes where byte != 0x0A && !Self.isFastASCIIByte(byte) {
-            return nil
-        }
-        let count = bytes.count
-        let lineHeight = style.codeLineHeight
-        let tabInterval = style.codeTabInterval
-        let baselineShift = baselineOffset(fixedLineHeight: lineHeight)
-
-        var lines: [TextLine] = []
-        var runs: [TextGlyphRun] = []
-        var maxWidth: CGFloat = 0
-        var y: CGFloat = 0
-        var lineStart = 0
-
-        while lineStart < count {
-            var lineEnd = lineStart
-            while lineEnd < count, bytes[lineEnd] != 0x0A { lineEnd += 1 }
-            let endsWithNewline = lineEnd < count
-            let rangeEnd = endsWithNewline ? lineEnd + 1 : lineEnd
-            let lineLen = rangeEnd - lineStart
-
-            let baseline = y + baselineShift
-            var carets = [CGFloat](repeating: 0, count: lineLen + 1)
-            var lineGlyphs: [CGGlyph] = []
-            var linePositions: [CGPoint] = []
-            lineGlyphs.reserveCapacity(lineEnd - lineStart)
-            linePositions.reserveCapacity(lineEnd - lineStart)
-
-            var x: CGFloat = 0
-            var visibleWidth: CGFloat = 0
-            for idx in lineStart..<lineEnd {
-                let byte = bytes[idx]
-                carets[idx - lineStart] = x
-                if byte == 0x09 {
-                    x = nextTabX(after: x, tabInterval: tabInterval)
-                } else {
-                    if byte != 0x20 {
-                        lineGlyphs.append(glyphs[Int(byte)])
-                        linePositions.append(CGPoint(x: x, y: -baseline))
-                        visibleWidth = x + advance
-                    }
-                    x += advance
-                }
-            }
-            carets[lineEnd - lineStart] = x
-            if endsWithNewline { carets[lineLen] = x }
-
-            let firstRun = runs.count
-            if !lineGlyphs.isEmpty {
-                runs.append(
-                    TextGlyphRun(
-                        font: font, glyphs: lineGlyphs, positions: linePositions, color: .primary,
-                        range: lineStart..<lineEnd, linkIndex: nil, isRightToLeft: false, visualWidth: visibleWidth))
-            }
-            lines.append(
-                TextLine(
-                    top: y, baseline: baseline, height: lineHeight, x: 0, width: visibleWidth,
-                    range: lineStart..<rangeEnd, caretOffsets: carets, runs: firstRun..<runs.count,
-                    decorations: 0..<0, endsWithNewline: endsWithNewline, hasComplexBiDi: false))
-            maxWidth = max(maxWidth, visibleWidth)
-            y += lineHeight
-            lineStart = rangeEnd
-        }
-
-        return TextLayout(
-            string: code, size: CGSize(width: ceil(maxWidth), height: ceil(y)),
-            lines: lines, runs: runs, decorations: [], links: [], hasComplexBiDi: false)
-    }
 }
 
 /// 2D-virtualized storage for extreme code blocks (`> 16 KB` or any single
@@ -148,6 +64,52 @@ nonisolated struct MonospaceASCIIMetrics: Sendable {
 /// and shapes/draws strictly the visible `(lines × columns)` slice per tile.
 /// Handles 500,000-line code dumps AND 1 MB+ single horizontal lines in < 2 ms.
 nonisolated struct VirtualCodeBody: Sendable {
+    /// Thread-safe bounded cache of Core Text single-line layouts for non-ASCII
+    /// or syntax-colored lines so hit-testing, caret queries, and tile drawing
+    /// never re-lay out a giant line repeatedly on the main thread.
+    private final class LineLayoutCache: Sendable {
+        struct State {
+            var layouts: [Int: TextLayout] = [:]
+            var order: [Int] = []
+            var totalBytes = 0
+        }
+
+        static let maxCachedLines = 64
+        static let maxCachedBytes = 8 * 1024 * 1024
+
+        let state = Mutex<State>(State())
+
+        func layout(for lineIndex: Int) -> TextLayout? {
+            state.withLock { $0.layouts[lineIndex] }
+        }
+
+        func insert(_ layout: TextLayout, for lineIndex: Int) {
+            state.withLock { state in
+                if let existing = state.layouts[lineIndex] {
+                    state.totalBytes -= existing.retainedBytes
+                } else {
+                    state.order.append(lineIndex)
+                }
+                state.layouts[lineIndex] = layout
+                state.totalBytes += layout.retainedBytes
+                // Always keep at least the most recently accessed line so
+                // dragging across a single 1 MB non-ASCII line stays O(1).
+                while state.order.count > 1,
+                    state.order.count > Self.maxCachedLines || state.totalBytes > Self.maxCachedBytes
+                {
+                    let oldest = state.order.removeFirst()
+                    if let removed = state.layouts.removeValue(forKey: oldest) {
+                        state.totalBytes -= removed.retainedBytes
+                    }
+                }
+            }
+        }
+
+        var retainedBytes: Int {
+            state.withLock { $0.totalBytes }
+        }
+    }
+
     let code: String
     /// UTF-8 byte offset of each line start (`lineByteStarts.count == lineCount`).
     let lineByteStarts: [Int]
@@ -171,9 +133,12 @@ nonisolated struct VirtualCodeBody: Sendable {
     let colors: CodeColors?
     /// Tight body size (`maxLineWidth × lineCount * lineHeight`), matching `TextLayout.size`.
     let size: CGSize
+    private let lineCache = LineLayoutCache()
 
     var lineCount: Int { lineByteStarts.count }
-    var retainedBytes: Int { lineByteStarts.count * 16 + nonASCIILines.count * 16 + tabbedLines.count * 16 + 128 }
+    var retainedBytes: Int {
+        lineByteStarts.count * 16 + nonASCIILines.count * 16 + tabbedLines.count * 16 + lineCache.retainedBytes + 128
+    }
 
     init(code: String, style: TextStyle, colors: CodeColors?, ascii: MonospaceASCIIMetrics) {
         self.code = code
@@ -186,9 +151,10 @@ nonisolated struct VirtualCodeBody: Sendable {
         var byteStarts: [Int] = [0]
         var utf16Starts: [Int] = [0]
         var nonASCIILines: Set<Int> = []
+        var nonASCIIEntries: [(lineIndex: Int, byteLength: Int, upperWidth: CGFloat)] = []
         var tabbedLines: Set<Int> = []
         var hasLargeNonASCIILine = false
-        var maxLineWidth: CGFloat = 0
+        var maxASCIIWidth: CGFloat = 0
         var totalUTF16 = 0
         let advance = ascii.advance
         let tabInterval = style.codeTabInterval
@@ -201,17 +167,25 @@ nonisolated struct VirtualCodeBody: Sendable {
             var lineHasTab = false
             var colX: CGFloat = 0
             var visibleX: CGFloat = 0
+            // Upper bound for a non-ASCII line's width: one column per UTF-8
+            // byte, wider than any common script draws (CJK: 3 bytes, ~1.7
+            // columns; emoji: 4 bytes, ~2.3 columns), so a line left
+            // unmeasured below is not clipped.
+            var upperX: CGFloat = 0
             var idx = 0
 
             func finishLine(at endByte: Int) {
                 if lineHasNonASCII {
                     nonASCIILines.insert(lineIndex)
-                    if endByte - lineByteStart > CodeLayout.virtualizeLineLimit {
+                    let byteLen = endByte - lineByteStart
+                    nonASCIIEntries.append((lineIndex, byteLen, upperX))
+                    if byteLen > CodeLayout.virtualizeLineLimit {
                         hasLargeNonASCIILine = true
                     }
+                } else {
+                    maxASCIIWidth = max(maxASCIIWidth, visibleX)
                 }
                 if lineHasTab { tabbedLines.insert(lineIndex) }
-                maxLineWidth = max(maxLineWidth, visibleX)
             }
 
             while idx < count {
@@ -230,6 +204,7 @@ nonisolated struct VirtualCodeBody: Sendable {
                     }
                     colX = 0
                     visibleX = 0
+                    upperX = 0
                 } else if b == 0x0D, idx + 1 < count, bytes[idx + 1] == 0x0A {
                     // Trailing `\r` in CRLF contributes a UTF-16 code unit but
                     // zero visual width and stays on the fast ASCII path.
@@ -239,13 +214,14 @@ nonisolated struct VirtualCodeBody: Sendable {
                     if b == 0x09 {
                         lineHasTab = true
                         colX = ascii.nextTabX(after: colX, tabInterval: tabInterval)
+                        upperX = ascii.nextTabX(after: upperX, tabInterval: tabInterval)
                     } else if b >= 0x20 && b <= 0x7E {
                         colX += advance
+                        upperX += advance
                         if b != 0x20 { visibleX = colX }
                     } else {
                         lineHasNonASCII = true
-                        colX += advance
-                        visibleX = colX
+                        upperX += advance
                     }
                     totalUTF16 += 1
                     idx += 1
@@ -254,16 +230,14 @@ nonisolated struct VirtualCodeBody: Sendable {
                     // Multi-byte UTF-8 lead byte: 4-byte scalars encode as 2 UTF-16 units.
                     let charLen: Int
                     let utf16Len: Int
-                    let widthFactor: CGFloat
                     if b < 0xE0 {
-                        charLen = 2; utf16Len = 1; widthFactor = 1
+                        charLen = 2; utf16Len = 1
                     } else if b < 0xF0 {
-                        charLen = 3; utf16Len = 1; widthFactor = 2
+                        charLen = 3; utf16Len = 1
                     } else {
-                        charLen = 4; utf16Len = 2; widthFactor = 2
+                        charLen = 4; utf16Len = 2
                     }
-                    colX += advance * widthFactor
-                    visibleX = colX
+                    upperX += advance * CGFloat(charLen)
                     totalUTF16 += utf16Len
                     idx = min(count, idx + charLen)
                 }
@@ -281,6 +255,43 @@ nonisolated struct VirtualCodeBody: Sendable {
         self.tabbedLines = tabbedLines
         self.hasLargeNonASCIILine = hasLargeNonASCIILine
         self.totalUTF16 = totalUTF16
+
+        // Exact width: lay out non-ASCII lines widest bound first until no
+        // unmeasured line can be wider than the widest found. Past a 128 KB
+        // budget the next bound stands in, wider than any line left, so a
+        // giant block may scroll a little too far but never clips a line.
+        var maxLineWidth = maxASCIIWidth
+        var budget = 131_072
+        let utf8 = code.utf8
+        let lineOpts = TextLayoutEngine.Options(lineSpacing: 0, wraps: false, fixedLineHeight: style.codeLineHeight)
+        for entry in nonASCIIEntries.sorted(by: { $0.upperWidth > $1.upperWidth }) {
+            guard entry.upperWidth > maxLineWidth else { break }
+            guard budget > 0 else {
+                maxLineWidth = entry.upperWidth
+                break
+            }
+            budget -= entry.byteLength
+            let start = byteStarts[entry.lineIndex]
+            var end = entry.lineIndex + 1 < byteStarts.count ? byteStarts[entry.lineIndex + 1] : utf8.count
+            if end > start {
+                let prev = utf8.index(utf8.startIndex, offsetBy: end - 1)
+                if utf8[prev] == 0x0A {
+                    end -= 1
+                    if end > start, utf8[utf8.index(before: prev)] == 0x0D { end -= 1 }
+                }
+            }
+            guard end > start else { continue }
+            let sIdx = utf8.index(utf8.startIndex, offsetBy: start)
+            let eIdx = utf8.index(utf8.startIndex, offsetBy: end)
+            let layout = TextLayoutEngine.layout(
+                CodeLayout.buildStyledCode(String(code[sIdx..<eIdx]), colors: nil, style: style),
+                width: .greatestFiniteMagnitude, options: lineOpts)
+            maxLineWidth = max(maxLineWidth, layout.size.width)
+            if colors == nil {
+                lineCache.insert(layout, for: entry.lineIndex)
+            }
+        }
+
         let height = CGFloat(max(1, byteStarts.count)) * style.codeLineHeight
         self.size = CGSize(width: ceil(maxLineWidth), height: ceil(height))
     }
@@ -471,24 +482,24 @@ nonisolated struct VirtualCodeBody: Sendable {
         return sliced.isEmpty ? nil : CodeColors(code: lineString, runs: sliced, isDark: colors.isDark)
     }
 
-    /// Lays out one single line (on demand, e.g. for highlighted/non-ASCII lines,
-    /// hit-testing, or caret queries on virtualized code).
+    /// Lays out one single line (cached in `lineCache` so hit-testing, carets,
+    /// and tile drawing never re-lay out a large non-ASCII or highlighted line).
     func layoutSingleLine(_ lineIndex: Int) -> TextLayout {
+        if let cached = lineCache.layout(for: lineIndex) {
+            return cached
+        }
         let range = lineContentByteRange(lineIndex)
         let utf8 = code.utf8
         let startIdx = utf8.index(utf8.startIndex, offsetBy: range.lowerBound)
         let endIdx = utf8.index(utf8.startIndex, offsetBy: range.upperBound)
         let lineString = String(code[startIdx..<endIdx])
         let slicedColors = lineColors(for: lineIndex, lineString: lineString)
-        if slicedColors == nil, !nonASCIILines.contains(lineIndex),
-            let fast = ascii.materializeASCII(code: lineString, style: style)
-        {
-            return fast
-        }
-        return TextLayoutEngine.layout(
+        let layout = TextLayoutEngine.layout(
             CodeLayout.buildStyledCode(lineString, colors: slicedColors, style: style),
             width: .greatestFiniteMagnitude,
             options: .init(lineSpacing: 0, wraps: false, fixedLineHeight: lineHeight))
+        lineCache.insert(layout, for: lineIndex)
+        return layout
     }
 
     // MARK: Geometry & selection (O(1) / O(log N))
@@ -648,29 +659,69 @@ nonisolated struct VirtualCodeBody: Sendable {
         return layoutSingleLine(lineIndex).size.width
     }
 
-    /// Unchanged height from top compared to `other` (streaming optimization).
+    /// Unchanged height from top compared to `other` (streaming optimization):
+    /// uses `memcmp` on contiguous UTF-8 storage + O(log lines) lookup so
+    /// streaming 25k+ line blocks stays < 0.1 ms on the main thread.
     func unchangedHeight(comparedTo other: VirtualCodeBody) -> CGFloat {
         guard style.version == other.style.version,
             CFEqual(ascii.font.font, other.ascii.font.font),
             lineHeight == other.lineHeight, tabInterval == other.tabInterval,
             ascii.advance == other.ascii.advance, colors == other.colors
         else { return 0 }
-        let shared = min(lineCount, other.lineCount)
-        let aUTF8 = code.utf8
-        let bUTF8 = other.code.utf8
-        for index in 0..<shared {
-            let rA = lineContentByteRange(index)
-            let rB = other.lineContentByteRange(index)
-            if rA.count != rB.count { return CGFloat(index) * lineHeight }
-            let aStart = aUTF8.index(aUTF8.startIndex, offsetBy: rA.lowerBound)
-            let aEnd = aUTF8.index(aUTF8.startIndex, offsetBy: rA.upperBound)
-            let bStart = bUTF8.index(bUTF8.startIndex, offsetBy: rB.lowerBound)
-            let bEnd = bUTF8.index(bUTF8.startIndex, offsetBy: rB.upperBound)
-            if !aUTF8[aStart..<aEnd].elementsEqual(bUTF8[bStart..<bEnd]) {
-                return CGFloat(index) * lineHeight
+
+        func firstDiffByte() -> Int? {
+            var resolved: Int?
+            let usedFastPath = code.utf8.withContiguousStorageIfAvailable { aBuf -> Bool in
+                other.code.utf8.withContiguousStorageIfAvailable { bBuf -> Bool in
+                    let shared = min(aBuf.count, bBuf.count)
+                    guard let aBase = aBuf.baseAddress, let bBase = bBuf.baseAddress else {
+                        resolved = aBuf.count == bBuf.count ? nil : 0
+                        return true
+                    }
+                    if shared == 0 {
+                        resolved = aBuf.count == bBuf.count ? nil : 0
+                        return true
+                    }
+                    if memcmp(aBase, bBase, shared) == 0 {
+                        resolved = aBuf.count == bBuf.count ? nil : shared
+                        return true
+                    }
+                    // Binary search for the first differing byte via `memcmp`.
+                    var low = 0
+                    var high = shared
+                    while low < high {
+                        let mid = (low + high) / 2
+                        if memcmp(aBase + low, bBase + low, mid - low + 1) == 0 {
+                            low = mid + 1
+                        } else {
+                            high = mid
+                        }
+                    }
+                    resolved = low
+                    return true
+                } ?? false
+            } ?? false
+            if usedFastPath { return resolved }
+            var aIdx = code.utf8.startIndex
+            var bIdx = other.code.utf8.startIndex
+            var offset = 0
+            while aIdx < code.utf8.endIndex, bIdx < other.code.utf8.endIndex {
+                if code.utf8[aIdx] != other.code.utf8[bIdx] { return offset }
+                code.utf8.formIndex(after: &aIdx)
+                other.code.utf8.formIndex(after: &bIdx)
+                offset += 1
             }
+            return aIdx == code.utf8.endIndex && bIdx == other.code.utf8.endIndex ? nil : offset
         }
-        if lineCount == other.lineCount { return .infinity }
-        return CGFloat(shared) * lineHeight
+
+        guard let diffByte = firstDiffByte() else { return .infinity }
+        let starts = other.code.utf8.count >= code.utf8.count ? other.lineByteStarts : lineByteStarts
+        var low = 0
+        var high = starts.count
+        while low + 1 < high {
+            let mid = (low + high) / 2
+            if starts[mid] <= diffByte { low = mid } else { high = mid }
+        }
+        return CGFloat(min(low, min(lineCount, other.lineCount))) * lineHeight
     }
 }
