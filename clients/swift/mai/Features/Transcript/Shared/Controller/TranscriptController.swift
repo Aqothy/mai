@@ -115,6 +115,7 @@ final class TranscriptController {
     @ObservationIgnored var store: ThreadStore?
     @ObservationIgnored var threadID: String?
     @ObservationIgnored var turns: [TranscriptTurn] = []
+    @ObservationIgnored var plan: [PlanEntry] = []
     @ObservationIgnored var lastSnapshotID: Int?
     @ObservationIgnored var turnRevisions: [Int] = []
     @ObservationIgnored var expandedTurnIDs: Set<String> = []

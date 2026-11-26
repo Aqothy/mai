@@ -23,6 +23,8 @@ nonisolated struct TranscriptBuilder {
     let expandedTurnIDs: Set<String>
     /// The working row's verb.
     let workingPhrase: String
+    /// The thread's current plan checklist, shown as a notice row when present.
+    var plan: [PlanEntry] = []
 
     private enum Item {
         case user(TranscriptEntry)
@@ -47,6 +49,13 @@ nonisolated struct TranscriptBuilder {
         var rows: [TranscriptRow] = []
         rows.reserveCapacity(turns.count * 8)
         for turn in turns { append(turn, to: &rows) }
+        if !plan.isEmpty {
+            let checklist = plan.map { entry in
+                let mark = entry.status == "completed" ? "✓" : "○"
+                return "\(mark) \(entry.content)"
+            }.joined(separator: "\n")
+            rows.append(TranscriptRow(id: "plan", kind: .notice(title: "Plan", text: checklist)))
+        }
         if hasRunningTurn {
             rows.append(TranscriptRow(id: "working", kind: .working(phrase: workingPhrase)))
         }
@@ -76,8 +85,17 @@ nonisolated struct TranscriptBuilder {
                             item: .notice(ref: entry.ref, title: "Continued from an earlier conversation", text: nil),
                             isFoldable: false))
                 case .message, .reply, .notice:
-                    blocks.append(
-                        Block(item: .notice(ref: entry.ref, title: entry.title ?? "Message", text: entry.text), isFoldable: false))
+                    let sender = entry.envelopeFrom.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent"
+                    let title: String =
+                        switch entry.envelopeKind {
+                        case .reply: "Reply from \(sender)"
+                        case .notice: entry.title ?? "Notice"
+                        default: "From \(sender)"
+                        }
+                    let body =
+                        entry.envelopeBody.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? (entry.text.isEmpty ? nil : entry.text)
+                    blocks.append(Block(item: .notice(ref: entry.ref, title: title, text: body), isFoldable: false))
                 case .instructions, nil:
                     continue
                 }
@@ -87,7 +105,12 @@ nonisolated struct TranscriptBuilder {
             default:
                 if entry.isRunningInBackground {
                     blocks.append(Block(item: .activity([entry]), isFoldable: false))
-                } else if case .activity(var group)? = blocks.last?.item, blocks.last?.isFoldable == true {
+                } else if !blocks.isEmpty, blocks[blocks.count - 1].isFoldable,
+                    case .activity(var group) = blocks[blocks.count - 1].item
+                {
+                    // Drop the array reference inside `blocks` before appending
+                    // so `group` stays uniquely referenced (avoids O(n²) COW).
+                    blocks[blocks.count - 1].item = .activity([])
                     group.append(entry)
                     blocks[blocks.count - 1].item = .activity(group)
                 } else {

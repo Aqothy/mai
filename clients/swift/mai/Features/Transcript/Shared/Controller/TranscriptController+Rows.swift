@@ -40,6 +40,9 @@ extension TranscriptController {
         guard let thread, thread.id == threadID else { return }
         hasOlderTurns = thread.older != nil
 
+        let planChanged = !Self.samePlan(plan, thread.plan)
+        plan = thread.plan
+
         let canDiffPrefix =
             lastSnapshotID == thread.snapshotID
             && thread.turnRevisions.count == thread.turns.count
@@ -54,7 +57,7 @@ extension TranscriptController {
             {
                 firstChanged += 1
             }
-            if firstChanged == thread.turns.count && turns.count == thread.turns.count {
+            if firstChanged == thread.turns.count && turns.count == thread.turns.count && !planChanged {
                 loadOlderTurnsIfNearTop()
                 return
             }
@@ -102,7 +105,7 @@ extension TranscriptController {
         let builder = TranscriptBuilder(
             blocks: { [self] messageID, source in blocks(forMessage: messageID, source: source) },
             metrics: { [self] messageID in streams[messageID]?.metrics ?? parsedMessages[messageID]?.metrics },
-            expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase)
+            expandedTurnIDs: expandedTurnIDs, workingPhrase: workingPhrase, plan: plan)
         guard !rows.isEmpty else {
             setRows(builder.rows(for: turns))
             return
@@ -182,6 +185,14 @@ extension TranscriptController {
             streams[messageID] = finishing
         }
         updateFrameUpdates()
+    }
+
+    private static func samePlan(_ lhs: [PlanEntry], _ rhs: [PlanEntry]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        for (a, b) in zip(lhs, rhs) where a.content != b.content || a.status != b.status || a.priority != b.priority {
+            return false
+        }
+        return true
     }
 
     private func finalText(of messageID: String) -> String? {

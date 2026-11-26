@@ -11,6 +11,8 @@ nonisolated struct TranscriptEntry: Sendable {
     let text: String
     let title: String?
     let envelopeKind: MaidEnvelopeKind?
+    let envelopeFrom: String?
+    let envelopeBody: String?
     /// The verb this entry adds to its activity group's summary.
     let activityPhrase: TranscriptActivityPhrase
     let isRunningInBackground: Bool
@@ -22,7 +24,10 @@ nonisolated struct TranscriptEntry: Sendable {
         status = entry.itemStatus
         text = entry.text ?? ""
         title = entry.title
-        envelopeKind = entry.envelopeKind
+        let envelope = entry.envelope
+        envelopeKind = envelope.flatMap { MaidEnvelopeKind(rawValue: $0.kind) }
+        envelopeFrom = envelope?.from
+        envelopeBody = envelope?.body
         activityPhrase = TranscriptActivityPhrase(entry)
         isRunningInBackground = entry.itemStatus == .inProgress && entry.tool?.background == true
         hasRequestRecord = entry.request != nil

@@ -9,7 +9,7 @@ nonisolated struct TranscriptRow: Equatable, Sendable {
     /// into share it, so the reading place survives a live reply becoming
     /// its final blocks (PLAN 3.9 rule 4).
     let sourceID: String
-    var kind: TranscriptRowKind
+    let kind: TranscriptRowKind
     var messageID: String?
     var role: TranscriptRole?
     /// The turn this row belongs to, so incremental store updates rebuild only
