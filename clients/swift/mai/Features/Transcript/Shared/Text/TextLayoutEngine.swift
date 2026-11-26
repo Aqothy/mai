@@ -429,6 +429,10 @@ nonisolated enum TextLayoutEngine {
         var width: CGFloat
         var previousQuoteBars: [CGFloat]
         var hasComplexBiDi = false
+        /// Cached UAX #9 P2/P3 base direction for the current paragraph so
+        /// multi-line numeric/punctuation paragraphs never re-scan O(N) per line.
+        private var cachedParagraphStart = -1
+        private var cachedParagraphIsRTL = false
 
         init(
             text: StyledText, nsString: NSString, options: Options, availableWidth: CGFloat,
@@ -475,10 +479,18 @@ nonisolated enum TextLayoutEngine {
             let height = options.fixedLineHeight ?? ceil(ascent + descent + leading)
             let baseline = y + (options.fixedLineHeight.map { ($0 - ascent - descent) / 2 } ?? 0) + ascent
             let paragraphStart = paragraph?.start ?? 0
-            let isRTL =
-                overrideParagraphIsRTL
-                ?? (options.wraps && options.alignsRTLToWidth && availableWidth.isFinite
-                    && TextLayoutEngine.paragraphIsRTL(nsString, startingAt: paragraphStart))
+            let isRTL: Bool
+            if let overrideParagraphIsRTL {
+                isRTL = overrideParagraphIsRTL
+            } else if options.wraps && options.alignsRTLToWidth && availableWidth.isFinite {
+                if paragraphStart != cachedParagraphStart {
+                    cachedParagraphStart = paragraphStart
+                    cachedParagraphIsRTL = TextLayoutEngine.paragraphIsRTL(nsString, startingAt: paragraphStart)
+                }
+                isRTL = cachedParagraphIsRTL
+            } else {
+                isRTL = false
+            }
             let lineX = TextLayoutEngine.lineOriginX(
                 indent: indent, lineWidth: lineWidth, availableWidth: availableWidth, isRTL: isRTL)
             let firstRun = runs.count

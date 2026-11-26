@@ -65,7 +65,7 @@ nonisolated struct TableLayout: Sendable {
                         environment: .init(blockSpacing: 0))
                     layout = TextLayoutEngine.layout(
                         builder.text, width: style.tableMaximumColumnWidth,
-                        options: .init(lineSpacing: style.lineSpacing))
+                        options: .init(lineSpacing: style.lineSpacing, alignsRTLToWidth: false))
                 }
                 columnWidths[column] = max(columnWidths[column], min(style.tableMaximumColumnWidth, layout.size.width))
                 line.append(layout)
