@@ -150,11 +150,18 @@ final class TranscriptRowMounter {
             var visibleWidthLag: CGFloat = 0
         #endif
         if let range = geometry.indices(overlapping: max(0, drawn.minY), drawn.maxY) {
-            for index in range {
-                let (minY, height) = geometry.frame(at: index)
+            // Walk from the scroll-leading edge so downward scrolls spend any
+            // remaining sync raster budget on entering bottom rows first
+            // instead of starving the lower half of the viewport.
+            let step = downward ? -1 : 1
+            var index = downward ? range.upperBound : range.lowerBound
+            while range.contains(index) {
+                let rowIndex = index
+                index += step
+                let (minY, height) = geometry.frame(at: rowIndex)
                 let frame = CGRect(x: 0, y: minY, width: documentWidth, height: height)
-                guard let layout = controller.layout(forRowAt: index) else {
-                    missingLayouts.append(index)
+                guard let layout = controller.layout(forRowAt: rowIndex) else {
+                    missingLayouts.append(rowIndex)
                     if frame.maxY <= visible.minY {
                         spanTop = max(spanTop, frame.maxY)
                     } else if frame.minY >= visible.maxY {
@@ -177,7 +184,7 @@ final class TranscriptRowMounter {
                     }
                 #endif
                 mount(
-                    controller.rows[index], index: index, frame: frame, layout: layout, controller: controller,
+                    controller.rows[rowIndex], index: rowIndex, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
                     colorSpace: space, showsContent: showsContent, syncDeadline: syncDeadline)
             }

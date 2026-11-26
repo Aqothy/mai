@@ -15,16 +15,18 @@ extension TranscriptController {
     private static let maxCachedLayoutBytes = 12 << 20
     private static let maxParsedMessageBytes = 16 * 1024 * 1024
     /// Maximum UTF-8 bytes (or selectable UTF-16 units) of a visible blank row
-    /// eligible for bounded-budget synchronous layout fallback (matches
-    /// `TranscriptBlockFlattener.maxSliceBytes` plus a 256-byte marker margin
-    /// so every flattened slice qualifies while giant blocks stay off-main).
-    static let syncFallbackByteLimit = 4_352
+    /// eligible for bounded-budget synchronous layout fallback. The deadline is
+    /// checked before each row, so a frame can overrun the budget by one row:
+    /// 2 KB keeps that to ~1 ms of Latin text, while 2 KB of Arabic takes ~5 ms
+    /// on an M-series Mac (Debug, `SyncFallbackBudgetTests`).
+    static let syncFallbackByteLimit = 2_048
     /// Maximum UTF-8 bytes of a visible `.pendingMessage` eligible for
-    /// synchronous parse-only splicing (< 2 ms via SIMD C scanner); step 2 then
-    /// lays out strictly the 1–3 slices intersecting the viewport.
-    static let syncFallbackParseByteLimit = 131_072
+    /// synchronous parse-only splicing (the SIMD byte scanner parses prose at
+    /// 100+ MiB/s, so 32 KB is well under 1 ms); step 2 then lays out only small
+    /// visible rows intersecting the viewport.
+    static let syncFallbackParseByteLimit = 32_768
     /// Maximum cells in a Markdown table eligible for synchronous fallback.
-    private static let syncFallbackTableCellLimit = 64
+    private static let syncFallbackTableCellLimit = 32
 
     /// The key a row's layout must have to be current.
     func currentKey(_ row: TranscriptRow) -> RowLayoutKey {
@@ -101,9 +103,10 @@ extension TranscriptController {
         layouts[rows[index].id]
     }
 
-    /// Synchronously parses visible `.pendingMessage` turns (`<= 128 KB`,
-    /// parse-only) and lays out only the visible `<= 4 KB` slices missing a
-    /// cached layout, stopping immediately once `deadline` elapses. Runs before
+    /// Synchronously parses visible `.pendingMessage` turns
+    /// (`<= syncFallbackParseByteLimit`, parse-only) and lays out visible rows
+    /// up to `syncFallbackByteLimit` missing a cached layout, checking
+    /// `deadline` before each unit of work. Runs before
     /// `mounter.place` so rapid scrollbar scrubbing never shows white flashes
     /// while giant blocks and huge tables stay strictly off-main.
     func prepareVisibleSynchronously(in visible: CGRect, deadline: CFTimeInterval) {
@@ -161,18 +164,21 @@ extension TranscriptController {
             applyParsedMessages(parsedBatch)
         }
 
-        // 2. Lay out any remaining small visible rows missing a layout.
-        // Convert `host.viewportTop` (uncovered top, includes `topInset`) back
-        // to raw document rect coordinates matching `visible.minY`.
+        // 2. Lay out any remaining small visible rows missing a layout,
+        // starting from the scroll-leading edge so downward scrolls do not
+        // exhaust the budget at the top and leave the lower half blank.
         guard CACurrentMediaTime() < deadline else { return }
         let currentMinY = host.map { $0.viewportTop - ($0.viewport?.topInset ?? 0) } ?? visible.minY
         guard let visibleRange = geometry.indices(overlapping: max(0, currentMinY), currentMinY + visible.height) else {
             return
         }
         var syncHeights: [String: CGFloat] = [:]
-        for index in visibleRange {
+        let step = isScrollingDown ? -1 : 1
+        var index = isScrollingDown ? visibleRange.upperBound : visibleRange.lowerBound
+        while visibleRange.contains(index) {
             guard CACurrentMediaTime() < deadline else { break }
             let row = rows[index]
+            index += step
             if case .pendingMessage = row.kind { continue }
             if case .markdownBlock(.table(let table), _, _) = row.kind,
                 (table.rows.count + 1) * table.columnCount > Self.syncFallbackTableCellLimit

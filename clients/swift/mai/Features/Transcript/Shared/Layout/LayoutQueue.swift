@@ -44,16 +44,35 @@ actor LayoutQueue {
         let priority: Int
     }
 
+    private enum WorkKey: Equatable {
+        case layout(key: RowLayoutKey, isHighlighted: Bool, colorsDark: Bool?)
+        case parse(message: TranscriptMessage, source: String, width: CGFloat, styleVersion: Int)
+    }
+
     private var urgent: [String: Job] = [:]
     private var latestUrgentGeneration = 0
     private let activeGeneration = GenerationBox()
-    private var running: Set<String> = []
+    /// In-flight jobs keyed by `job.id` with the exact work parameters running,
+    /// so duplicate `prefetch` submissions skip re-running identical work while
+    /// newer widths/versions still queue behind the in-flight job.
+    private var running: [String: WorkKey] = [:]
     private let concurrency: Int
     private let deliver: @Sendable (Result) -> Void
 
     init(concurrency: Int, deliver: @escaping @Sendable (Result) -> Void) {
         self.concurrency = concurrency
         self.deliver = deliver
+    }
+
+    private static func workKey(for work: Work) -> WorkKey {
+        switch work {
+        case .layout(let request, _):
+            .layout(
+                key: request.key, isHighlighted: request.codeColors != nil,
+                colorsDark: request.codeColors?.isDark)
+        case .parseAndLayout(let message, let source, let width, let style, _):
+            .parse(message: message, source: source, width: width, styleVersion: style.version)
+        }
     }
 
     /// Queues work near the viewport. A monotonic `generation` ensures stale
@@ -69,6 +88,8 @@ actor LayoutQueue {
             urgent.removeAll(keepingCapacity: true)
         }
         for job in jobs {
+            let key = Self.workKey(for: job.work)
+            if running[job.id] == key { continue }
             urgent[job.id] = job
         }
         pump()
@@ -76,7 +97,7 @@ actor LayoutQueue {
 
     private func pump() {
         while running.count < concurrency, let job = takeNext() {
-            running.insert(job.id)
+            running[job.id] = Self.workKey(for: job.work)
             let expectedGeneration = latestUrgentGeneration
             let generationBox = activeGeneration
             Task.detached(priority: .userInitiated) { [weak self] in
@@ -89,7 +110,7 @@ actor LayoutQueue {
 
     private func takeNext() -> Job? {
         // A row whose earlier layout still runs waits; its newer job runs next.
-        if let job = urgent.values.lazy.filter({ !self.running.contains($0.id) }).min(by: { $0.priority < $1.priority }) {
+        if let job = urgent.values.lazy.filter({ self.running[$0.id] == nil }).min(by: { $0.priority < $1.priority }) {
             urgent[job.id] = nil
             return job
         }
@@ -97,7 +118,7 @@ actor LayoutQueue {
     }
 
     private func finish(_ id: String, _ result: Result) {
-        running.remove(id)
+        running[id] = nil
         deliver(result)
         pump()
     }

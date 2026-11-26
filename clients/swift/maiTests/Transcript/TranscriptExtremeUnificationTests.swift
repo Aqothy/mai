@@ -11,12 +11,11 @@ import Testing
 @testable import mai
 
 /// Tests and fuzzers for the unified bounded-prose flattener, 2D-virtualized
-/// `CodeLayout`, `U+FEFF` sliding-window fix, cancellable 1-hop
-/// raster, and iOS wide-block/inputView fixes.
-@MainActor
-struct TranscriptExtremeUnificationTests {
-    private let style = TextStyle.current()
-    private let palette = TextPalette.resolveForTests
+/// `CodeLayout`, `U+FEFF` sliding-window fix, cancellable 1-hop raster,
+/// selection/copy/envelope correctness, and perf regressions.
+nonisolated struct TranscriptExtremeUnificationTests {
+    private func makeStyle() async -> TextStyle { await TextStyle.current() }
+    private func makePalette() async -> TextPalette { await TextPalette.resolveForTests }
 
     // MARK: Unified bounded prose flattener
 
@@ -35,9 +34,17 @@ struct TranscriptExtremeUnificationTests {
         #expect(thoughtRows.count == 1)
         if case .thought = thoughtRows[0].kind {} else { Issue.record("expected single .thought") }
         #expect(assistantRows.count == 2)
+
+        // A prompt under the slice size stays one unsplit bubble.
+        let unit = #"{"key":"value","count":42},"#
+        let prompt = String(repeating: unit, count: TranscriptBlockFlattener.maxSliceBytes / 2 / unit.utf8.count)
+        let promptRows = user.rows(from: MarkdownPlanner.blocks(from: prompt))
+        #expect(promptRows.count == 1)
+        if case .userMessage = promptRows[0].kind {} else { Issue.record("expected the prompt to stay one bubble") }
     }
 
-    @Test func giantParagraphListItemQuoteUserAndThoughtAllBoundTo4KB() {
+    @Test func giantParagraphListItemQuoteUserAndThoughtAllBoundToTheSliceSize() async {
+        let style = await makeStyle()
         let unit = "performance analysis across large documents "
         let oneMB = String(repeating: unit, count: 1_048_576 / unit.utf8.count)
         let list5k = (0..<5_000).map { "- Item \($0) with detail text" }.joined(separator: "\n")
@@ -59,7 +66,7 @@ struct TranscriptExtremeUnificationTests {
             let message = TranscriptMessage(kind: kind, turnID: "t", ref: "r")
             let blocks = MarkdownPlanner.blocks(from: source)
             let rows = message.rows(from: blocks)
-            #expect(rows.count > 10, "expected giant \(kind) to flatten into bounded rows")
+            #expect(rows.count >= 6, "expected giant \(kind) to flatten into bounded rows")
 
             // Verify every row stays bounded, selectable length matches layout
             // exactly, and user bubbles connect top -> middle -> bottom cleanly.
@@ -89,9 +96,10 @@ struct TranscriptExtremeUnificationTests {
     }
 
     @Test func streamingGiantParagraphMatchesSettledFlattenedRows() async {
+        let style = await makeStyle()
         let worker = TranscriptStreamWorker()
         let unit = "streamed word sequence "
-        let text = String(repeating: unit, count: 24_000 / unit.utf8.count)
+        let text = String(repeating: unit, count: 48_000 / unit.utf8.count)
         let result = await worker.run(
             TranscriptStreamWorker.Update(
                 messageID: "t|a", text: text, isFinished: true, width: 520, style: style,
@@ -107,7 +115,9 @@ struct TranscriptExtremeUnificationTests {
 
     // MARK: 2D-virtualized CodeLayout
 
-    @Test func virtualizedCodeHandles50kLinesAnd1MBSingleHorizontalLineInOViewport() {
+    @Test func virtualizedCodeHandles50kLinesAnd1MBSingleHorizontalLineInOViewport() async {
+        let style = await makeStyle()
+        let palette = await makePalette()
         // 1. 50,000 vertical lines
         let verticalCode = (0..<50_000).map { "let line\($0) = compute(\($0)) // ok" }.joined(separator: "\n")
         let vertical = CodeLayout.make(code: verticalCode, language: "swift", colors: nil, width: 600, style: style)
@@ -156,6 +166,8 @@ struct TranscriptExtremeUnificationTests {
     }
 
     @Test func staleLayoutGenerationSkipsSpeculativePreRaster() async throws {
+        let style = await makeStyle()
+        let palette = await makePalette()
         let drawnFlags = Mutex<[Bool]>([])
         let queue = LayoutQueue(concurrency: 1) { result in
             if case .layout(_, let drawn) = result {
@@ -195,7 +207,8 @@ struct TranscriptExtremeUnificationTests {
 
     // MARK: Review & blanking regression tests
 
-    @Test func virtualizedCodeRendersSlicedColorsAndInvalidatesDiffOnColorChange() {
+    @Test func virtualizedCodeRendersSlicedColorsAndInvalidatesDiffOnColorChange() async {
+        let style = await makeStyle()
         let lines = (0..<600).map { "let value\($0) = compute(\($0))" }
         let code = lines.joined(separator: "\n")
         let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
@@ -217,7 +230,8 @@ struct TranscriptExtremeUnificationTests {
         #expect(highlighted.unchangedHeight(comparedTo: highlighted) == .infinity)
     }
 
-    @Test func positionVerticallyStepsInsideAndAcrossVirtualizedCode() {
+    @MainActor @Test func positionVerticallyStepsInsideAndAcrossVirtualizedCode() {
+        let style = TextStyle.current()
         let controller = TranscriptController(configuration: .testing)
         controller.columnWidth = 520
         let code = (0..<600).map { "let item\($0) = \($0) // line" }.joined(separator: "\n")
@@ -271,9 +285,10 @@ struct TranscriptExtremeUnificationTests {
         #expect(pastEnd?.rowID == "p1")
     }
 
-    @Test func connectedUserBubbleHasZeroGapBetweenSlices() {
+    @Test func connectedUserBubbleHasZeroGapBetweenSlices() async {
+        let style = await makeStyle()
         let logLine = "[2026-11-25 14:00:00] INFO worker=1 batch=42 ok\n\n"
-        let userText = String(repeating: logLine, count: 250)
+        let userText = String(repeating: logLine, count: 450)
         let message = TranscriptMessage(kind: .user, turnID: "t", ref: "u")
         let rows = message.rows(from: MarkdownPlanner.blocks(from: userText))
         #expect(rows.count >= 3)
@@ -293,8 +308,9 @@ struct TranscriptExtremeUnificationTests {
         }
     }
 
-    @Test func flattenedBlockquoteAndNestedListQuotePreserveQuoteBarsAndMarkers() {
-        let longText = String(repeating: "quoted nested detail ", count: 350)
+    @Test func flattenedBlockquoteAndNestedListQuotePreserveQuoteBarsAndMarkers() async {
+        let style = await makeStyle()
+        let longText = String(repeating: "quoted nested detail ", count: 1_000)
         let md = "- > \(longText)\n\n  > second paragraph inside nested quote"
         let message = TranscriptMessage(kind: .assistant, turnID: "t", ref: "a")
         let rows = message.rows(from: MarkdownPlanner.blocks(from: md))
@@ -325,7 +341,9 @@ struct TranscriptExtremeUnificationTests {
         #expect(sawContinuousQuoteBar)
     }
 
-    @Test func virtualizedCodeHandlesNegativeClipCRLFBiDiAndBlankSelections() {
+    @Test func virtualizedCodeHandlesNegativeClipCRLFBiDiAndBlankSelections() async {
+        let style = await makeStyle()
+        let palette = await makePalette()
         let ascii = MonospaceASCIIMetrics.metrics(for: style.font(.code))
 
         // 1. CRLF stays on fast ASCII path & negative visMaxX does not trap.
@@ -355,7 +373,7 @@ struct TranscriptExtremeUnificationTests {
         #expect(blankRects.contains { $0.height > 500 * style.codeLineHeight && $0.width > 0 })
     }
 
-    @Test func syncFallbackParsesLargePendingMessageAndLaysOutOnlyVisibleSlices() {
+    @MainActor @Test func syncFallbackParsesLargePendingMessageAndLaysOutOnlyVisibleSlices() {
         var config = TranscriptConfiguration(laysOutRows: true, drawsOffMain: false, syncFallbackBudget: 0.5)
         config.concurrency = 1
         let controller = TranscriptController(configuration: config)
@@ -364,9 +382,10 @@ struct TranscriptExtremeUnificationTests {
         host.controller = controller
         controller.attach(host)
 
-        // 80 KB pending assistant message (< 128 KB sync parse limit, > 4 KB slice limit).
-        let unit = "Sync fallback test paragraph content with markdown **bold** and `code`. "
-        let text = String(repeating: unit, count: 80_000 / unit.utf8.count)
+        // 24 KB pending assistant message (< 32 KB sync parse limit) made of
+        // small paragraphs (<= 2 KB each) so step 2 lays out only visible ones.
+        let para = "Sync fallback test paragraph content with markdown **bold** and `code`."
+        let text = (0..<240).map { "Paragraph \($0): \(para)" }.joined(separator: "\n\n")
         let message = TranscriptMessage(kind: .assistant, turnID: "t0", ref: "a0")
         let pending = message.pendingRow(source: text)
         controller.setRows([pending], measuredHeights: [pending.id: 12_000])
@@ -380,25 +399,18 @@ struct TranscriptExtremeUnificationTests {
             in: CGRect(x: 0, y: 0, width: 520, height: 600),
             deadline: CACurrentMediaTime() + 0.5)
 
-        // Pending row spliced into >= 15 bounded <= 4 KB slices, and only the
-        // visible subset was laid out synchronously (not all 20+ slices!).
-        #expect(controller.rows.count >= 15)
+        // Pending row spliced into 240 rows, and only the visible subset was laid out.
+        #expect(controller.rows.count == 240)
         #expect(controller.layouts[controller.rows[0].id] != nil)
         #expect(controller.layouts.count < controller.rows.count)
     }
 
-    @Test func adaptiveSyncFallbackBudgetMatchesDisplayRefreshAndLowPowerMode() {
-        let adaptive = TranscriptConfiguration()
-        let budget120 = adaptive.effectiveSyncFallbackBudget(maximumFramesPerSecond: 120, isLowPowerMode: false)
-        let budget60 = adaptive.effectiveSyncFallbackBudget(maximumFramesPerSecond: 60, isLowPowerMode: false)
-        let budgetLPM = adaptive.effectiveSyncFallbackBudget(maximumFramesPerSecond: 120, isLowPowerMode: true)
-        #expect(abs(budget120 - (0.5 / 120.0)) < 0.0002)
-        #expect(abs(budget60 - (0.5 / 60.0)) < 0.0002)
-        #expect(abs(budgetLPM - budget60) < 0.0001)
-        #expect(TranscriptConfiguration.testing.effectiveSyncFallbackBudget(maximumFramesPerSecond: 60, isLowPowerMode: false) == 0)
+    @Test func syncFallbackBudgetDefaultsToFixed4ms() {
+        #expect(TranscriptConfiguration().syncFallbackBudget == 0.004)
+        #expect(TranscriptConfiguration.testing.syncFallbackBudget == 0)
     }
 
-    @Test func devExtremeThreadsCatalogBuildsBlankingStressThread() {
+    @MainActor @Test func devExtremeThreadsCatalogBuildsBlankingStressThread() {
         let catalog = ChatSyntheticBenchmarkThread.devExtremeThreads()
         #expect(catalog.count == 11)
         let blanking = catalog.first(where: { $0.summary.id == "synthetic-benchmark-blanking" })?.build()
@@ -421,7 +433,8 @@ struct TranscriptExtremeUnificationTests {
 
     // MARK: Fuzzing unified flattening & virtualized code invariants
 
-    @Test(arguments: [0, 1]) func fuzzUnifiedFlatteningAndVirtualizedCodeInvariants(seed: UInt64) {
+    @Test(arguments: [0, 1]) func fuzzUnifiedFlatteningAndVirtualizedCodeInvariants(seed: UInt64) async {
+        let style = await makeStyle()
         var rng = FuzzRNG(seed: 0xE77E_0000 ^ seed)
         let iterations = 8 * TranscriptFuzz.scale
         let tokens = [
@@ -434,15 +447,15 @@ struct TranscriptExtremeUnificationTests {
             let mode = rng.int(in: 0..<4)
             switch mode {
             case 0:
-                // Giant single paragraph (~18 KB)
-                while md.utf8.count < 18_000 { md += rng.pick(tokens) }
+                // Giant single paragraph (~24 KB)
+                while md.utf8.count < 24_000 { md += rng.pick(tokens) }
             case 1:
-                // Giant list (~20 KB) including one oversized item
-                md = "- " + String(repeating: rng.pick(tokens), count: 1_200) + "\n"
+                // Giant list (~24 KB) including one oversized item
+                md = "- " + String(repeating: rng.pick(tokens), count: 2_600) + "\n"
                 for i in 0..<120 { md += "- item \(i) \(rng.pick(tokens))\n" }
             case 2:
-                // Giant quote (~18 KB)
-                for i in 0..<300 { md += "> quote line \(i) \(rng.pick(tokens))\n" }
+                // Giant quote (~24 KB)
+                for i in 0..<400 { md += "> quote line \(i) \(rng.pick(tokens))\n" }
             default:
                 // Giant code block (~20 KB, mixed ASCII + occasional Unicode/tabs)
                 md = "```txt\n"
