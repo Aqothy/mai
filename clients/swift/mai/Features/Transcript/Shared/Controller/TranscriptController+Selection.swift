@@ -364,6 +364,39 @@ extension TranscriptController {
         guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
         else { return [] }
 
+        // Select All always highlights full column width cleanly across the
+        // selected message (1–3 seamless strips so iOS start/end grab handles
+        // keep exact single-line height).
+        if let selection, selection.isSelectAll, columnWidth > 0, let ends = orderedSelection(),
+            first == ends.start.index, start.offset == ends.start.offset,
+            last == ends.end.index, end.offset == ends.end.offset
+        {
+            let top = geometry.offset(at: first)
+            let bottom = geometry.offset(at: last + 1)
+            let totalH = bottom - top
+            guard totalH > 0 else { return [] }
+            let startH = min(totalH, max(1, caretRect(for: start, columnX: columnX, scrollX: scrollX)?.height ?? 20))
+            let endH = min(totalH, max(1, caretRect(for: end, columnX: columnX, scrollX: scrollX)?.height ?? 20))
+            if totalH <= startH + endH {
+                return [(
+                    rect: CGRect(x: columnX, y: top, width: columnWidth, height: totalH),
+                    isStart: true, isEnd: true
+                )]
+            }
+            let midH = totalH - startH - endH
+            return [
+                (rect: CGRect(x: columnX, y: top, width: columnWidth, height: startH), isStart: true, isEnd: false),
+                (
+                    rect: CGRect(x: columnX, y: top + startH, width: columnWidth, height: midH),
+                    isStart: false, isEnd: false
+                ),
+                (
+                    rect: CGRect(x: columnX, y: bottom - endH, width: columnWidth, height: endH),
+                    isStart: false, isEnd: true
+                ),
+            ]
+        }
+
         var result: [(rect: CGRect, isStart: Bool, isEnd: Bool)] = []
         for index in first...last where rows[index].kind.isSelectable {
             guard let layout = layouts[rows[index].id], let length = selectableLength(ofRowAt: index) else { continue }
@@ -474,7 +507,8 @@ extension TranscriptController {
             setSelection(
                 TranscriptSelection(
                     anchor: TextPosition(rowID: rows[first].id, offset: 0),
-                    focus: TextPosition(rowID: rows[last].id, offset: length)))
+                    focus: TextPosition(rowID: rows[last].id, offset: length),
+                    isSelectAll: true))
             return
         }
         guard let first = rows.firstIndex(where: \.kind.isSelectable),
@@ -483,7 +517,8 @@ extension TranscriptController {
         setSelection(
             TranscriptSelection(
                 anchor: TextPosition(rowID: rows[first].id, offset: 0),
-                focus: TextPosition(rowID: rows[last].id, offset: length)))
+                focus: TextPosition(rowID: rows[last].id, offset: length),
+                isSelectAll: true))
     }
 
     /// The word (or run of whitespace or punctuation) around `position`.

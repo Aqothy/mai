@@ -362,7 +362,8 @@ final class TranscriptController {
                 let newAnchor = remapRemovedPosition(current.anchor, old: old, kept: kept, replacement: versioned)
                 let newFocus = remapRemovedPosition(current.focus, old: old, kept: kept, replacement: versioned)
                 if newAnchor != current.anchor || newFocus != current.focus {
-                    remappedSelection = TranscriptSelection(anchor: newAnchor, focus: newFocus)
+                    remappedSelection = TranscriptSelection(
+                        anchor: newAnchor, focus: newFocus, isSelectAll: current.isSelectAll)
                 }
             }
         }

@@ -7,14 +7,18 @@ import Foundation
 nonisolated struct TranscriptSelection: Hashable, Sendable {
     var anchor: TextPosition
     var focus: TextPosition
+    /// True when created by Select All (renders full column width instead of
+    /// ragged-right per-line rects).
+    var isSelectAll: Bool
 
-    init(anchor: TextPosition, focus: TextPosition) {
+    init(anchor: TextPosition, focus: TextPosition, isSelectAll: Bool = false) {
         self.anchor = anchor
         self.focus = focus
+        self.isSelectAll = isSelectAll
     }
 
     init(caret: TextPosition) {
-        self.init(anchor: caret, focus: caret)
+        self.init(anchor: caret, focus: caret, isSelectAll: false)
     }
 
     var isEmpty: Bool { anchor == focus }

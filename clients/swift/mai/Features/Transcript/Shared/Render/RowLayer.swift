@@ -60,6 +60,7 @@ nonisolated final class RowLayer: CALayer {
     private let selectionLayer = CAShapeLayer()
     private var selectedRange: Range<Int>?
     private var selectionColor: CGColor?
+    private var fullWidthSelection = false
     private var palette: TextPalette?
     /// The color space the bands draw in: their window's.
     private var bandColorSpace: CGColorSpace?
@@ -139,10 +140,11 @@ nonisolated final class RowLayer: CALayer {
 
     /// Highlights `range` of the row's text (nil: none). A wide block's body
     /// highlights in its scroller instead.
-    func showSelection(_ range: Range<Int>?, color: CGColor) {
-        guard range != selectedRange || color != selectionColor else { return }
+    func showSelection(_ range: Range<Int>?, color: CGColor, fullWidth: Bool = false) {
+        guard range != selectedRange || color != selectionColor || fullWidth != fullWidthSelection else { return }
         selectedRange = range
         selectionColor = color
+        fullWidthSelection = fullWidth
         drawSelection()
     }
 
@@ -153,7 +155,11 @@ nonisolated final class RowLayer: CALayer {
             return
         }
         let path = CGMutablePath()
-        for rect in content.selectionRects(for: range) { path.addRect(rect) }
+        if fullWidthSelection {
+            path.addRect(CGRect(origin: .zero, size: bounds.size))
+        } else {
+            for rect in content.selectionRects(for: range) { path.addRect(rect) }
+        }
         selectionLayer.frame = bounds
         selectionLayer.fillColor = color
         selectionLayer.path = path
@@ -249,6 +255,7 @@ nonisolated final class RowLayer: CALayer {
         accessoriesKey = nil
         accessoriesOrigin = nil
         selectedRange = nil
+        fullWidthSelection = false
         selectionLayer.isHidden = true
         selectionLayer.path = nil
         paintedRect = .zero
