@@ -540,4 +540,25 @@ struct TextLayoutEngineTests {
         let unchanged = RowContentDiff.unchangedHeight(before, after)
         #expect(unchanged < secondLineTop, "expected unchanged (\(unchanged)) < line 1 top (\(secondLineTop))")
     }
+
+    /// Shaped scripts outside the width table's verified ones measure as the
+    /// line Core Text draws (Balinese measured 150.3 pt against 143.6 drawn).
+    @Test(arguments: [
+        ("Balinese", "ᬩᬲᬩᬮᬶ ᬅᬓ᭄ᬱᬭ ᬩᬮᬶ"),
+        ("Sundanese", "ᮃᮊ᮪ᮞᮛ ᮞᮥᮔ᮪ᮓ"),
+        ("Batak", "ᯘᯮᯒᯖ᯲ ᯅᯖᯂ᯲"),
+        ("Lepcha", "ᰛᰩᰵ ᰛᰧᰶ"),
+        ("Brahmi", "𑀩𑁆𑀭𑀸𑀳𑁆𑀫𑀻 𑀮𑀺𑀧𑀺"),
+        ("Adlam", "𞤀𞤣𞤤𞤢𞤥 𞤆𞤵𞤤𞤢𞤪"),
+        ("Hanifi Rohingya", "𐴌𐴟𐴇𐴥𐴝𐴚𐴒𐴙𐴝"),
+    ])
+    func shapedScriptsMeasureAsCoreTextDrawsThem(script: String, sample: String) {
+        let styled = AttributedTextBuilder.plain(sample, role: .body, color: .primary, style: style)
+        let layout = TextLayoutEngine.layout(styled, width: .greatestFiniteMagnitude, options: .init(lineSpacing: 0))
+        let line = CTLineCreateWithAttributedString(
+            StyledText.attributedSlice(of: styled.text as NSString, range: 0..<styled.length, runs: styled.runs))
+        let drawn = CTLineGetTypographicBounds(line, nil, nil, nil) - CTLineGetTrailingWhitespaceWidth(line)
+        let measured = layout.lines.map(\.width).max() ?? 0
+        #expect(abs(measured - drawn) < 0.5, "\(script): measured \(measured) pt, Core Text draws \(drawn) pt")
+    }
 }

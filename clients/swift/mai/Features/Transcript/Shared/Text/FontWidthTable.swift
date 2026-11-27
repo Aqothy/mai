@@ -398,13 +398,19 @@ nonisolated final class FontWidthTable: @unchecked Sendable {
         if v <= 0x036F { return true }
         if v >= 0x0590 && v <= 0x109F { return true }
         if v >= 0x1100 && v <= 0x11FF { return true }
-        if v >= 0x1700 && v <= 0x1AFF { return true }
+        // Philippine, Khmer, Mongolian ... Balinese, Sundanese, Batak, Lepcha,
+        // Ol Chiki, Vedic (Balinese measured 6.7 pt and Lepcha 13 pt wide).
+        if v >= 0x1700 && v <= 0x1CFF { return true }
         if v >= 0x1DC0 && v <= 0x1DFF { return true }
         if v >= 0x200B && v <= 0x206F { return true }
         if v >= 0x20D0 && v <= 0x20FF { return true }
         if v >= 0xA800 && v <= 0xABFF { return true }
         if v >= 0xFB1D && v <= 0xFDFF { return true }
         if v >= 0xFE00 && v <= 0xFEFF { return true }
+        // Shaped scripts beyond the BMP: right-to-left (Hanifi Rohingya, Old
+        // Uyghur), Brahmic (Brahmi ... Ahom) and Adlam.
+        if v >= 0x10800 && v <= 0x11FFF { return true }
+        if v >= 0x1E800 && v <= 0x1EDFF { return true }
         if v >= 0xE0000 && v <= 0xE007F { return true }
         return false
     }
