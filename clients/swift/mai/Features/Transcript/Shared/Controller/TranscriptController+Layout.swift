@@ -286,7 +286,7 @@ extension TranscriptController {
     }
 
     private var currentDrawing: DrawnBands.Drawing? {
-        guard configuration.drawsOffMain, let palette else { return nil }
+        guard let palette else { return nil }
         return DrawnBands.Drawing(
             palette: palette, scale: host?.scale ?? 2, colorSpace: host?.colorSpace ?? RowLayer.colorSpace)
     }

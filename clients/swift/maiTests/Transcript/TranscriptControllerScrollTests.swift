@@ -228,7 +228,7 @@ struct TranscriptControllerScrollTests {
     /// prepares every visible row — small, giant, or large table — synchronously
     /// in the frame with no byte or cell caps, including rows under `topInset`.
     @Test func ensureVisibleRowsReadyPreparesAllVisibleRowsIncludingGiantsAndTables() {
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 400, height: 300)
         host.controller = controller
@@ -280,7 +280,7 @@ struct TranscriptControllerScrollTests {
     /// re-fits visible rows synchronously in the frame (zero width lag) and
     /// anchors the first visible character when reading away from the end.
     @Test func widthChangeRefitsVisibleRowsInFrameAndAnchorsReadingLine() {
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 760, height: 300)
         host.controller = controller
@@ -602,7 +602,7 @@ struct TranscriptControllerScrollTests {
         let saved = TranscriptSavedPlace(
             anchorID: "t|msg-1#2", offsetIntoRow: 50, source: "t|msg-1", offsetIntoSource: 800,
             expandedTurnIDs: [])
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 300, height: 200)
         host.controller = controller
@@ -651,7 +651,7 @@ struct TranscriptControllerScrollTests {
         let saved = TranscriptSavedPlace(
             anchorID: "row-1", offsetIntoRow: 20, source: "row-1", offsetIntoSource: 20,
             expandedTurnIDs: [])
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.animatesJumps = true
         host.size = CGSize(width: 300, height: 200)
@@ -705,7 +705,7 @@ struct TranscriptControllerScrollTests {
             expandedTurnIDs: [])
         store.setSavedTranscriptPlace(saved, for: detail.id)
 
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 400, height: 200)
         host.controller = controller
@@ -764,7 +764,7 @@ struct TranscriptControllerScrollTests {
     }
 
     @Test func unscheduledPendingMessageEnteringViewportParsesAsynchronouslyWithoutSyncLayout() async throws {
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 400, height: 200)
         host.controller = controller
@@ -807,7 +807,7 @@ struct TranscriptControllerScrollTests {
     }
 
     @Test func removingAndReaddingRowWithSameIDDropsStaleCachedLayout() {
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 400, height: 300)
         host.controller = controller
@@ -850,7 +850,7 @@ struct TranscriptControllerScrollTests {
         }
 
         @Test func verticalDragStartingOnAccessoryButtonScrollsTranscript() {
-            let controller = TranscriptController(configuration: .launch)
+            let controller = TranscriptController()
             let scrollView = TranscriptScrollView(controller: controller)
             let button = TranscriptAccessoryControl()
             let touch = StubTouch(view: button)

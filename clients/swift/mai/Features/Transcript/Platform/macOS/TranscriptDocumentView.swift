@@ -79,7 +79,6 @@
         init(controller: TranscriptController) {
             self.controller = controller
             mounter = TranscriptRowMounter(container: rowsView.rowsLayer)
-            mounter.drawsOffMain = controller.configuration.drawsOffMain
             super.init(frame: .zero)
             mounter.delegate = self
             wantsLayer = true
@@ -264,18 +263,10 @@
         }
 
         private func updateFrameLink() {
-            #if DEBUG
-                let blocks = TranscriptMainThreadBlocker.milliseconds > 0
-            #else
-                let blocks = false
-            #endif
-            displayLink?.isPaused = !(needsFrames || blocks)
+            displayLink?.isPaused = !needsFrames
         }
 
         @objc private func frameDidTick(_ link: CADisplayLink) {
-            #if DEBUG
-                TranscriptMainThreadBlocker.blockIfRequested()
-            #endif
             if needsFrames { controller.frameDidTick() }
         }
 
@@ -333,7 +324,7 @@
             scroller.show(
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
+                drawn: localDrawn, visible: localVisible,
                 streamed: streamed)
         }
 
@@ -409,9 +400,5 @@
                 scroller.removeFromSuperview()
             }
         }
-
-        #if DEBUG
-            var mountedRowCount: Int { mounter.mountedRowCount }
-        #endif
     }
 #endif

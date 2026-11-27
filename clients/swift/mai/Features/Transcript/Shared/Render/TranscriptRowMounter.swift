@@ -38,9 +38,6 @@ protocol TranscriptRowMounterDelegate: AnyObject {
 final class TranscriptRowMounter {
     let container: CALayer
     weak var delegate: (any TranscriptRowMounterDelegate)?
-    /// Bands draw on background tasks (off only to compare, DEBUG
-    /// `-ChatTranscriptRaster main`).
-    var drawsOffMain = true
     private var mounted: [String: RowLayer] = [:]
     /// Whether any row may show a highlight, so rows without a selection
     /// skip the lookup.
@@ -67,8 +64,6 @@ final class TranscriptRowMounter {
     init(container: CALayer) {
         self.container = container
     }
-
-    var mountedRowCount: Int { mounted.count }
 
     /// Rows, heights or layouts changed: place again before the next frame.
     func invalidate() {
@@ -271,7 +266,7 @@ final class TranscriptRowMounter {
         layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
-        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain, frameDraws: frameDraws)
+        layer.drawBands(in: local, visible: localVisible, frameDraws: frameDraws)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.

@@ -64,7 +64,6 @@
         init(controller: TranscriptController) {
             self.controller = controller
             mounter = TranscriptRowMounter(container: rowsView.layer)
-            mounter.drawsOffMain = controller.configuration.drawsOffMain
             // UIKit's text interaction draws the selection highlight.
             mounter.drawsSelection = false
             super.init(frame: .zero)
@@ -380,7 +379,7 @@
             scroller.show(
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
+                drawn: localDrawn, visible: localVisible,
                 streamed: streamed)
         }
 
@@ -476,10 +475,6 @@
         var columnX: CGFloat {
             max(0, ((bounds.width - controller.columnWidth) / 2).rounded(.down))
         }
-
-        #if DEBUG
-            var mountedRowCount: Int { mounter.mountedRowCount }
-        #endif
     }
 
     /// Takes no touches itself, only through its subviews.

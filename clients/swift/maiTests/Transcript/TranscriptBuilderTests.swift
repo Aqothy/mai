@@ -131,7 +131,7 @@ struct TranscriptBuilderTests {
     /// User, assistant, and reasoning messages all unify through `.pendingMessage`
     /// -> off-main Markdown parsing -> laid-out Markdown (reasoning muted).
     @Test func userAssistantAndReasoningAllParseWholeOffMainAsMarkdown() async throws {
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 600, height: 600)
         host.controller = controller

@@ -95,7 +95,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
 
         // Draw only a viewport window at x = 50,000 (simulating scrolled-right wide code).
         let drawRect = CGRect(x: 50_000, y: 0, width: 1_400, height: wide.frame.height)
-        rowLayer.drawBands(in: drawRect, visible: drawRect, offMain: false)
+        rowLayer.drawBands(in: drawRect, visible: drawRect)
         let mountedBands = rowLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
         #expect((2...4).contains(mountedBands.count))
         for band in mountedBands {
@@ -241,7 +241,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
 
     @MainActor @Test func messageWith2000BlocksParsesAndBackfillsExactGeometry() async throws {
         let source = (0..<2_000).map { "Paragraph number \($0) with enough words to measure." }.joined(separator: "\n\n")
-        let controller = TranscriptController(configuration: .launch)
+        let controller = TranscriptController()
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 600, height: 400)
         host.controller = controller

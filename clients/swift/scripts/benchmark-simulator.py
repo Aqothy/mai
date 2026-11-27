@@ -26,7 +26,6 @@ def main():
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--turns", type=int, default=300)
     parser.add_argument("--timeout", type=float, default=180)
-    parser.add_argument("--engine", choices=["new", "legacy"], default="new")
     args = parser.parse_args()
     if min(args.runs, args.turns, args.timeout) <= 0:
         parser.error("Runs, turns and timeout must be positive.")
@@ -49,7 +48,7 @@ def main():
         "deviceName": matches[0][1]["name"], "deviceUUID": args.device,
         "codeImageSHA256": hashlib.sha256(code.read_bytes()).hexdigest(),
         "plan": args.plan, "runs": args.runs, "syntheticTurns": args.turns,
-        "engine": args.engine, "container": "iOS UIKit transcript",
+        "container": "iOS UIKit transcript",
         "measurement": "simulator display-link callbacks, not physical-device or presented FPS",
     }
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -60,8 +59,7 @@ def main():
             f"--stderr={log.with_suffix('.stderr')}", args.device, bundle,
             "-ChatAutoBenchmark", args.plan,
             "-ChatBenchmarkSyntheticTurns", str(args.turns),
-            "-ChatBenchmarkUniqueAnswers", "YES",
-            "-ChatTranscriptEngine", args.engine)
+            "-ChatBenchmarkUniqueAnswers", "YES")
         (log.with_suffix(".launch.txt")).write_text(launch + "\n")
         deadline = time.monotonic() + args.timeout
         try:

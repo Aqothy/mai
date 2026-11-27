@@ -68,8 +68,7 @@ def main():
         subprocess.run(["open", "-n", "-a", str(app), "--stdout", str(log),
                         "--stderr", str(out / "app.stderr"), "--args",
                         "-ChatBenchmarkSyntheticTurns", "20", "-ChatAutoBenchmark", "stream",
-                        "-ChatBenchmarkStreamActivity", "YES" if args.activity else "NO",
-                        "-ChatBenchmarkPaginatedHistory", "YES"], check=True)
+                        "-ChatBenchmarkStreamActivity", "YES" if args.activity else "NO"], check=True)
         deadline = time.monotonic() + 90
         with (out / "capture.log").open("w") as capture_log:
             while time.monotonic() < deadline:

@@ -66,7 +66,7 @@
         /// block's offset.
         func show(
             rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
-            palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
+            palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
             let isNewRow = self.rowID != rowID
@@ -79,7 +79,7 @@
             let visWidth = max(frame.width, contentView.bounds.width)
             body.show(
                 rowID: rowID, body: wide, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
-                drawsOffMain: drawsOffMain, drawn: drawn, visible: visible,
+                drawn: drawn, visible: visible,
                 horizontalVisible: visMinX...(visMinX + visWidth), streamed: streamed)
             if resized { reflectScrolledClipView(contentView) }
         }

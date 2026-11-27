@@ -54,7 +54,7 @@ nonisolated struct TranscriptInvariantFuzzTests {
                     let rect = CGRect(
                         x: CGFloat(rng.int(in: -500..<Int(size.width) + 500)), y: CGFloat(rng.int(in: -500..<Int(size.height) + 500)),
                         width: CGFloat(rng.int(in: 1..<2_000)), height: CGFloat(rng.int(in: 1..<2_000)))
-                    row.drawBands(in: rect, visible: rect, offMain: false)
+                    row.drawBands(in: rect, visible: rect)
                     let bands = row.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
                     let context = "iteration \(iteration) step \(step) wide \(wide)"
                     for band in bands {

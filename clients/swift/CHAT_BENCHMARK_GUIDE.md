@@ -29,7 +29,6 @@ By default, one single app launch runs the full **`suite`** plan (~20–25s) in 
 |---|---|
 | `--turns N` | Synthetic turn count, default 1000. |
 | `--runs N` | App launches, default 1. |
-| `--engine new\|legacy` | Transcript engine, default `new`. |
 | `--foreground` | Activate and focus the benchmark window instead of running behind active windows. |
 | `--with-chrome` | Keep sidebar, composer, and toolbar (default is transcript-only). |
 | `--compare <dirs...>` | Print summaries for saved result directories without launching the app. |

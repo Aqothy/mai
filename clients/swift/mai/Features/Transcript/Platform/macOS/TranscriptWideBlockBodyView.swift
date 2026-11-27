@@ -28,13 +28,12 @@
         private var lastDrawnY: CGRect = .null
         private var lastVisibleY: CGRect = .null
         private var lastContentWidth: CGFloat = 0
-        private var lastDrawsOffMain = true
         private var lastHorizontalDrawnX: CGFloat = .nan
         private var lastHorizontalDrawnSpan: ClosedRange<CGFloat>?
 
         func show(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, palette: TextPalette, scale: CGFloat,
-            colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect, visible: CGRect,
+            colorSpace: CGColorSpace, drawn: CGRect, visible: CGRect,
             horizontalVisible: ClosedRange<CGFloat>, streamed: DrawnBands?
         ) {
             let height = body.frame.height
@@ -47,7 +46,6 @@
             lastDrawnY = drawn
             lastVisibleY = visible
             lastContentWidth = body.contentWidth
-            lastDrawsOffMain = drawsOffMain
             updateTiles(horizontalVisible: horizontalVisible)
         }
 
@@ -85,7 +83,7 @@
                     x: horizontalVisible.lowerBound, y: lastVisibleY.minY,
                     width: max(0, horizontalVisible.upperBound - horizontalVisible.lowerBound),
                     height: lastVisibleY.height)
-            row.drawBands(in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain)
+            row.drawBands(in: drawRect, visible: visibleRect)
             let releaseMarginY = lastVisibleY.isNull ? 512 : max(512, lastVisibleY.height)
             row.releaseBands(outside: drawRect.insetBy(dx: -RowLayer.bandWidth, dy: -releaseMarginY))
         }

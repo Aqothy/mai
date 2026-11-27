@@ -146,7 +146,7 @@ final class TranscriptController {
     @ObservationIgnored var requestedOlderBefore: String?
     @ObservationIgnored let streamWorker = TranscriptStreamWorker()
 
-    init(configuration: TranscriptConfiguration = .launch) {
+    init(configuration: TranscriptConfiguration = TranscriptConfiguration()) {
         self.configuration = configuration
         style = TextStyle.current()
     }

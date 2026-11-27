@@ -170,16 +170,15 @@ nonisolated final class RowLayer: CALayer {
     /// draw in the frame, so scrubbing and live resize show no blanks or stale
     /// widths, together with the frame's others in `frameDraws` (or this
     /// row's, without one); off-screen prefetch bands draw asynchronously on
-    /// `RasterQueue` when `offMain` is true.
+    /// `RasterQueue`.
     @MainActor
-    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool, frameDraws: FrameBandDraws? = nil) {
+    func drawBands(in rect: CGRect, visible: CGRect, frameDraws: FrameBandDraws? = nil) {
         guard let palette, colCount > 0, rowCount > 0, !rect.isNull, !rect.isEmpty else { return }
         let draws = frameDraws ?? FrameBandDraws()
         defer { if frameDraws == nil { draws.draw() } }
-        let drawsNow = !offMain
         if !isSparseGrid {
             for band in linearBands where !band.isCurrent && band.frame.intersects(rect) {
-                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false, draws: draws)
+                submitBand(band, palette: palette, visible: visible, is2D: false, draws: draws)
             }
             return
         }
@@ -193,26 +192,21 @@ nonisolated final class RowLayer: CALayer {
                 let frame = tileFrame(col: col, row: row)
                 guard frame.intersects(rect) else { continue }
                 let band = acquireTile(for: TileKey(col: col, row: row), frame: frame, scale: contentsScale)
-                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true, draws: draws)
+                submitBand(band, palette: palette, visible: visible, is2D: true, draws: draws)
             }
         }
     }
 
     @MainActor
     private func submitBand(
-        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool,
-        draws: FrameBandDraws
+        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, is2D: Bool, draws: FrameBandDraws
     ) {
         guard !band.isCurrent else { return }
-        let syncForVisible = !drawsNow && !visible.isNull && band.frame.intersects(visible)
-        guard drawsNow || syncForVisible || !band.isPending else { return }
+        let syncForVisible = !visible.isNull && band.frame.intersects(visible)
+        guard syncForVisible || !band.isPending else { return }
         let raster = BandRaster(
             content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
             scale: contentsScale, colorSpace: bandColorSpace ?? Self.colorSpace)
-        if drawsNow {
-            band.show(BandRasterizer.bitmap(raster), generation: band.generation)
-            return
-        }
         if syncForVisible {
             draws.add(band, raster)
             return

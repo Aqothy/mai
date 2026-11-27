@@ -105,7 +105,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             let targetContent = appWindow.contentRect(forFrameRect: targetFrame).size
             let background = ChatBenchmarkAutoRun.runsInBackground
 
-            let bareController = TranscriptController(configuration: .launch)
+            let bareController = TranscriptController()
             let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: targetContent))
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = false

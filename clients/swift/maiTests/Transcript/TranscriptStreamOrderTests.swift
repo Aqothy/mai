@@ -33,7 +33,7 @@ struct TranscriptStreamOrderTests {
         let layer = RowLayer()
         layer.frame = CGRect(x: 0, y: 0, width: layout.key.width, height: layout.height)
         layer.show(rowID: "row", layout: layout, palette: palette, drawsWideBody: true, scale: 2)
-        layer.drawBands(in: layer.bounds, visible: layer.bounds, offMain: false)
+        layer.drawBands(in: layer.bounds, visible: layer.bounds)
         return layer
     }
 
@@ -161,7 +161,7 @@ struct TranscriptStreamOrderTests {
         let codeLayer = RowLayer()
         codeLayer.frame = CGRect(x: 0, y: 0, width: 300, height: codeLayout.height)
         codeLayer.show(rowID: "c", layout: codeLayout, palette: palette, drawsWideBody: false, scale: 2)
-        codeLayer.drawBands(in: codeLayer.bounds, visible: codeLayer.bounds, offMain: false)
+        codeLayer.drawBands(in: codeLayer.bounds, visible: codeLayer.bounds)
         let codeBands = codeLayer.sublayers?.compactMap { $0 as? RowBandLayer } ?? []
         #expect(codeBands.count == 1)
         #expect(codeBands.allSatisfy { $0.frame.maxY <= RowLayer.bandHeight })
