@@ -44,10 +44,10 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
 
     @Test func biDiArabicAndZalgoStressRemainValidAndBounded() async {
         let style = await TextStyle.current()
-        // Mixed Arabic RTL + Eastern Arabic numerals + Latin exceeding slidingWindowThreshold.
+        // Mixed Arabic RTL + Eastern Arabic numerals + Latin exceeding 4 KB.
         let arabicChunk = "مرحبا بالعالم ٢٥ Hello world שלום 👋 עולם أبا "
         let longBiDi = String(repeating: arabicChunk, count: 160)
-        #expect(longBiDi.utf16.count > TextLayoutEngine.slidingWindowThreshold)
+        #expect(longBiDi.utf16.count > 4_096)
         let biDiLayout = RowLayoutBuilder.prose(
             [.paragraph([MarkdownInline(text: longBiDi)])], width: 420, style: style)
         #expect(biDiLayout.hasComplexBiDi)
@@ -196,15 +196,14 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }
     }
 
-    // MARK: 3. Memory-Budget Eviction
+    // MARK: 3. Compact PreparedText Memory Footprint (`REDESIGN.md §4, §8`)
 
-    @MainActor @Test func wideCodeBlocksEvictByByteBudget() async {
+    @MainActor @Test func wideCodeBlocksAndProseStayCompactWithoutEviction() async {
         let style = TextStyle.current()
         let key = RowLayoutKey(contentVersion: 0, width: 600, styleVersion: style.version)
         let controller = TranscriptController(configuration: .testing)
 
-        // 2D-virtualized wide code blocks stay tiny in RAM (16 × 35 KB code
-        // blocks hold < 100 KB total instead of > 12 MB).
+        // 16 × 35 KB wide code blocks stay well under 1 MB total (no glyph copies).
         let chunk = (0..<200).map { "let line\($0) = " + String(repeating: "x", count: 160) }.joined(separator: "\n")
         let wideRows = (0..<16).map { index in
             TranscriptRow(
@@ -217,12 +216,12 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
             wideRows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
         for layout in codeLayouts { controller.storeLayout(layout) }
-        #expect(controller.cachedLayoutBytes < 256_000)
+        #expect(controller.cachedLayoutBytes < 1_024_000)
 
-        // Memory-budget eviction: 40 materialized 12 KB prose rows hold > 12 MB
-        // in fewer rows than the 64-row cap; the off-window ones must evict.
+        // 40 × 12 KB prose rows hold compact segment + line geometry (< 3 MB total,
+        // ~7× smaller than the old 12+ MB glyph-copying layout cache).
         let proseController = TranscriptController(configuration: .testing)
-        let bigProse = String(repeating: "memory budget eviction check ", count: 440)
+        let bigProse = String(repeating: "memory budget check ", count: 600)
         let proseRows = (0..<40).map { index in
             TranscriptRow(
                 id: "t1|p#\(index)", sourceID: "t1|p",
@@ -235,23 +234,19 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }.value
         for layout in proseLayouts { proseController.storeLayout(layout) }
         #expect(proseController.layouts.count == 40)
-        #expect(proseController.cachedLayoutBytes > 12 << 20)
-        proseController.dropLayouts(outside: 0...1_000)
-        #expect(proseController.layouts.count < 40)
+        #expect(proseController.cachedLayoutBytes < 4 << 20)
         #expect(proseController.cachedLayoutBytes == proseController.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
     }
 
-    // MARK: 4. Parse-Only Split for 2,000-Block Messages
+    // MARK: 4. Exact Geometry Backfill for 2,000-Block Messages (`REDESIGN.md §4.6, §7 R3`)
 
-    @MainActor @Test func messageWith2000BlocksParsesWithoutEagerlyLayingOutOffscreenBlocks() async throws {
+    @MainActor @Test func messageWith2000BlocksParsesAndBackfillsExactGeometry() async throws {
         let source = (0..<2_000).map { "Paragraph number \($0) with enough words to measure." }.joined(separator: "\n\n")
         let controller = TranscriptController(configuration: .launch)
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 600, height: 400)
         host.controller = controller
         controller.attach(host)
-        // Push out the 1 s readiness fallback so parallel Debug test CPU load
-        // never reveals before the viewport's async layouts land.
         controller.openStarted = ContinuousClock.now.advanced(by: .seconds(60))
 
         let pending = TranscriptMessage(kind: .assistant, turnID: "t1", ref: "big").pendingRow(source: source)
@@ -262,9 +257,8 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }
         #expect(!controller.isAwaitingInitialEnd)
         #expect(controller.rows.count == 2_000)
-        // Must have laid out ONLY the viewport + prefetch window, nowhere near all 2,000 blocks.
-        #expect(controller.layouts.count < 200)
-        #expect(!controller.layouts.isEmpty)
+        // R3 parses and lays out all 2,000 blocks in one hop for exact geometry.
+        #expect(controller.layouts.count == 2_000)
     }
 
     // MARK: 5. 5 MB Multi-Turn Chat + 200 Live Tool Updates
@@ -421,9 +415,10 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
 
         for index in layout.lines.indices {
             let line = layout.lines[index]
+            let carets = layout.caretOffsets(forLineAt: index)
             #expect(!line.range.isEmpty)
             #expect(line.top.isFinite && line.height.isFinite && line.height > 0)
-            #expect(line.caretOffsets.count == line.range.count + 1)
+            #expect(carets.count == line.range.count + 1)
             if !allowWideAtomicCluster {
                 #expect(line.x + line.width <= maxWidth + 2, "line \(index) overflowed width \(maxWidth)")
             }
@@ -433,18 +428,19 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
                 #expect(line.top >= prev.bottom)
             }
             if checkMonotonicCarets && !layout.hasComplexBiDi {
-                for c in 1..<line.caretOffsets.count {
-                    #expect(line.caretOffsets[c] >= line.caretOffsets[c - 1] - 0.01)
+                for c in 1..<carets.count {
+                    #expect(carets[c] >= carets[c - 1] - 0.01)
                 }
             } else {
-                #expect(line.caretOffsets.allSatisfy { $0.isFinite })
+                #expect(carets.allSatisfy { $0.isFinite })
             }
         }
         // Spot-check hit-test and selection rects stay in bounds and finite.
         for probe in [0, totalUTF16 / 2, max(0, totalUTF16 - 1)] {
             let lineIdx = layout.lines.firstIndex { $0.range.contains(probe) } ?? 0
             let line = layout.lines[lineIdx]
-            let caretX = line.caretOffsets[min(probe - line.range.lowerBound, line.caretOffsets.count - 1)]
+            let carets = layout.caretOffsets(forLineAt: lineIdx)
+            let caretX = carets[min(probe - line.range.lowerBound, carets.count - 1)]
             let hit = layout.offset(closestTo: CGPoint(x: caretX, y: line.top + line.height / 2))
             #expect(hit >= 0 && hit <= totalUTF16)
         }
@@ -549,8 +545,10 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
             styled, width: 728, options: .init(lineSpacing: style.lineSpacing))
 
         // Reference unsliced CoreText line count & break offsets.
-        let typesetter = CTTypesetterCreateWithAttributedString(styled.string)
-        let total = styled.string.length
+        let ns = styled.text as NSString
+        let typesetter = CTTypesetterCreateWithAttributedString(
+            StyledText.attributedSlice(of: ns, range: 0..<ns.length, runs: styled.runs))
+        let total = styled.length
         var refRanges: [Range<Int>] = []
         var offset = 0
         while offset < total {
@@ -560,7 +558,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }
         #expect(layout.lines.map(\.range) == refRanges)
         #expect(layout.lines.count == 2)
-        #expect(layout.lines[1].caretOffsets.first == 0)
+        #expect(layout.caretOffsets(forLineAt: 1).first == 0)
     }
 
     @Test func drawnBandsRedrawsShrunkWideTile() async {

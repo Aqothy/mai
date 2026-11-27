@@ -62,9 +62,10 @@ struct TextLayoutEngineTests {
     @Test func caretsRunLeftToRightAcrossEachLine() {
         let text = layout([.paragraph([MarkdownInline(text: "Carets café 👩🏽‍💻 end")])], width: 1_000)
         let line = text.lines[0]
-        #expect(line.caretOffsets.count == line.range.count + 1)
-        #expect(zip(line.caretOffsets, line.caretOffsets.dropFirst()).allSatisfy { $0 <= $1 })
-        #expect(abs((line.caretOffsets.last ?? 0) - (line.x + line.width)) < 1)
+        let carets = text.caretOffsets(forLineAt: 0)
+        #expect(carets.count == line.range.count + 1)
+        #expect(zip(carets, carets.dropFirst()).allSatisfy { $0 <= $1 })
+        #expect(abs((carets.last ?? 0) - (line.x + line.width)) < 1)
     }
 
     /// Carets from glyph positions match Core Text's at every character
@@ -117,13 +118,13 @@ struct TextLayoutEngineTests {
         #expect(kinds.contains(.underline))
         #expect(kinds.contains(.strikethrough))
         #expect(text.links.first == URL(string: "https://example.com"))
-        #expect(text.runs.contains { $0.linkIndex == 0 })
+        #expect(text.prepared.runs.contains { $0.style.linkIndex == 0 })
     }
 
     @Test func codeKeepsLinesUnwrappedWithAnAnalyticHeight() {
         let code = "let a = 1\n" + String(repeating: "x", count: 400) + "\nend"
         let block = CodeLayout.make(code: code, language: "swift", colors: nil, width: 300, style: style)
-        #expect(block.materializedBody?.lines.count == 3)
+        #expect(block.body.lines.count == 3)
         #expect(block.isWiderThanBlock)
         #expect(block.size.height == ceil(style.codeHeaderHeight + 3 * style.codeLineHeight + style.codeBottomInset))
         #expect(CodeLayout.displayName("py") == "Python")
@@ -155,7 +156,7 @@ struct TextLayoutEngineTests {
         let list = MarkdownBlock.list(
             MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.paragraph([MarkdownInline(text: "a")])])]))
         let text = AttributedTextBuilder.build([.quote([.quote([list])])], style: style)
-        #expect(text.string.string.hasPrefix("•"))
+        #expect(text.text.hasPrefix("•"))
     }
 
     /// An item that starts with code or a nested list still shows its marker.
@@ -163,12 +164,12 @@ struct TextLayoutEngineTests {
         let code = AttributedTextBuilder.build(
             [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.code(language: nil, code: "make")])]))],
             style: style)
-        #expect(code.string.string.hasPrefix("•"))
-        #expect(code.string.string.hasSuffix("make"))
+        #expect(code.text.hasPrefix("•"))
+        #expect(code.text.hasSuffix("make"))
         let numbered = AttributedTextBuilder.build(
             [.list(MarkdownList(startIndex: 3, items: [MarkdownList.Item(blocks: [.code(language: nil, code: "make")])]))],
             style: style)
-        #expect(numbered.string.string.hasPrefix("3."))
+        #expect(numbered.text.hasPrefix("3."))
     }
 
     /// The newline ending a paragraph is in that paragraph's font: in the
@@ -247,7 +248,7 @@ struct TextLayoutEngineTests {
         let c2Inc = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style, previous: c1)
         let c2Full = CodeLayout.make(code: code2, language: "go", colors: nil, width: 400, style: style)
         #expect(c2Inc.size == c2Full.size)
-        #expect(c2Inc.materializedBody?.lines.count == 7)
+        #expect(c2Inc.body.lines.count == 7)
         #expect(c2Inc.unchangedBodyHeight(comparedTo: c2Full) == .infinity)
 
         // 3. Table growth.
@@ -317,19 +318,16 @@ struct TextLayoutEngineTests {
             [.list(MarkdownList(startIndex: nil, items: [MarkdownList.Item(blocks: [.code(language: nil, code: code)])]))],
             width: 600)
         let nestedStart = (nested.string as NSString).range(of: "\tx").location
-        guard let wholeBody = whole.materializedBody, let streamedBody = streamed.materializedBody else {
-            Issue.record("expected materialized code bodies")
-            return
-        }
-        for (name, body, start) in [("whole", wholeBody, 0), ("streamed", streamedBody, 0), ("nested", nested, nestedStart)] {
-            let lines = body.lines.filter { $0.range.lowerBound >= start }
-            // The caret before each line's `x`, from the line's first caret.
-            func xCaret(_ line: TextLine) -> CGFloat {
+        for (name, body, start) in [("whole", whole.body, 0), ("streamed", streamed.body, 0), ("nested", nested, nestedStart)] {
+            let matchingIndices = body.lines.indices.filter { body.lines[$0].range.lowerBound >= start }
+            func xCaret(_ lineIndex: Int) -> CGFloat {
+                let line = body.lines[lineIndex]
                 let offset = ((body.string as NSString).range(of: "x", range: NSRange(line.range)).location) - line.range.lowerBound
-                return line.caretOffsets[offset] - line.caretOffsets[0]
+                let carets = body.caretOffsets(forLineAt: lineIndex)
+                return carets[offset] - carets[0]
             }
             let expected: [CGFloat] = [4, 4, 4, 8, 12].map { $0 * column }
-            let actual = lines.prefix(5).map(xCaret)
+            let actual = matchingIndices.prefix(5).map(xCaret)
             #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 0.01 }, "\(name): \(actual) vs \(expected)")
         }
     }
@@ -344,21 +342,23 @@ struct TextLayoutEngineTests {
                 Issue.record("expected line for \(sample)")
                 continue
             }
+            let carets = laid.caretOffsets(forLineAt: 0)
             #expect(
-                abs((line.caretOffsets.last ?? 0) - (line.x + line.width)) < 0.5,
-                "\(sample): end caret \(line.caretOffsets.last ?? -1) vs width \(line.width)")
+                abs((carets.last ?? 0) - (line.x + line.width)) < 0.5,
+                "\(sample): end caret \(carets.last ?? -1) vs width \(line.width)")
             let rects = laid.selectionRects(for: line.range)
             #expect(rects.count == 1 && abs(rects[0].width - line.width) < 0.5, "\(sample): rect \(rects) vs width \(line.width)")
         }
         // In "مرحبا a\u{200D}b", 'b' must keep a non-zero caret span after the ZWJ.
         let mixed = "مرحبا a\u{200D}b"
         let laidMixed = layout([.paragraph([MarkdownInline(text: mixed)])], width: 400)
-        guard let line = laidMixed.lines.first else {
+        guard !laidMixed.lines.isEmpty else {
             Issue.record("expected line for mixed BiDi")
             return
         }
         let bStart = (mixed as NSString).range(of: "b").location
-        let span = abs(line.caretOffsets[bStart + 1] - line.caretOffsets[bStart])
+        let mixedCarets = laidMixed.caretOffsets(forLineAt: 0)
+        let span = abs(mixedCarets[bStart + 1] - mixedCarets[bStart])
         #expect(span > 1, "expected non-zero caret span for 'b', got \(span)")
     }
 
@@ -425,22 +425,23 @@ struct TextLayoutEngineTests {
             ],
             width: 400)
         #expect(laid.hasComplexBiDi)
-        #expect(!laid.lines[0].hasComplexBiDi)
-        #expect(laid.lines[1].hasComplexBiDi)
+        #expect(!laid.shapedLine(at: 0).hasComplexBiDi)
+        #expect(laid.shapedLine(at: 1).hasComplexBiDi)
 
+        let line0Carets = laid.caretOffsets(forLineAt: 0)
         // Select "lo " (3..<6) on line 0: must lie strictly to the right of "Hel".
         let partial = laid.selectionRects(for: 3..<6)
         #expect(partial.count == 1)
         if let rect = partial.first {
-            #expect(abs(rect.minX - laid.lines[0].caretOffsets[3]) < 0.5)
-            #expect(abs(rect.maxX - laid.lines[0].caretOffsets[6]) < 0.5)
+            #expect(abs(rect.minX - line0Carets[3]) < 0.5)
+            #expect(abs(rect.maxX - line0Carets[6]) < 0.5)
         }
         // Select "Hello wor" (0..<9) across both LTR runs: must start at x=0 and cover "Hello ".
         let across = laid.selectionRects(for: 0..<9)
         #expect(across.count == 1)
         if let rect = across.first {
-            #expect(abs(rect.minX - laid.lines[0].caretOffsets[0]) < 0.5)
-            #expect(abs(rect.maxX - laid.lines[0].caretOffsets[9]) < 0.5)
+            #expect(abs(rect.minX - line0Carets[0]) < 0.5)
+            #expect(abs(rect.maxX - line0Carets[9]) < 0.5)
         }
     }
 

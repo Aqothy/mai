@@ -244,6 +244,7 @@ extension TranscriptController {
 
     private func applyStreamResult(_ result: TranscriptStreamWorker.Result) {
         guard var stream = streams[result.messageID] else { return }
+        pauseBackfillBriefly(rebuildAfter: false)
         stream.isInFlight = false
         if result.isFinished {
             streams[result.messageID] = nil
@@ -283,14 +284,14 @@ extension TranscriptController {
             }
         }
         let turnID = existing.first.flatMap { rows[$0].turnID } ?? (parsedTurnID.isEmpty ? nil : parsedTurnID)
-        let kinds = TranscriptBlockFlattener.kinds(for: result.blocks, kind: result.kind)
-        let newRows = kinds.enumerated().map { index, kind in
-            let rowMetrics = index < result.metrics.count ? result.metrics[index] : nil
-            return TranscriptRow(
-                id: message.parsedRowID(at: index), sourceID: messageID,
-                kind: kind,
-                messageID: message.messageID, role: message.role, turnID: turnID, metrics: rowMetrics)
-        }
+        let expectedRowCount =
+            if result.blocks.isEmpty {
+                0
+            } else if result.kind == .assistant {
+                result.blocks.count
+            } else {
+                1
+            }
         let selectionFollows = selectionEnd(atEndOf: existing)
         let selectionTouchesStream: Bool = {
             guard let ordered = orderedSelection(), let first = existing.first, let last = existing.last else {
@@ -304,27 +305,55 @@ extension TranscriptController {
         // layouts come from the layout queue.
         let laidOut = result.width == columnWidth && result.styleVersion == style.version ? result.rows : []
         var heights: [String: CGFloat] = [:]
-        for row in laidOut where row.index < newRows.count && newRows[row.index].kind == row.kind {
-            heights[newRows[row.index].id] = row.layout.height
-            measuredRowHeights[newRows[row.index].id] = row.layout.height
-        }
-        let sameIDs = existing.count == newRows.count && zip(existing, newRows).allSatisfy { rows[$0].id == $1.id }
-        if sameIDs {
-            // Only the blocks the worker laid out changed (finished blocks
-            // never do): the rest are not compared again every frame.
-            let changed = result.rows.compactMap { row in
-                row.index < newRows.count ? (existing[row.index], newRows[row.index]) : nil
+        // O(changed) fast path when the block count did not change: construct
+        // only the changed tail rows instead of rebuilding all N rows on every
+        // stream frame (`OPTIMIZATIONS.md`).
+        let sameCountAndIDs =
+            existing.count == expectedRowCount
+            && (existing.isEmpty || rows[existing[existing.count - 1]].id == message.parsedRowID(at: existing.count - 1))
+        let lastRowID: String?
+        if sameCountAndIDs, !existing.isEmpty {
+            var changed: [(Int, TranscriptRow)] = []
+            changed.reserveCapacity(result.rows.count)
+            for row in result.rows where row.index < existing.count {
+                let id = message.parsedRowID(at: row.index)
+                let rowMetrics = row.index < result.metrics.count ? result.metrics[row.index] : nil
+                let updated = TranscriptRow(
+                    id: id, sourceID: messageID, kind: row.kind, messageID: message.messageID, role: message.role,
+                    turnID: turnID, metrics: rowMetrics)
+                changed.append((existing[row.index], updated))
+            }
+            for row in laidOut where row.index < existing.count {
+                let id = message.parsedRowID(at: row.index)
+                heights[id] = row.layout.height
+                measuredRowHeights[id] = row.layout.height
             }
             updateRows(changed, heights: heights)
-        } else if let first = existing.first, let last = existing.last {
-            replaceRows(first..<(last + 1), with: newRows, heights: heights)
+            lastRowID = message.parsedRowID(at: existing.count - 1)
         } else {
-            rebuildRows()
-            setHeights(heights)
+            let kinds = TranscriptMessage.rowKinds(for: result.blocks, kind: result.kind)
+            let newRows = kinds.enumerated().map { index, kind in
+                let rowMetrics = index < result.metrics.count ? result.metrics[index] : nil
+                return TranscriptRow(
+                    id: message.parsedRowID(at: index), sourceID: messageID,
+                    kind: kind,
+                    messageID: message.messageID, role: message.role, turnID: turnID, metrics: rowMetrics)
+            }
+            for row in laidOut where row.index < newRows.count && newRows[row.index].kind == row.kind {
+                heights[newRows[row.index].id] = row.layout.height
+                measuredRowHeights[newRows[row.index].id] = row.layout.height
+            }
+            if let first = existing.first, let last = existing.last {
+                replaceRows(first..<(last + 1), with: newRows, heights: heights)
+            } else {
+                rebuildRows()
+                setHeights(heights)
+            }
+            lastRowID = newRows.last?.id
         }
         if laidOut.isEmpty, !result.rows.isEmpty { scheduleWork() }
-        for row in laidOut where row.index < newRows.count {
-            let id = newRows[row.index].id
+        for row in laidOut where row.index < expectedRowCount {
+            let id = message.parsedRowID(at: row.index)
             guard let rowIndex = geometry.index(for: id), rows[rowIndex].kind == row.kind else { continue }
             let key = currentKey(rows[rowIndex])
             let layout = RowLayout(rowID: id, key: key, height: row.layout.height, content: row.layout.content)
@@ -333,12 +362,12 @@ extension TranscriptController {
         }
         if isAwaitingInitialEnd { alignInitialEndIfPossible() }
         var selectionGrew = false
-        if let selectionFollows, let last = newRows.last, let index = geometry.index(for: last.id),
+        if let selectionFollows, let lastID = lastRowID, let index = geometry.index(for: lastID),
             let length = selectableLength(ofRowAt: index), var selection
         {
             // A selection that reached the streamed text's end grows with
             // it, as text selected to the end of a page does in a browser.
-            let end = TextPosition(rowID: last.id, offset: length)
+            let end = TextPosition(rowID: lastID, offset: length)
             if selectionFollows == .anchor { selection.anchor = end } else { selection.focus = end }
             self.selection = selection
             selectionGrew = true

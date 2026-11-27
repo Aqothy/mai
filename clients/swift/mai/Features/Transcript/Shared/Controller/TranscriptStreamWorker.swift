@@ -68,7 +68,7 @@ actor TranscriptStreamWorker {
             blocks = snapshot.blocks
             parsers[update.messageID] = parser
         }
-        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: update.kind)
+        let kinds = TranscriptMessage.rowKinds(for: blocks, kind: update.kind)
         let state = shown[update.messageID].flatMap {
             $0.width == update.width && $0.styleVersion == update.style.version ? $0 : nil
         }
@@ -89,7 +89,7 @@ actor TranscriptStreamWorker {
                 key: RowLayoutKey(contentVersion: -1, width: update.width, styleVersion: update.style.version),
                 style: update.style)
             if let before { request.previous = before }
-            if case .markdownBlock(.code(_, let code), _, let ctx) = kind, !ctx.isNestedInContainer,
+            if case .markdownBlock(.code(_, let code), _) = kind,
                 let isDark = update.isDark,
                 let colors = update.codeColors[rowID], colors.matches(code: code, isDark: isDark)
             {

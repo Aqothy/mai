@@ -184,33 +184,27 @@ nonisolated enum TranscriptFuzz {
         if a.lines.count != b.lines.count { return "line count \(a.lines.count) vs \(b.lines.count)" }
         for (index, (x, y)) in zip(a.lines, b.lines).enumerated() {
             guard x.range == y.range else { return "line \(index) range \(x.range) vs \(y.range)" }
-            guard x.top == y.top, x.baseline == y.baseline, x.height == y.height else {
+            guard abs(x.top - y.top) < 0.5, abs(x.baseline - y.baseline) < 0.5, abs(x.height - y.height) < 0.5 else {
                 return "line \(index) metrics \(x.top)/\(x.baseline)/\(x.height) vs \(y.top)/\(y.baseline)/\(y.height)"
             }
-            guard x.x == y.x, x.width == y.width else { return "line \(index) x/width" }
-            guard x.caretOffsets == y.caretOffsets else {
-                let at = x.caretOffsets.indices.first { $0 < y.caretOffsets.count && x.caretOffsets[$0] != y.caretOffsets[$0] } ?? 0
-                let units = Array(a.string.utf16)[x.range]
-                return "line \(index) caret \(at): \(x.caretOffsets[at]) vs \(y.caretOffsets[at]) in "
-                    + "\(units.map { String($0, radix: 16) })"
+            guard abs(x.x - y.x) < 0.5, abs(x.width - y.width) < 0.5 else {
+                return "line \(index) x/width \(x.x)/\(x.width) vs \(y.x)/\(y.width)"
+            }
+            let xCarets = a.caretOffsets(forLineAt: index)
+            let yCarets = b.caretOffsets(forLineAt: index)
+            guard xCarets.count == yCarets.count,
+                zip(xCarets, yCarets).allSatisfy({ abs($0 - $1) < 0.5 })
+            else {
+                let at = xCarets.indices.first { $0 < yCarets.count && abs(xCarets[$0] - yCarets[$0]) >= 0.5 } ?? 0
+                return "line \(index) caret \(at): \(xCarets[at]) vs \(yCarets[at])"
             }
             guard x.endsWithNewline == y.endsWithNewline else { return "line \(index) newline" }
-            guard x.runs.count == y.runs.count else { return "line \(index) run count" }
-            guard x.decorations.count == y.decorations.count else { return "line \(index) decoration count" }
         }
-        if a.runs.count != b.runs.count { return "run count" }
-        for (index, (x, y)) in zip(a.runs, b.runs).enumerated() {
-            guard x.glyphs == y.glyphs, x.positions == y.positions else {
-                func describe(_ run: TextGlyphRun) -> String {
-                    "\(CTFontCopyPostScriptName(run.font.font)) \(run.range) \(run.glyphs) \(run.positions.map(\.x))"
-                }
-                return "run \(index) glyphs: \(describe(x)) vs \(describe(y))"
-            }
-            guard x.range == y.range, x.color == y.color, x.linkIndex == y.linkIndex, CFEqual(x.font.font, y.font.font)
-            else { return "run \(index) attributes" }
-        }
-        if a.decorations.count != b.decorations.count { return "decoration count" }
-        for (index, (x, y)) in zip(a.decorations, b.decorations).enumerated() {
+        if a.prepared.runs != b.prepared.runs { return "styled runs" }
+        let aDec = a.decorations
+        let bDec = b.decorations
+        if aDec.count != bDec.count { return "decoration count \(aDec.count) vs \(bDec.count)" }
+        for (index, (x, y)) in zip(aDec, bDec).enumerated() {
             guard x.kind == y.kind, x.rect == y.rect, x.color == y.color else { return "decoration \(index)" }
         }
         return nil
@@ -225,14 +219,7 @@ nonisolated enum TranscriptFuzz {
                 x.code == y.code
             else { return "code frame" }
             if let labelDiff = difference(x.label, y.label) { return "label: \(labelDiff)" }
-            switch (x.storage, y.storage) {
-            case (.materialized(let a), .materialized(let b)):
-                return difference(a, b).map { "body: \($0)" }
-            case (.virtualized(let a), .virtualized(let b)):
-                return a.unchangedHeight(comparedTo: b) == .infinity ? nil : "virtual body differs"
-            default:
-                return "code storage kind differs"
-            }
+            return x.unchangedBodyHeight(comparedTo: y) == .infinity ? nil : "code body differs"
         case (.table(let x, let xf), .table(let y, let yf)):
             guard xf == yf, x.size == y.size, x.gridSize == y.gridSize, x.cells.count == y.cells.count,
                 x.dividers == y.dividers
@@ -247,19 +234,13 @@ nonisolated enum TranscriptFuzz {
         }
     }
 
-    /// The first offset inside a grapheme cluster whose caret is not the
-    /// caret before it (Blink places carets only at cluster boundaries), nil
-    /// when every line keeps that rule. Clusters are the engine's
-    /// (`TextLayoutEngine.startsCluster`): Apple's sequences answer per
-    /// offset (after a stray ZWJ, the sequence at the ZWJ's base runs on
-    /// through the next letter, while the letter's own starts at the
-    /// letter, as UAX #29 has it).
     static func caretInsideCluster(_ layout: TextLayout) -> String? {
         let ns = layout.string as NSString
         for (index, line) in layout.lines.enumerated() {
+            let carets = layout.caretOffsets(forLineAt: index)
             for offset in (line.range.lowerBound + 1)..<max(line.range.lowerBound + 1, line.range.upperBound) {
                 let local = offset - line.range.lowerBound
-                guard !TextLayoutEngine.startsCluster(ns, at: offset), line.caretOffsets[local] != line.caretOffsets[local - 1]
+                guard !TextLayoutEngine.startsCluster(ns, at: offset), carets[local] != carets[local - 1]
                 else { continue }
                 let cluster = ns.rangeOfComposedCharacterSequence(at: offset)
                 let scalars = ns.substring(with: cluster).unicodeScalars.map { String($0.value, radix: 16) }

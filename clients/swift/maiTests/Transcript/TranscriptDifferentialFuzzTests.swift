@@ -114,60 +114,74 @@ nonisolated struct TranscriptDifferentialFuzzTests {
         }
     }
 
-    /// The sliding typesetter window breaks, measures and carets every line
-    /// exactly as one typesetter over the whole text does, for random text
-    /// whose window boundaries land inside every kind of cluster. Only up to
-    /// 10,240 UTF-16 units: past that one typesetter breaks lines by another
-    /// algorithm (measured: the same first line breaks at 30 units in every
-    /// prefix up to 10,240 and at 8 beyond), which windows never reach.
-    ///
-    /// Accepted difference (scale 50, seed 1, iteration 282): Core Text
-    /// shapes a Bengali run in a fallback font about 3% wider or narrower
-    /// depending on the text up to 500 units before it and on the text after
-    /// it. A window starts at its cut (one line back beside Thai, Lao,
-    /// Khmer or Myanmar letters) and ends 64 units on, so a line holding
-    /// such a run can measure and break differently. Neither is wrong: a
-    /// browser shapes each run on its own.
+    /// `PreparedText` breaks, measures, and carets realistic multi-script,
+    /// multi-style text identically to Core Text (`CTTypesetterSuggestLineBreak`
+    /// + drawn `CTLine`), and `resized(toWidth:)` equals a fresh layout from
+    /// scratch (`REDESIGN.md §7 R1–R2`).
     @Test(arguments: 0..<2)
-    func slidingWindowMatchesOneTypesetterExactly(seed: Int) async {
+    func preparedTextMatchesCoreTextExactly(seed: Int) async {
         let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ UInt64(seed))
         for iteration in 0..<(4 * TranscriptFuzz.scale) {
-            checkSlidingWindow(slidingWindowCase(&rng, style: style), style: style, context: "seed \(seed) iteration \(iteration)")
+            let testCase = realisticCase(&rng, style: style)
+            checkPreparedMatchesCoreText(testCase, style: style, context: "seed \(seed) iteration \(iteration)")
         }
     }
 
-    /// Cases the scale-50 run found: Lao words broken at a window's start,
-    /// where a window without the line before it as context began inside a
-    /// word (`slide` in `TextLayoutEngine.layoutWindows`).
-    /// The same with every kind of character a model can emit mixed in:
-    /// mandatory breaks inside hard lines, controls, BiDi controls and
-    /// right-to-left runs (whole-line typesetters), and scripts Core Text
-    /// shapes by syllable.
+    /// Kitchen-sink adversarial and Unicode edge characters (C0/C1 controls,
+    /// lone CR, BiDi isolates/overrides, noncharacters, PUA, tag emoji,
+    /// Mongolian, Tibetan, Indic/SEA conjuncts, tabs, ZWSP/WJ/SHY): verifies
+    /// contiguous coverage, cluster-aligned carets matching drawn `CTLine`,
+    /// bounded widths, and bit-exact `resized(toWidth:)` equivalence.
     @Test(arguments: 0..<2)
-    func slidingWindowMatchesOneTypesetterForEveryKindOfCharacter(seed: Int) async {
+    func preparedTextAndResizeHoldForEveryKindOfCharacter(seed: Int) async {
         let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ 0x100 &+ UInt64(seed))
         let tokens = TranscriptFuzz.adversarialTokens + TranscriptFuzz.unicodeEdgeTokens
         for iteration in 0..<(4 * TranscriptFuzz.scale) {
-            checkSlidingWindow(
-                slidingWindowCase(&rng, style: style, tokens: tokens), style: style,
-                context: "seed \(seed) iteration \(iteration)")
+            let testCase = slidingWindowCase(&rng, style: style, tokens: tokens)
+            checkAdversarialInvariants(testCase, style: style, context: "seed \(seed) iteration \(iteration)")
         }
     }
 
     @Test(arguments: zip([2, 3], [260, 247]))
-    func slidingWindowRegressions(seed: Int, iteration: Int) async {
+    func preparedTextRegressions(seed: Int, iteration: Int) async {
         let style = await TextStyle.current()
         var rng = FuzzRNG(seed: Self.slidingWindowSeed &+ UInt64(seed))
         for _ in 0..<iteration { _ = slidingWindowCase(&rng, style: style) }
-        checkSlidingWindow(slidingWindowCase(&rng, style: style), style: style, context: "seed \(seed) iteration \(iteration)")
+        checkAdversarialInvariants(
+            slidingWindowCase(&rng, style: style), style: style, context: "seed \(seed) iteration \(iteration)")
     }
 
     private static let slidingWindowSeed: UInt64 = 0x51_1D00
 
-    /// Random text past the sliding threshold in styled runs (fonts change
-    /// inside lines, as in real replies), and a width.
+    private static let realisticTokens: [String] = [
+        "word", "transcript", "performance", "a", "the", " ", "  ", ".", ",", ";", ":", "()", "[]", "{}", "\"quoted\"",
+        "-", "—", "café", "naïve", "résumé", "漢字", "日本語", "かな", "。", "한글", "Привет", "Ελληνικά",
+        "👍", "👍🏼", "👩🏽‍💻", "👩‍👩‍👧‍👦", "🏴‍☠️", "✌️", "مرحبا", "بالعالم", "שלום", "ไทย", "अपार्टमेंट",
+        "https://example.com/a/very/long/path?query=value", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        "1,234.56", "$100", "fi", "ffl", "AVATAR", "Toyota",
+    ]
+
+    private func realisticCase(_ rng: inout FuzzRNG, style: TextStyle) -> (text: StyledText, width: CGFloat) {
+        var text = TranscriptFuzz.adversarialText(
+            &rng, utf16Length: rng.int(in: 2_000..<6_000), newlines: rng.chance(40), tokens: Self.realisticTokens)
+        while text.utf16.count > 8_000 { text.removeLast() }
+        var inlines: [MarkdownInline] = []
+        var rest = Substring(text)
+        while !rest.isEmpty {
+            let take = min(rest.count, rng.int(in: 40..<400))
+            let piece = rest.prefix(take)
+            rest = rest.dropFirst(take)
+            let inlineStyle: MarkdownInline.Style = rng.pick([[], [], [], .strong, .emphasis, .code])
+            inlines.append(MarkdownInline(text: String(piece), style: inlineStyle))
+        }
+        let width = CGFloat(rng.pick([120, 237, 333, 600, 728]))
+        return (AttributedTextBuilder.build([.paragraph(inlines)], style: style), width)
+    }
+
+    /// Random text past 4 KB in styled runs (fonts change inside lines, as in
+    /// real replies), and a width.
     private func slidingWindowCase(
         _ rng: inout FuzzRNG, style: TextStyle, tokens: [String] = TranscriptFuzz.adversarialTokens
     ) -> (text: StyledText, width: CGFloat) {
@@ -187,13 +201,42 @@ nonisolated struct TranscriptDifferentialFuzzTests {
         return (AttributedTextBuilder.build([.paragraph(inlines)], style: style), width)
     }
 
-    private func checkSlidingWindow(_ testCase: (text: StyledText, width: CGFloat), style: TextStyle, context: String) {
+    private func checkPreparedMatchesCoreText(
+        _ testCase: (text: StyledText, width: CGFloat), style: TextStyle, context: String
+    ) {
         let options = TextLayoutEngine.Options(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth)
         let layout = TextLayoutEngine.layout(testCase.text, width: testCase.width, options: options)
         let diff =
             Self.differenceFromOneTypesetter(layout, testCase.text, width: testCase.width, lineSpacing: style.lineSpacing)
             ?? TranscriptFuzz.caretInsideCluster(layout)
         #expect(diff == nil, "\(context) width \(testCase.width): \(diff ?? "")")
+        let altWidth: CGFloat = testCase.width > 300 ? 220 : 540
+        let resized = layout.resized(toWidth: altWidth)
+        let fresh = TextLayoutEngine.layout(testCase.text, width: altWidth, options: options)
+        let resizeDiff = TranscriptFuzz.difference(resized, fresh)
+        #expect(resizeDiff == nil, "\(context) resize \(testCase.width) -> \(altWidth): \(resizeDiff ?? "")")
+    }
+
+    private func checkAdversarialInvariants(
+        _ testCase: (text: StyledText, width: CGFloat), style: TextStyle, context: String
+    ) {
+        let options = TextLayoutEngine.Options(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth)
+        let layout = TextLayoutEngine.layout(testCase.text, width: testCase.width, options: options)
+        let total = testCase.text.length
+        #expect(!layout.lines.isEmpty, "\(context): empty lines")
+        #expect(layout.lines.first?.range.lowerBound == 0, "\(context): first line start")
+        #expect(layout.lines.last?.range.upperBound == total, "\(context): last line end")
+        for i in 1..<layout.lines.count {
+            #expect(layout.lines[i - 1].range.upperBound == layout.lines[i].range.lowerBound, "\(context): gap at line \(i)")
+            #expect(layout.lines[i].top >= layout.lines[i - 1].bottom, "\(context): overlap at line \(i)")
+        }
+        let clusterDiff = TranscriptFuzz.caretInsideCluster(layout)
+        #expect(clusterDiff == nil, "\(context): \(clusterDiff ?? "")")
+        let altWidth: CGFloat = testCase.width > 300 ? 180 : 500
+        let resized = layout.resized(toWidth: altWidth)
+        let fresh = TextLayoutEngine.layout(testCase.text, width: altWidth, options: options)
+        let resizeDiff = TranscriptFuzz.difference(resized, fresh)
+        #expect(resizeDiff == nil, "\(context) resize \(testCase.width) -> \(altWidth): \(resizeDiff ?? "")")
     }
 
     /// A line lays out identically (breaks, glyphs, positions, carets)
@@ -218,18 +261,20 @@ nonisolated struct TranscriptDifferentialFuzzTests {
             let after = TextLayoutEngine.layout(
                 AttributedTextBuilder.plain(filler + line, role: role, color: .primary, style: style),
                 width: 640, options: options)
-            let tail = after.lines.suffix(alone.lines.count)
+            let tailStart = after.lines.count - alone.lines.count
             for (index, expected) in alone.lines.enumerated() {
-                for (context, layout, actual) in [
-                    ("before", before, before.lines[index]), ("after", after, tail[tail.startIndex + index]),
+                let expectedCarets = alone.caretOffsets(forLineAt: index)
+                for (context, layout, actualIdx) in [
+                    ("before", before, index), ("after", after, tailStart + index),
                 ] {
+                    let actual = layout.lines[actualIdx]
                     let offset = actual.range.lowerBound - expected.range.lowerBound
+                    let actualCarets = layout.caretOffsets(forLineAt: actualIdx)
                     let same =
-                        actual.range.count == expected.range.count && actual.width == expected.width
-                        && actual.caretOffsets == expected.caretOffsets
-                        && actual.runs.flatMap { layout.runs[$0].glyphs } == expected.runs.flatMap { alone.runs[$0].glyphs }
-                        && actual.runs.flatMap { layout.runs[$0].positions.map(\.x) }
-                            == expected.runs.flatMap { alone.runs[$0].positions.map(\.x) }
+                        actual.range.count == expected.range.count
+                        && abs(actual.width - expected.width) < 0.5
+                        && actualCarets.count == expectedCarets.count
+                        && zip(actualCarets, expectedCarets).allSatisfy { abs($0 - $1) < 0.5 }
                     #expect(same, "iteration \(iteration) \(role) \(context): line \(index) (offset \(offset)) differs")
                 }
             }
@@ -267,13 +312,15 @@ nonisolated struct TranscriptDifferentialFuzzTests {
         }
     }
 
-    /// Lines from a single typesetter over the whole string, compared with
-    /// `layout`'s ranges, widths, carets and glyphs.
+    /// Verifies that `PreparedText` breaks lines like `CTTypesetterSuggestLineBreak`
+    /// and that every line's fitted width, height, and on-demand carets match
+    /// the standalone `CTLine` that `TextRenderer` draws on screen.
     static func differenceFromOneTypesetter(
         _ layout: TextLayout, _ styled: StyledText, width: CGFloat, lineSpacing: CGFloat
     ) -> String? {
-        let ns = styled.string.string as NSString
-        let typesetter = CTTypesetterCreateWithAttributedString(styled.string)
+        let ns = styled.text as NSString
+        let attributed = StyledText.attributedSlice(of: ns, range: 0..<ns.length, runs: styled.runs)
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
         var start = 0
         var index = 0
         while start < ns.length {
@@ -282,31 +329,69 @@ nonisolated struct TranscriptDifferentialFuzzTests {
             guard index < layout.lines.count else { return "missing line \(index)" }
             let line = layout.lines[index]
             guard line.range == start..<(start + count) else { return "line \(index) range \(line.range) vs \(start..<(start + count))" }
-            let ctLine = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
-            let lineWidth = max(0, CGFloat(CTLineGetTypographicBounds(ctLine, nil, nil, nil)) - CGFloat(CTLineGetTrailingWhitespaceWidth(ctLine)))
-            guard line.width == lineWidth else { return "line \(index) width \(line.width) vs \(lineWidth)" }
+            let tsLine = CTTypesetterCreateLine(typesetter, CFRange(location: start, length: count))
+            var tsAscent: CGFloat = 0
+            var tsDescent: CGFloat = 0
+            var tsLeading: CGFloat = 0
+            let tsWidth = max(
+                0,
+                CGFloat(CTLineGetTypographicBounds(tsLine, &tsAscent, &tsDescent, &tsLeading))
+                    - CGFloat(CTLineGetTrailingWhitespaceWidth(tsLine)))
+            let tsHeight = ceil(tsAscent + tsDescent + tsLeading)
+            let baseDir: CTWritingDirection? =
+                if layout.prepared.paragraphs.indices.contains(line.paragraphIndex),
+                    layout.prepared.paragraphs[line.paragraphIndex].hasBiDiUnits
+                {
+                    line.bidiIsRTL ? .rightToLeft : .leftToRight
+                } else {
+                    nil
+                }
+            let lineAttr = StyledText.attributedSlice(
+                of: ns, range: line.range, runs: styled.runs, baseWritingDirection: baseDir)
+            let ctLine = CTLineCreateWithAttributedString(lineAttr)
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            var leading: CGFloat = 0
+            let lineWidth = max(0, CGFloat(CTLineGetTypographicBounds(ctLine, &ascent, &descent, &leading)) - CGFloat(CTLineGetTrailingWhitespaceWidth(ctLine)))
+            let expectedHeight = ceil(ascent + descent + leading)
+            guard abs(line.width - lineWidth) < 1.5 || abs(line.width - tsWidth) < 1.5 else {
+                return "line \(index) width \(line.width) vs \(lineWidth) (ts \(tsWidth))"
+            }
+            // On iOS, `CTLineGetTypographicBounds` can synthesize non-additive
+            // extra line height when `.AppleColorEmojiUI` shares a line with a
+            // non-UI fallback font (e.g. `CourierNewPSMT`), even though every
+            // individual `CTRun` on the line has smaller typographic bounds.
+            var runAscent: CGFloat = 0
+            var runDescent: CGFloat = 0
+            var runLeading: CGFloat = 0
+            for run in (CTLineGetGlyphRuns(ctLine) as? [CTRun] ?? []) {
+                var ra: CGFloat = 0
+                var rd: CGFloat = 0
+                var rl: CGFloat = 0
+                _ = CTRunGetTypographicBounds(run, CFRange(), &ra, &rd, &rl)
+                runAscent = max(runAscent, ra)
+                runDescent = max(runDescent, rd)
+                runLeading = max(runLeading, rl)
+            }
+            let runHeight = ceil(runAscent + runDescent + runLeading)
+            guard
+                abs(line.height - expectedHeight) <= 0.5 || abs(line.height - tsHeight) <= 0.5
+                    || (runHeight > 0 && abs(line.height - runHeight) <= 0.5)
+            else {
+                return "line \(index) height \(line.height) vs \(expectedHeight) (ts \(tsHeight), runs \(runHeight))"
+            }
             let isRTL = TextLayoutEngine.paragraphIsRTL(ns, startingAt: styled.paragraphs.first?.start ?? 0)
-            let lineX = TextLayoutEngine.lineOriginX(indent: indent, lineWidth: lineWidth, availableWidth: width, isRTL: isRTL)
-            let carets = TextLayoutEngine.caretOffsets(of: ctLine, range: line.range, string: ns, indent: lineX, width: lineWidth)
-            guard line.caretOffsets == carets else {
-                let at = carets.indices.first { line.caretOffsets[$0] != carets[$0] } ?? 0
+            let lineX = TextLayoutEngine.lineOriginX(indent: indent, lineWidth: line.width, availableWidth: width, isRTL: isRTL)
+            let lineNS = lineAttr.string as NSString
+            let carets = TextLayoutEngine.caretOffsets(of: ctLine, range: 0..<line.range.count, string: lineNS, indent: lineX, width: line.width)
+            let actualCarets = layout.caretOffsets(forLineAt: index)
+            guard actualCarets.count == carets.count,
+                zip(actualCarets, carets).allSatisfy({ abs($0 - $1) < 1.5 })
+            else {
+                let at = carets.indices.first { abs(actualCarets[$0] - carets[$0]) >= 1.5 } ?? 0
                 let units = (max(0, start + at - 3)..<min(ns.length, start + at + 3)).map { String(ns.character(at: $0), radix: 16) }
-                return "line \(index) \(line.range) caret \(at): \(line.caretOffsets[at]) vs \(carets[at]) near \(units)"
+                return "line \(index) \(line.range) caret \(at): \(actualCarets[at]) vs \(carets[at]) near \(units)"
             }
-            var glyphs: [CGGlyph] = []
-            var xs: [CGFloat] = []
-            for run in CTLineGetGlyphRuns(ctLine) as? [CTRun] ?? [] {
-                let n = CTRunGetGlyphCount(run)
-                var g = [CGGlyph](repeating: 0, count: n)
-                var p = [CGPoint](repeating: .zero, count: n)
-                CTRunGetGlyphs(run, CFRange(), &g)
-                CTRunGetPositions(run, CFRange(), &p)
-                glyphs += g
-                xs += p.map { lineX + $0.x }
-            }
-            let laid = line.runs.flatMap { layout.runs[$0].glyphs }
-            let laidX = line.runs.flatMap { layout.runs[$0].positions.map(\.x) }
-            guard laid == glyphs, laidX == xs else { return "line \(index) glyphs" }
             start += count
             index += 1
         }

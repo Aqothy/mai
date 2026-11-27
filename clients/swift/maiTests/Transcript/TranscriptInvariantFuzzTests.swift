@@ -289,20 +289,18 @@ nonisolated struct TranscriptInvariantFuzzTests {
         }
     }
 
-    // MARK: Layout cache budget
+    // MARK: Compact PreparedText memory footprint
 
-    /// Off-screen layouts are bounded by memory, not row or line count: a
-    /// one-line row can hold megabytes of glyphs (Ghostty bounds scrollback
-    /// in bytes, `max_scrollback_bytes`, for the same reason).
-    @MainActor @Test func layoutCacheEvictsLongSingleLineRowsByTheirSize() async {
+    /// Giant prose rows hold only compact segment widths + line starts
+    /// (~2.5× text bytes, zero glyph/caret copies), so 4 × 200 KB rows stay
+    /// well under 4 MB total instead of the old > 22 MB glyph cache.
+    @MainActor @Test func giantSingleLineRowsStayCompactInMemory() async {
         let style = TextStyle.current()
         let controller = TranscriptController(configuration: .testing)
         let host = FakeTranscriptHost()
         host.size = CGSize(width: 800, height: 600)
         host.controller = controller
         controller.attach(host)
-        // Four 200 KB materialized prose rows (~5.6 MB of glyph positions and
-        // carets each, > 12 MB budget). Only the rows near the viewport may stay.
         let line = String(repeating: #"{"k":"value","n":12345}, "#, count: 200 * 1024 / 25)
         let rows = (0..<4).map { index in
             TranscriptRow(
@@ -315,8 +313,8 @@ nonisolated struct TranscriptInvariantFuzzTests {
             rows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
         for layout in built { controller.storeLayout(layout) }
-        controller.dropLayouts(outside: 0...2_000)
-        #expect(controller.layouts.count <= 2, "kept \(controller.layouts.count) off-screen megabyte layouts")
+        #expect(controller.layouts.count == 4)
+        #expect(controller.cachedLayoutBytes < 4 << 20, "4 × 200 KB prose layouts used \(controller.cachedLayoutBytes) B")
     }
 
     // MARK: Pathological Markdown

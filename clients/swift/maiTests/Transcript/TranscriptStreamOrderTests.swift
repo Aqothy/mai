@@ -200,7 +200,7 @@ struct TranscriptStreamOrderTests {
         var accessoryOrigins: [String: CGPoint] = [:]
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
+            visible: CGRect, streamed: DrawnBands?
         ) { wideOrigins[rowID] = origin }
         func removeWideBlock(rowID: String) { wideOrigins[rowID] = nil }
         func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor) {}

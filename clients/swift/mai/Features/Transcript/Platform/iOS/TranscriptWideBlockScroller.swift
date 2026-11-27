@@ -33,11 +33,12 @@
             showsVerticalScrollIndicator = false
             scrollsToTop = false
             backgroundColor = .clear
-            // Keep `body` user-interaction enabled so touches inside wide code
-            // blocks hit a plain `UIView` rather than the nested `UIScrollView`
-            // directly, letting the outer `UITextInteraction` initiate long-press
-            // selection while horizontal pans still scroll normally.
-            body.isUserInteractionEnabled = true
+            // Keep the scroller non-hit-testable so touches inside wide code
+            // blocks and tables hit `TranscriptTextInputView` directly, giving
+            // 100% native `UITextInteraction` selection, handles, and menus;
+            // `TranscriptScrollView`'s horizontal pan gesture drives scrolling.
+            isUserInteractionEnabled = false
+            body.isUserInteractionEnabled = false
             body.layer.addSublayer(row)
             addSubview(body)
         }
@@ -69,7 +70,7 @@
         func show(
             rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
+            visible: CGRect, streamed: DrawnBands?
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID
@@ -91,7 +92,7 @@
             lastVisibleY = visible
             lastContentWidth = wide.contentWidth
             lastDrawsOffMain = drawsOffMain
-            updateTiles(syncDeadline: syncDeadline)
+            updateTiles()
             CATransaction.commit()
         }
 
@@ -110,11 +111,11 @@
             guard needsUpdate else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            updateTiles(syncDeadline: 0)
+            updateTiles()
             CATransaction.commit()
         }
 
-        private func updateTiles(syncDeadline: CFTimeInterval) {
+        private func updateTiles() {
             let visMinX = max(0, contentOffset.x)
             let visWidth = max(bounds.width, frame.width)
             let overscan = RowLayer.bandWidth
@@ -128,8 +129,7 @@
                 lastVisibleY.isNull
                 ? .null
                 : CGRect(x: visMinX, y: lastVisibleY.minY, width: visWidth, height: lastVisibleY.height)
-            row.drawBands(
-                in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain, syncDeadline: syncDeadline)
+            row.drawBands(in: drawRect, visible: visibleRect, offMain: lastDrawsOffMain)
             let releaseMarginY = lastVisibleY.isNull ? 512 : max(512, lastVisibleY.height)
             row.releaseBands(outside: drawRect.insetBy(dx: -RowLayer.bandWidth, dy: -releaseMarginY))
         }
@@ -148,6 +148,15 @@
 
         /// How far the body is scrolled: hit testing adds it to a point.
         var scrollX: CGFloat { contentOffset.x }
+        var maxScrollX: CGFloat { max(0, contentSize.width - bounds.width) }
+
+        /// Drives horizontal scrolling from `TranscriptScrollView`'s latched
+        /// horizontal pan gesture and momentum deceleration.
+        func pan(toX x: CGFloat) {
+            let clamped = min(max(0, x), maxScrollX)
+            guard abs(contentOffset.x - clamped) > 0.1 else { return }
+            contentOffset = CGPoint(x: clamped, y: contentOffset.y)
+        }
 
         func resetForReuse() {
             rowID = nil

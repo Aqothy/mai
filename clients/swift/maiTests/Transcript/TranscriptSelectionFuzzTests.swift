@@ -120,8 +120,8 @@ struct TranscriptSelectionFuzzTests {
                         return unit >= 0x0590 && TextLayoutEngine.isBiDiCodeUnit(unit)
                     }
                     guard !hasBiDi else { continue }
-                    for line in segment.layout.lines where line.width > 1 {
-                        let endX = line.caretOffsets.last ?? 0
+                    for (lineIndex, line) in segment.layout.lines.enumerated() where line.width > 1 {
+                        let endX = segment.layout.caretOffsets(forLineAt: lineIndex).last ?? 0
                         #expect(
                             endX >= line.x + line.width - 1,
                             "\(context): line \(line.range) end caret \(endX) < \(line.x + line.width)")

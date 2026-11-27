@@ -41,7 +41,7 @@ struct TranscriptResizeTests {
         }
         #expect(frame.width == 520)
         #expect(resized.isHighlighted)
-        #expect(resized.materializedBody?.runs.map(\.glyphs) == colored.materializedBody?.runs.map(\.glyphs))
+        #expect(resized.body.prepared === colored.body.prepared)
         #expect(RowContentDiff.unchangedHeight(old.content, new.content) == .infinity)
     }
 
@@ -86,7 +86,7 @@ struct TranscriptResizeTests {
         let plainWide = layout(codeKind, width: 600)
         let plainNarrow = layout(codeKind, width: 420, previous: (codeKind, plainWide))
         if case .code(let a, _) = plainWide.content, case .code(let b, _) = plainNarrow.content {
-            #expect(a.materializedBody?.runs.map(\.glyphs) == b.materializedBody?.runs.map(\.glyphs))
+            #expect(a.body.prepared === b.body.prepared)
         } else {
             Issue.record("expected code")
         }

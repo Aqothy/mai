@@ -32,10 +32,6 @@ nonisolated final class RowLayer: CALayer {
         return frames
     }
 
-    /// Maximum `RowContentLayout.retainedBytes` eligible for bounded-budget
-    /// synchronous drawing of a visible blank band (keeps giant blocks off-main).
-    static let syncFallbackMaxRetainedBytes = 256_000
-
     private struct TileKey: Hashable {
         let col: Int
         let row: Int
@@ -170,20 +166,17 @@ nonisolated final class RowLayer: CALayer {
     nonisolated static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     /// Draws the tiles crossing `rect` (row coordinates) that do not show
-    /// their current bitmap: off the main thread when `offMain` is on, nearest
-    /// to `visible` first, each keeping what it shows until its new bitmap
-    /// lands. When `syncDeadline > 0`, blank visible bands of normal-sized rows
-    /// draw synchronously until the per-frame deadline so rapid scrubbing never
-    /// shows white flashes while giant blocks stay off-main.
+    /// their current bitmap (`REDESIGN.md §7 R3`): visible non-current bands
+    /// draw synchronously in the frame so scrubbing and live resize show zero
+    /// blanks or stale widths; off-screen prefetch bands draw asynchronously on
+    /// `RasterQueue` when `offMain` is true.
     @MainActor
-    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool, syncDeadline: CFTimeInterval = 0) {
+    func drawBands(in rect: CGRect, visible: CGRect, offMain: Bool) {
         guard let palette, colCount > 0, rowCount > 0, !rect.isNull, !rect.isEmpty else { return }
         let drawsNow = !offMain
         if !isSparseGrid {
             for band in linearBands where !band.isCurrent && band.frame.intersects(rect) {
-                submitBand(
-                    band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false,
-                    syncDeadline: syncDeadline)
+                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: false)
             }
             return
         }
@@ -197,29 +190,22 @@ nonisolated final class RowLayer: CALayer {
                 let frame = tileFrame(col: col, row: row)
                 guard frame.intersects(rect) else { continue }
                 let band = acquireTile(for: TileKey(col: col, row: row), frame: frame, scale: contentsScale)
-                submitBand(
-                    band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true,
-                    syncDeadline: syncDeadline)
+                submitBand(band, palette: palette, visible: visible, drawsNow: drawsNow, is2D: true)
             }
         }
     }
 
     @MainActor
     private func submitBand(
-        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool,
-        syncDeadline: CFTimeInterval
+        _ band: RowBandLayer, palette: TextPalette, visible: CGRect, drawsNow: Bool, is2D: Bool
     ) {
         guard !band.isCurrent else { return }
-        let syncForVisibleBlank =
-            !drawsNow && syncDeadline > 0 && band.contents == nil && !visible.isNull
-            && band.frame.intersects(visible) && content.retainedBytes <= Self.syncFallbackMaxRetainedBytes
-            && !(content.codeLayout?.hasLargeNonASCIILine ?? false)
-            && CACurrentMediaTime() < syncDeadline
-        guard drawsNow || syncForVisibleBlank || !band.isPending else { return }
+        let syncForVisible = !drawsNow && !visible.isNull && band.frame.intersects(visible)
+        guard drawsNow || syncForVisible || !band.isPending else { return }
         let raster = BandRaster(
             content: content, palette: palette, drawsWideBody: drawsWideBody, rect: band.frame,
             scale: contentsScale, colorSpace: bandColorSpace ?? Self.colorSpace)
-        if drawsNow || syncForVisibleBlank {
+        if drawsNow || syncForVisible {
             band.show(BandRasterizer.bitmap(raster), generation: band.generation)
             return
         }
@@ -411,15 +397,12 @@ nonisolated final class RowLayer: CALayer {
 
     private func configureShape(palette: TextPalette) {
         switch content {
-        case .bubble(_, let frame, _, let topRounded, let bottomRounded):
+        case .bubble(_, let frame, _):
             shape.isHidden = false
             shape.frame = frame
             shape.backgroundColor = palette.bubble
-            var corners: CACornerMask = []
-            if topRounded { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
-            if bottomRounded { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
-            shape.cornerRadius = corners.isEmpty ? 0 : TextStyle.bubbleCornerRadius
-            shape.maskedCorners = corners
+            shape.cornerRadius = TextStyle.bubbleCornerRadius
+            shape.maskedCorners = Self.allCorners
             shape.borderWidth = 0
             masksToBounds = false
         case .code(_, let frame):

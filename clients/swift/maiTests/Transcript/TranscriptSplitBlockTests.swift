@@ -51,7 +51,7 @@ nonisolated struct TranscriptSplitBlockTests {
             if let body {
                 document.showWideBlock(
                     rowID: row.id, body: body, key: layout.key,
-                    origin: .zero, drawn: .null, visible: .null, streamed: nil, syncDeadline: 0)
+                    origin: .zero, drawn: .null, visible: .null, streamed: nil)
             }
             #expect(document.wideBlocks[row.id]?.scrollX == 700)
 
@@ -65,7 +65,7 @@ nonisolated struct TranscriptSplitBlockTests {
             if let narrowBody = narrowLayout.content.wideBody {
                 document.showWideBlock(
                     rowID: narrow.id, body: narrowBody, key: narrowLayout.key,
-                    origin: .zero, drawn: .null, visible: .null, streamed: nil, syncDeadline: 0)
+                    origin: .zero, drawn: .null, visible: .null, streamed: nil)
             }
             #expect(controller.wideBlockOffsets[narrow.id] == nil)
             #expect(document.wideBlocks[narrow.id]?.scrollX == 0)

@@ -45,9 +45,6 @@ extension TranscriptController {
                 let speaker: String
                 switch row.kind {
                 case .userMessage: speaker = "You: "
-                case .markdownBlock(_, let position, let context)
-                where context.presentation == .userBubble && position.isFirst:
-                    speaker = "You: "
                 case .pendingMessage(let message, _) where message.kind == .user: speaker = "You: "
                 default: speaker = ""
                 }

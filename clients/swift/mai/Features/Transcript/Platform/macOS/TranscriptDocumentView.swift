@@ -29,9 +29,35 @@
                 }
             }
         }
+        private final class AccessoriesContainerView: NSView {
+            nonisolated override var isFlipped: Bool { true }
+            override var wantsUpdateLayer: Bool { true }
+
+            override init(frame frameRect: NSRect) {
+                super.init(frame: frameRect)
+                wantsLayer = true
+                layerContentsRedrawPolicy = .never
+            }
+
+            @available(*, unavailable)
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+
+            override func updateLayer() {}
+
+            override func hitTest(_ point: NSPoint) -> NSView? {
+                let hit = super.hitTest(point)
+                return hit === self ? nil : hit
+            }
+        }
+
         private var accessoryButtons: [String: [TranscriptAccessoryButton]] = [:]
         private var accessoryPool: [TranscriptAccessoryButton] = []
         private let rowsView = TranscriptRowsView()
+        /// Single container shifted once when the centered column moves during
+        /// resize, avoiding per-button `NSView.setFrame` calls.
+        private let accessoriesView = AccessoriesContainerView()
         let mounter: TranscriptRowMounter
         private(set) var wideBlocks: [String: TranscriptWideBlockScrollView] = [:]
         private var wideBlockPool: [TranscriptWideBlockScrollView] = []
@@ -59,6 +85,7 @@
             wantsLayer = true
             layerContentsRedrawPolicy = .never
             addSubview(rowsView)
+            addSubview(accessoriesView)
             alphaValue = 0
         }
 
@@ -164,6 +191,10 @@
         /// The rows view is as big as the document, under the code scrollers.
         private func attachRowsLayer() {
             if rowsView.frame != bounds { rowsView.frame = bounds }
+            let colW = controller.columnWidth
+            let colX = max(0, ((bounds.width - colW) / 2).rounded(.down))
+            let accFrame = NSRect(x: colX, y: 0, width: max(colW, bounds.width - colX), height: bounds.height)
+            if accessoriesView.frame != accFrame { accessoriesView.frame = accFrame }
         }
 
         override func layout() {
@@ -264,15 +295,12 @@
             placeRows()
         }
 
-        /// Places rows using cached layouts and pre-drawn bands, spending up to
-        /// the fixed sync fallback budget on small visible blank rows when rapid
-        /// scrolling or scrollbar scrubbing outruns off-main prefetch.
+        /// Ensures visible rows are laid out and mounts/draws them in the
+        /// frame (`REDESIGN.md §7 R3`: zero blanks, in-frame live resize).
         private func placeRows() {
             guard let clip, let palette, controller.columnWidth > 0 else { return }
-            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
-            let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
-            if deadline > 0 {
-                controller.prepareVisibleSynchronously(in: clip.documentVisibleRect, deadline: deadline)
+            if isContentVisible {
+                controller.ensureVisibleRowsReady(in: clip.documentVisibleRect)
             }
             attachRowsLayer()
             CATransaction.begin()
@@ -280,20 +308,20 @@
             defer { CATransaction.commit() }
             mounter.place(
                 controller, visible: clip.documentVisibleRect, documentWidth: bounds.width, palette: palette,
-                scale: scale, colorSpace: colorSpace, showsContent: isContentVisible, syncDeadline: deadline)
+                scale: scale, colorSpace: colorSpace, showsContent: isContentVisible)
         }
 
         // MARK: TranscriptRowMounterDelegate
 
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
+            visible: CGRect, streamed: DrawnBands?
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScrollView()
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
                 scroller.transcriptScrollView = enclosingScrollView
-                if scroller.superview == nil { addSubview(scroller) }
+                if scroller.superview == nil { addSubview(scroller, positioned: .below, relativeTo: accessoriesView) }
                 scroller.isHidden = false
                 scroller.onReaderScroll = { [weak self] in self?.wideBlockDidScroll($0) }
             }
@@ -306,7 +334,7 @@
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
-                streamed: streamed, syncDeadline: syncDeadline)
+                streamed: streamed)
         }
 
         /// The reader scrolled a wide block: keep its sideways offset across
@@ -331,7 +359,7 @@
                 } else {
                     button = accessoryPool.popLast() ?? TranscriptAccessoryButton()
                 }
-                if button.superview == nil { addSubview(button) }
+                if button.superview == nil { accessoriesView.addSubview(button) }
                 buttons.append(button)
             }
             for (button, accessory) in zip(buttons, accessories) {
@@ -340,7 +368,7 @@
                 } else {
                     button.isHidden = false
                 }
-                let frame = accessory.frame.offsetBy(dx: origin.x, dy: origin.y)
+                let frame = accessory.frame.offsetBy(dx: origin.x - accessoriesView.frame.minX, dy: origin.y)
                 if button.frame != frame { button.frame = frame }
                 button.show(accessory.action)
                 button.onResolveCopy = { [weak self] action in

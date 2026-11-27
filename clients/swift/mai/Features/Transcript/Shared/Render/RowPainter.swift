@@ -12,7 +12,7 @@ nonisolated enum RowPainter {
         switch content {
         case .text(let layout, let origin):
             TextRenderer.draw(layout, at: origin, clip: clip, palette: palette, in: context)
-        case .bubble(let layout, _, let textOrigin, _, _):
+        case .bubble(let layout, _, let textOrigin):
             TextRenderer.draw(layout, at: textOrigin, clip: clip, palette: palette, in: context)
         case .notice(let layout, let frame, let textOrigin):
             TextRenderer.draw(

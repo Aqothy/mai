@@ -158,7 +158,7 @@ struct TranscriptBuilderTests {
 
         // User message resolved reference link whole and laid out as a bubble.
         let expectedURL = try #require(URL(string: "https://example.com/ref"))
-        if case .bubble(let userLayout, _, _, _, _) = controller.layout(forRowAt: 0)?.content {
+        if case .bubble(let userLayout, _, _) = controller.layout(forRowAt: 0)?.content {
             #expect(userLayout.string == "See ref and bold.")
             #expect(userLayout.links == [expectedURL])
         } else {
@@ -168,7 +168,7 @@ struct TranscriptBuilderTests {
         // Reasoning rendered as Markdown with muted secondary color on all runs.
         if case .text(let thoughtLayout, _) = controller.layout(forRowAt: 1)?.content {
             #expect(thoughtLayout.string == "Reasoning with emphasis and code.")
-            #expect(thoughtLayout.runs.allSatisfy { $0.color == .secondary })
+            #expect(thoughtLayout.prepared.runs.allSatisfy { $0.style.color == .secondary })
         } else {
             Issue.record("expected laid-out muted thought text")
         }

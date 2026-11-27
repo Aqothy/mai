@@ -333,7 +333,6 @@
                 for row in rows {
                     controller.storeLayout(RowLayoutBuilder.layout(RowLayoutRequest(rowID: row.id, kind: row.kind, key: key, style: style)))
                 }
-                controller.dropLayouts(outside: 0...2_000)
                 let kept = controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes }
                 emit("offscreen-12x256kb-lines", 0, ["keptLayouts": controller.layouts.count, "keptMB": Double(kept) / 1_048_576])
             }

@@ -169,8 +169,8 @@ struct TranscriptSelectionTests {
         #expect(text.offset(closestTo: CGPoint(x: 0, y: text.size.height + 20)) == text.length)
         let rects = text.selectionRects(for: 6..<13)
         #expect(rects.count == 2)
-        #expect(abs(rects[0].minX - first.caretOffsets[6]) < 0.01)
-        #expect(abs(rects[1].maxX - second.caretOffsets[2]) < 0.01)
+        #expect(abs(rects[0].minX - text.caretOffsets(forLineAt: 0)[6]) < 0.01)
+        #expect(abs(rects[1].maxX - text.caretOffsets(forLineAt: 1)[2]) < 0.01)
     }
 
     @Test func tableCellsHitTestWithinTheirBoxes() {

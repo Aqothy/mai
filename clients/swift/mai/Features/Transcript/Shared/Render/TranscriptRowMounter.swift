@@ -13,7 +13,7 @@ protocol TranscriptRowMounterDelegate: AnyObject {
     /// layout so wide blocks update size and pixels in the same frame.
     func showWideBlock(
         rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-        visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval)
+        visible: CGRect, streamed: DrawnBands?)
     func removeWideBlock(rowID: String)
     /// Highlights `range` of a wide block's text in its scroller.
     func showWideBlockSelection(rowID: String, range: Range<Int>?, color: CGColor)
@@ -115,7 +115,7 @@ final class TranscriptRowMounter {
     /// while the transcript waits for its first rows (PLAN 3.9 rule 9).
     func place(
         _ controller: TranscriptController, visible: CGRect, documentWidth: CGFloat, palette: TextPalette,
-        scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool, syncDeadline: CFTimeInterval = 0
+        scale: CGFloat, colorSpace: CGColorSpace? = nil, showsContent: Bool
     ) {
         let space = colorSpace ?? RowLayer.colorSpace
         hasSelection = drawsSelection && controller.selection != nil
@@ -179,7 +179,7 @@ final class TranscriptRowMounter {
                 mount(
                     controller.rows[rowIndex], index: rowIndex, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
-                    colorSpace: space, showsContent: showsContent, syncDeadline: syncDeadline)
+                    colorSpace: space, showsContent: showsContent)
             }
         }
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
@@ -210,8 +210,7 @@ final class TranscriptRowMounter {
                         {
                             delegate?.showWideBlock(
                                 rowID: id, body: wideBody,
-                                key: layout.key, origin: origin, drawn: drawn, visible: visible, streamed: nil,
-                                syncDeadline: 0)
+                                key: layout.key, origin: origin, drawn: drawn, visible: visible, streamed: nil)
                         }
                     }
                     continue
@@ -239,7 +238,7 @@ final class TranscriptRowMounter {
     private func mount(
         _ row: TranscriptRow, index: Int, frame: CGRect, layout: RowLayout, controller: TranscriptController,
         documentWidth: CGFloat, visible: CGRect, drawn: CGRect, palette: TextPalette, scale: CGFloat,
-        colorSpace: CGColorSpace, showsContent: Bool, syncDeadline: CFTimeInterval
+        colorSpace: CGColorSpace, showsContent: Bool
     ) {
         let width = layout.key.width
         let x = max(0, ((documentWidth - width) / 2).rounded(.down))
@@ -270,9 +269,7 @@ final class TranscriptRowMounter {
         layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
-        layer.drawBands(
-            in: local, visible: localVisible, offMain: drawsOffMain,
-            syncDeadline: showsContent ? syncDeadline : 0)
+        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.
@@ -294,7 +291,7 @@ final class TranscriptRowMounter {
             delegate?.showWideBlock(
                 rowID: row.id, body: wideBody, key: layout.key,
                 origin: origin, drawn: drawn, visible: showsContent ? visible : .null,
-                streamed: preDrawn?.wideBodyDrawn, syncDeadline: showsContent ? syncDeadline : 0)
+                streamed: preDrawn?.wideBodyDrawn)
             delegate?.showWideBlockSelection(
                 rowID: row.id, range: hasSelection ? controller.selectedRange(inRowAt: index) : nil,
                 color: selectionColor)

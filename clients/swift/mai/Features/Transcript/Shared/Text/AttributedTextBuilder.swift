@@ -37,64 +37,12 @@ nonisolated struct AttributedTextBuilder {
     }
 
     static func build(
-        _ blocks: [MarkdownBlock], style: TextStyle, color: TextColor = .primary,
-        context: TranscriptBlockContext = .default
+        _ blocks: [MarkdownBlock], style: TextStyle, color: TextColor = .primary
     ) -> StyledText {
-        let resolvedColor = context.presentation == .thought ? .secondary : color
-        var builder = AttributedTextBuilder(style: style, color: resolvedColor)
-        let quoteStep = style.quoteBarWidth + style.quoteIndent
-        var quoteBars: [CGFloat] = []
-        var indent: CGFloat = 0
-        var listDepth = 0
-        for container in context.containers {
-            switch container {
-            case .quote:
-                quoteBars.append(indent)
-                indent += quoteStep
-            case .list:
-                indent += style.listIndent
-                listDepth += 1
-            }
-        }
-        let root = Environment(
-            indent: indent, quoteBars: quoteBars, listDepth: listDepth,
-            blockSpacing: context.joinSpacingAbove == .tight ? style.listItemSpacing : style.blockSpacing)
-        if let marker = context.listMarker, let first = blocks.first {
-            let markerIndent = max(0, indent - style.listIndent)
-            var markerEnv = root
-            markerEnv.indent = markerIndent
-            let consumedFirst = builder.beginFlattenedItem(
-                marker: marker, first: first, markerEnvironment: markerEnv, nested: root)
-            let startIndex = consumedFirst ? 1 : 0
-            for block in blocks[startIndex...] { builder.append(block, environment: root) }
-        } else {
-            for block in blocks { builder.append(block, environment: root) }
-        }
+        var builder = AttributedTextBuilder(style: style, color: color)
+        let root = Environment(blockSpacing: style.blockSpacing)
+        for block in blocks { builder.append(block, environment: root) }
         return builder.text
-    }
-
-    private mutating func beginFlattenedItem(
-        marker: TranscriptBlockContext.ListMarker, first child: MarkdownBlock,
-        markerEnvironment: Environment, nested: Environment
-    ) -> Bool {
-        switch marker {
-        case .task(let checked):
-            var first = markerEnvironment
-            first.indent = nested.indent
-            beginParagraph(
-                first, headIndent: nested.indent,
-                taskMarker: StyledParagraph.TaskMarker(x: markerEnvironment.indent, checked: checked))
-        case .ordered(let number):
-            beginParagraph(markerEnvironment, headIndent: nested.indent)
-            appendRun("\(number). ", font: style.font(.body), style: TextRunStyle(color: baseColor))
-        case .bullet(let depth):
-            beginParagraph(markerEnvironment, headIndent: nested.indent)
-            let bullet = ["•", "◦", "▪"][depth % 3]
-            appendRun("\(bullet)  ", font: style.font(.bullet), style: TextRunStyle(color: baseColor))
-        }
-        guard case .paragraph(let inlines) = child else { return false }
-        append(inlines, Inline(color: baseColor))
-        return true
     }
 
     /// Plain text in one font and color, its line breaks kept.
@@ -104,36 +52,6 @@ nonisolated struct AttributedTextBuilder {
         var builder = AttributedTextBuilder(style: style)
         builder.beginParagraph(Environment(blockSpacing: 0))
         builder.appendRun(string, font: style.font(role, bold: bold), style: TextRunStyle(color: color))
-        return builder.text
-    }
-
-    /// Builds a `StyledText` for only the suffix of a single paragraph starting at
-    /// `utf16Offset`, keeping link indices aligned with `existingLinks`.
-    static func paragraphSuffix(
-        _ inlines: [MarkdownInline], fromUTF16 offset: Int, existingLinks: [URL], style: TextStyle,
-        color: TextColor = .primary
-    ) -> StyledText {
-        var builder = AttributedTextBuilder(style: style, color: color, existingLinks: existingLinks)
-        builder.beginParagraph(Environment(blockSpacing: 0))
-        var cursor = 0
-        for inline in inlines {
-            let count = inline.text.utf16.count
-            let next = cursor &+ count
-            if next <= offset {
-                cursor = next
-                continue
-            }
-            if cursor < offset {
-                let utf16 = inline.text.utf16
-                let cut = utf16.index(utf16.startIndex, offsetBy: offset &- cursor)
-                var sliced = inline
-                sliced.text = String(inline.text[cut...])
-                builder.append([sliced], Inline(color: color))
-            } else {
-                builder.append([inline], Inline(color: color))
-            }
-            cursor = next
-        }
         return builder.text
     }
 
@@ -196,10 +114,6 @@ nonisolated struct AttributedTextBuilder {
         }
     }
 
-    /// The marker starts the item's first paragraph (returns true, having
-    /// appended it); an item that starts with another block (code, a list)
-    /// gets it on a line of its own above that block. Task items draw a
-    /// vector checkbox in the leading gutter instead of a bullet/number.
     @inline(never)
     private mutating func beginItem(
         _ item: MarkdownList.Item, at offset: Int, of list: MarkdownList, first child: MarkdownBlock,
@@ -262,8 +176,6 @@ nonisolated struct AttributedTextBuilder {
         lastFont = font
     }
 
-    /// Starts a block-level paragraph: a newline ends the one before, and the
-    /// block spacing separates them.
     private mutating func beginParagraph(
         _ environment: Environment, headIndent: CGFloat? = nil, isRule: Bool = false,
         taskMarker: StyledParagraph.TaskMarker? = nil

@@ -86,6 +86,8 @@ final class TranscriptController {
     @ObservationIgnored var lastScheduledTop: CGFloat = 0
     @ObservationIgnored var isScrollingDown = true
     @ObservationIgnored var openStarted = ContinuousClock.now
+    @ObservationIgnored var backfillResumeTask: Task<Void, Never>?
+    @ObservationIgnored var needsBackfillRebuild = false
     @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) {
         [weak self, inbox = layoutInbox] result in
         let shouldSchedule = inbox.state.withLock { state -> Bool in
@@ -120,13 +122,10 @@ final class TranscriptController {
     /// changes only when the agent starts something new.
     @ObservationIgnored var workingPhrase = ChatWorkingPhrases.next(after: nil)
     @ObservationIgnored var workingActivityKey: String?
-    /// Parsed messages (user, assistant, reasoning): rows are state (PLAN 3.1
-    /// rule 9). Bounded by `maxParsedMessageBytes` so multi-tens-of-MB sessions
-    /// stay within budget. Metrics are cached alongside blocks so rebuilds stay
-    /// O(blocks) on the main thread.
+    /// Parsed messages (user, assistant, reasoning): rows are state (`REDESIGN.md §8`:
+    /// kept for the whole transcript so revisiting history never re-parses).
+    /// Metrics are cached alongside blocks so rebuilds stay O(blocks) on the main thread.
     @ObservationIgnored var parsedMessages: [String: (source: String, blocks: [MarkdownBlock], metrics: [TextMetrics])] = [:]
-    @ObservationIgnored var parsedMessageOrder: [String] = []
-    @ObservationIgnored var parsedMessageBytes = 0
     @ObservationIgnored var streams: [String: TranscriptStream] = [:]
     /// The daemon has turns before the first loaded one.
     @ObservationIgnored var hasOlderTurns = false
@@ -170,6 +169,7 @@ final class TranscriptController {
             viewportBecameAvailable(viewport)
         }
         alignInitialEndIfPossible()
+        if !isAwaitingInitialEnd { scheduleBackfill() }
         host.setNeedsRowPlacement()
         updateFrameUpdates()
     }
@@ -185,6 +185,9 @@ final class TranscriptController {
         detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
         persistSavedPlace()
         preDrawnBands.removeAll()
+        backfillResumeTask?.cancel()
+        backfillResumeTask = nil
+        Task { await queue.cancelAll() }
         host.setNeedsFrameUpdates(false)
         self.host = nil
     }
@@ -201,7 +204,22 @@ final class TranscriptController {
         if viewport != last {
             // Rule 3: layout moved the viewport, not the reader.
             lastViewport = viewport
-            if viewport.size.width != last.size.width { widthDidChange(viewport.size.width) }
+            let widthChanged = viewport.size.width != last.size.width
+            // When resizing away from the end, anchor the first visible
+            // character on the top row (or proportional offset for non-text
+            // rows) so tall paragraphs keep the exact reading line pinned.
+            var resizeAnchor: (rowID: String, charOffset: Int?, fraction: CGFloat)?
+            if widthChanged, !isFollowingEnd, !isAwaitingInitialEnd,
+                let anchorIdx = geometry.index(at: baselineTop)
+            {
+                let rowID = rows[anchorIdx].id
+                let (rowMinY, rowHeight) = geometry.frame(at: anchorIdx)
+                let localY = max(0, baselineTop - rowMinY)
+                let charOffset = layouts[rowID]?.content.textOffset(closestTo: CGPoint(x: 0, y: localY))
+                let fraction = rowHeight > 0 ? min(1, localY / rowHeight) : 0
+                resizeAnchor = (rowID: rowID, charOffset: charOffset, fraction: fraction)
+            }
+            if widthChanged { widthDidChange(viewport.size.width) }
             if endJump != nil {
                 stepEndJump()
             } else if isAwaitingInitialEnd {
@@ -212,7 +230,22 @@ final class TranscriptController {
                 // finger-lift wiggle flipped `isFollowing` off).
                 let pinsToEnd =
                     isFollowingEnd || (viewport.bottomInset != last.bottomInset && isNearEnd(top: baselineTop, last))
-                move(to: pinsToEnd ? endTop(viewport) : baselineTop)
+                if pinsToEnd {
+                    move(to: endTop(viewport))
+                } else if let anchor = resizeAnchor, let idx = geometry.index(for: anchor.rowID) {
+                    let (newMinY, newHeight) = geometry.frame(at: idx)
+                    let localY: CGFloat
+                    if let charOff = anchor.charOffset,
+                        let caret = layouts[anchor.rowID]?.content.caretRect(for: charOff)
+                    {
+                        localY = min(newHeight, max(0, caret.minY))
+                    } else {
+                        localY = anchor.fraction * newHeight
+                    }
+                    move(to: newMinY + localY)
+                } else {
+                    move(to: baselineTop)
+                }
             }
             alignInitialEndIfPossible()
             viewportDidMove()
@@ -246,8 +279,12 @@ final class TranscriptController {
             move(to: top)
         } else {
             detachedPlace = nil
-            baselineTop = host?.viewportTop ?? 0
-            updateEndVisibility()
+            if !geometry.isEmpty {
+                move(to: initialTargetTop(viewport).top)
+            } else {
+                baselineTop = host?.viewportTop ?? 0
+                updateEndVisibility()
+            }
         }
         viewportDidMove()
     }
@@ -261,8 +298,10 @@ final class TranscriptController {
         changeGeometry {
             rows = versioned
             let width = columnWidth > 0 ? columnWidth : 600
+            let spans = versioned.map(Self.selectableSpan(for:))
             geometry.replace(
-                ids: versioned.map(\.id), sources: versioned.map(\.sourceID), measured: measuredHeights
+                ids: versioned.map(\.id), sources: versioned.map(\.sourceID), measured: measuredHeights,
+                selectableSpans: spans
             ) { index in
                 rememberedHeight(for: versioned[index])
                     ?? HeightEstimator.estimate(versioned[index], width: width, style: style)
@@ -282,7 +321,8 @@ final class TranscriptController {
     /// block or a parsed message expanding in place. A row that stays keeps its
     /// height unless `heights` has one.
     func replaceRows(
-        _ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat]
+        _ range: Range<Int>, with replacement: [TranscriptRow], heights: [String: CGFloat],
+        shouldSchedule: Bool = true
     ) {
         var old: [String: (row: TranscriptRow, height: CGFloat)] = [:]
         for index in range { old[rows[index].id] = (rows[index], geometry.height(at: index)) }
@@ -329,13 +369,14 @@ final class TranscriptController {
         changeGeometry(replacingRange: range) {
             rows.replaceSubrange(range, with: versioned)
             geometry.replaceRows(
-                range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights)
+                range, ids: versioned.map(\.id), sources: versioned.map(\.sourceID), heights: newHeights,
+                selectableSpans: versioned.map(Self.selectableSpan(for:)))
         }
         if let remappedSelection {
             selection = remappedSelection
             host?.setNeedsSelectionDisplay()
         }
-        scheduleWork()
+        if shouldSchedule { scheduleWork() }
     }
 
     /// Remaps a selection endpoint anchored on a replaced row (such as a
@@ -362,7 +403,7 @@ final class TranscriptController {
         }
         var remaining = position.offset
         for (idx, row) in matching.enumerated() {
-            if idx > 0 { remaining = max(0, remaining - row.kind.separatorBefore.utf16.count) }
+            if idx > 0 { remaining = max(0, remaining - 1) }
             let len = row.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: row.kind) ?? 0
             if remaining <= len {
                 return TextPosition(rowID: row.id, offset: remaining)
@@ -383,9 +424,16 @@ final class TranscriptController {
                 row.contentVersion = changed ? rows[index].contentVersion + 1 : rows[index].contentVersion
                 if changed, heights[row.id] == nil { measuredRowHeights.removeValue(forKey: row.id) }
                 rows[index] = row
+                if changed { geometry.setSelectableSpan(Self.selectableSpan(for: row), at: index) }
             }
             geometry.setHeights(heights)
         }
+    }
+
+    private static func selectableSpan(for row: TranscriptRow) -> Int {
+        guard row.kind.isSelectable else { return 0 }
+        let len = row.metrics.selectableUTF16 ?? RowSelectableText.utf16Length(for: row.kind) ?? 0
+        return 1 + len
     }
 
     /// New content versions for rows whose content changed.
@@ -564,7 +612,7 @@ final class TranscriptController {
     /// session cache on detach: every way a chat leaves (another chat selected,
     /// a pop, its window closing) takes its view out of the window. Never
     /// overwrites a saved place while still hidden waiting for initial alignment.
-    private func persistSavedPlace() {
+    func persistSavedPlace() {
         guard let store, let threadID else { return }
         if let snapshot = snapshotMeasuredHeights() {
             store.setTranscriptMeasuredHeights(snapshot, for: threadID)

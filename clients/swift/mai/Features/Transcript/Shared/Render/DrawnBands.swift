@@ -32,14 +32,12 @@ nonisolated struct DrawnBands: Sendable {
     private static let maxPreDrawnWideColumns = 2
 
     /// Pre-draws the leading bands of a freshly laid-out cold row inside the
-    /// same `LayoutQueue` worker hop (1-hop raster), skipping giant blocks so
-    /// workers stay responsive and `RasterQueue` draws only visible tiles.
+    /// same `LayoutQueue` worker hop (1-hop raster); each band draws only its
+    /// visible lines (`O(band height)`).
     static func drawInitial(
         _ layout: RowLayout, drawing: Drawing, maxBands: Int = 2
     ) -> DrawnBands? {
-        guard maxBands > 0, layout.content.retainedBytes <= RowLayer.syncFallbackMaxRetainedBytes else {
-            return nil
-        }
+        guard maxBands > 0 else { return nil }
         let drawsWideBody = layout.content.wideBody == nil
         let bounds = layout.content.paintedBounds(
             drawsWideBody: drawsWideBody, rowWidth: layout.key.width, rowHeight: layout.height)

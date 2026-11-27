@@ -170,7 +170,12 @@
         // MARK: Geometry
 
         func firstRect(for range: UITextRange) -> CGRect {
-            selectionRects(for: range).first?.rect ?? .null
+            guard let range = range as? TranscriptTextRange, let controller else { return .null }
+            return controller.taggedSelectionRects(
+                from: range.from.position, to: range.to.position, columnX: columnX(), scrollX: scrollX
+            ).first?.rect
+                ?? controller.caretRect(for: range.from.position, columnX: columnX(), scrollX: scrollX)
+                ?? .null
         }
 
         func caretRect(for position: UITextPosition) -> CGRect {

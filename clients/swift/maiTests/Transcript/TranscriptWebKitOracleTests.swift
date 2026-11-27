@@ -10,6 +10,7 @@
     /// Differential oracle against live WebKit (`WKWebView`, Safari's engine):
     /// compares our Markdown text/block structure, word/paragraph selection
     /// ranges, and RTL `dir="auto"` alignment directly against a real browser.
+    @Suite(.serialized)
     struct TranscriptWebKitOracleTests {
         private final class NavigationWaiter: NSObject, WKNavigationDelegate {
             var continuation: CheckedContinuation<Void, Never>?
@@ -27,11 +28,20 @@
             func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish() }
         }
 
-        private func makeWebView(width: CGFloat = 600, height: CGFloat = 800) -> (WKWebView, NavigationWaiter) {
-            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+        /// Reused across oracle tests so the suite boots one WebContent XPC
+        /// process instead of spawning four separate ones (~5× faster).
+        private static let sharedWebView: (webView: WKWebView, waiter: NavigationWaiter) = {
+            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 800))
             let waiter = NavigationWaiter()
             webView.navigationDelegate = waiter
             return (webView, waiter)
+        }()
+
+        private func makeWebView(width: CGFloat = 600, height: CGFloat = 800) -> (WKWebView, NavigationWaiter) {
+            let pair = Self.sharedWebView
+            let frame = CGRect(x: 0, y: 0, width: width, height: height)
+            if pair.webView.frame != frame { pair.webView.frame = frame }
+            return pair
         }
 
         private func load(_ html: String, in webView: WKWebView, waiter: NavigationWaiter) async {

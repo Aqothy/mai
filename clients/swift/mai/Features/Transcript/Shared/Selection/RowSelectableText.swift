@@ -1,19 +1,18 @@
 import Foundation
 
-/// A row's selectable text without its layout: what copy reads for rows far
-/// from the viewport, whose layouts were dropped. Built by the same code the
+/// A row's selectable text without its layout: built by the same code the
 /// layout's text comes from, so offsets agree (`RowContentLayout.selectableString`).
 nonisolated enum RowSelectableText {
     static func string(for kind: TranscriptRowKind, style: TextStyle) -> String? {
         switch kind {
-        case .markdownBlock(.code(_, let code), _, let context) where !context.isNestedInContainer:
+        case .markdownBlock(.code(_, let code), _):
             return code
-        case .markdownBlock(.table(let table), _, let context) where !context.isNestedInContainer:
+        case .markdownBlock(.table(let table), _):
             return TableLayout.tabSeparatedText(table)
-        case .markdownBlock(let block, _, let context):
-            return AttributedTextBuilder.build([block], style: style, context: context).string.string
+        case .markdownBlock(let block, _):
+            return AttributedTextBuilder.build([block], style: style).text
         case .userMessage(let blocks), .thought(let blocks):
-            return AttributedTextBuilder.build(blocks, style: style).string.string
+            return AttributedTextBuilder.build(blocks, style: style).text
         case .pendingMessage(_, let source):
             return source
         case .notice(let title, let text):
@@ -25,8 +24,7 @@ nonisolated enum RowSelectableText {
     }
 
     /// Parses an unparsed `.pendingMessage` on demand when the user copies it,
-    /// returning the exact same plain text it produces once scrolled near and
-    /// parsed (so copy never depends on scroll history).
+    /// returning the exact same plain text it produces once parsed.
     static func renderedPendingString(message: TranscriptMessage, source: String, style: TextStyle) -> String {
         let blocks = MarkdownPlanner.blocks(from: source)
         let rows = message.rows(from: blocks)
@@ -34,24 +32,23 @@ nonisolated enum RowSelectableText {
         var hasPart = false
         for row in rows {
             guard let part = string(for: row.kind, style: style) else { continue }
-            if hasPart { result += row.kind.separatorBefore }
+            if hasPart { result += "\n" }
             result += part
             hasPart = true
         }
         return result
     }
 
-    /// Exact UTF-16 length of `string(for:style:)` without building an
-    /// `NSAttributedString` or touching Core Text fonts. Matches
-    /// `RowContentLayout.selectableLength` for every selectable row kind.
+    /// Exact UTF-16 length of `string(for:style:)` without building fonts or
+    /// layouts. Matches `RowContentLayout.selectableLength`.
     static func utf16Length(for kind: TranscriptRowKind) -> Int? {
         switch kind {
-        case .markdownBlock(.code(_, let code), _, let context) where !context.isNestedInContainer:
+        case .markdownBlock(.code(_, let code), _):
             return code.utf16.count
-        case .markdownBlock(.table(let table), _, let context) where !context.isNestedInContainer:
+        case .markdownBlock(.table(let table), _):
             return tableUTF16Length(table)
-        case .markdownBlock(let block, _, let context):
-            return blocksUTF16Length([block], context: context)
+        case .markdownBlock(let block, _):
+            return blocksUTF16Length([block])
         case .userMessage(let blocks), .thought(let blocks):
             return blocksUTF16Length(blocks)
         case .pendingMessage(_, let source):
@@ -79,9 +76,7 @@ nonisolated enum RowSelectableText {
         return total
     }
 
-    private static func blocksUTF16Length(
-        _ blocks: [MarkdownBlock], context: TranscriptBlockContext = .default
-    ) -> Int {
+    private static func blocksUTF16Length(_ blocks: [MarkdownBlock]) -> Int {
         var total = 0
         func beginParagraph() {
             if total > 0 { total += 1 }
@@ -109,10 +104,8 @@ nonisolated enum RowSelectableText {
                             beginParagraph()
                             if item.taskChecked == nil {
                                 if let start = list.startIndex {
-                                    // "\(start + offset). "
                                     total += decimalDigitCount(start + offset) + 2
                                 } else {
-                                    // "•  ", "◦  ", or "▪  " — 3 UTF-16 code units.
                                     total += 3
                                 }
                             }
@@ -136,7 +129,7 @@ nonisolated enum RowSelectableText {
                 func addNestedRow(_ row: [[MarkdownInline]]) {
                     if rowIndex > 0 { total += 1 }
                     for (column, cell) in row.enumerated() {
-                        if column > 0 { total += 5 }  // "  │  "
+                        if column > 0 { total += 5 }
                         appendInlines(cell)
                     }
                     rowIndex += 1
@@ -147,22 +140,6 @@ nonisolated enum RowSelectableText {
                 beginParagraph()
                 total += spelling.utf16.count
             }
-        }
-        if let marker = context.listMarker, let first = blocks.first {
-            switch marker {
-            case .task: break
-            case .ordered(let number): total += decimalDigitCount(number) + 2
-            case .bullet: total += 3
-            }
-            let startIndex: Int
-            if case .paragraph(let inlines) = first {
-                appendInlines(inlines)
-                startIndex = 1
-            } else {
-                startIndex = 0
-            }
-            for block in blocks[startIndex...] { appendBlock(block) }
-            return total
         }
         for block in blocks { appendBlock(block) }
         return total

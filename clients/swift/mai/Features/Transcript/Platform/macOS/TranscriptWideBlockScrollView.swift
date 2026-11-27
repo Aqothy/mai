@@ -67,7 +67,7 @@
         func show(
             rowID: String, offset: CGFloat, body wide: WideBlockBody, key: RowLayoutKey,
             palette: TextPalette, scale: CGFloat, colorSpace: CGColorSpace, drawsOffMain: Bool, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
+            visible: CGRect, streamed: DrawnBands?
         ) {
             let isNewRow = self.rowID != rowID
             self.rowID = rowID
@@ -80,7 +80,7 @@
             body.show(
                 rowID: rowID, body: wide, key: key, palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: drawsOffMain, drawn: drawn, visible: visible,
-                horizontalVisible: visMinX...(visMinX + visWidth), streamed: streamed, syncDeadline: syncDeadline)
+                horizontalVisible: visMinX...(visMinX + visWidth), streamed: streamed)
             if resized { reflectScrolledClipView(contentView) }
         }
 

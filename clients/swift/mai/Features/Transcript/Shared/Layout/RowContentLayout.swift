@@ -5,7 +5,7 @@ import Foundation
 nonisolated enum RowContentLayout: Sendable {
     case text(TextLayout, origin: CGPoint)
     /// A user message: its bubble and the text inside it.
-    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint, topRounded: Bool = true, bottomRounded: Bool = true)
+    case bubble(TextLayout, frame: CGRect, textOrigin: CGPoint)
     case code(CodeLayout, frame: CGRect)
     /// A wide code block's lines alone, in its horizontal scroller.
     case codeBody(CodeLayout)
@@ -22,12 +22,10 @@ nonisolated enum RowContentLayout: Sendable {
 }
 
 nonisolated extension RowContentLayout {
-    /// About how much memory the layout holds, which off-screen eviction
-    /// budgets (Ghostty bounds scrollback in bytes, not lines, for the same
-    /// reason: one line of a minified file holds megabytes of glyphs).
+    /// Memory held by this layout (prepared segments + fitted lines).
     var retainedBytes: Int {
         switch self {
-        case .text(let layout, _), .bubble(let layout, _, _, _, _), .header(let layout, _, _), .notice(let layout, _, _):
+        case .text(let layout, _), .bubble(let layout, _, _), .header(let layout, _, _), .notice(let layout, _, _):
             layout.retainedBytes
         case .code(let code, _), .codeBody(let code):
             code.retainedBytes
@@ -38,7 +36,6 @@ nonisolated extension RowContentLayout {
         }
     }
 
-    /// Whether a code block carries its syntax colors.
     var isHighlighted: Bool {
         switch self {
         case .code(let layout, _), .codeBody(let layout): layout.isHighlighted
@@ -53,7 +50,6 @@ nonisolated extension RowContentLayout {
         }
     }
 
-    /// The theme of a code block's syntax colors, nil while plain.
     var colorsAreDark: Bool? {
         switch self {
         case .code(let layout, _), .codeBody(let layout): layout.colorsAreDark
@@ -61,19 +57,14 @@ nonisolated extension RowContentLayout {
         }
     }
 
-    /// The tightest integer rect (in row coordinates) that `RowPainter` draws
-    /// pixels into, clamped to `(0, 0, rowWidth, rowHeight)`. Sizing each
-    /// band's `IOSurface` to this rect instead of the full column skips empty
-    /// margins around short replies, right-aligned user bubbles, narrow tables,
-    /// and wide-code headers (empty when a row paints only layer shapes/controls).
+    /// Tightest integer rect (in row coordinates) that `RowPainter` draws
+    /// pixels into, clamped to `(0, 0, rowWidth, rowHeight)`.
     func paintedBounds(drawsWideBody: Bool, rowWidth: CGFloat, rowHeight: CGFloat) -> CGRect {
         let rowRect = CGRect(x: 0, y: 0, width: max(0, rowWidth), height: max(0, rowHeight))
         guard !rowRect.isEmpty else { return .zero }
         func clamp(_ rect: CGRect) -> CGRect {
             var clipped = rect.integral.intersection(rowRect)
             guard !clipped.isNull, !clipped.isEmpty else { return .zero }
-            // Keep multi-tile surfaces anchored at 0 along any tiled axis so
-            // 768×512 tiles align consistently while single-band rows stay tight.
             if clipped.maxX > RowLayer.bandWidth {
                 clipped = CGRect(x: 0, y: clipped.minY, width: clipped.maxX, height: clipped.height)
             }
@@ -83,28 +74,19 @@ nonisolated extension RowContentLayout {
             return clipped
         }
         func textRect(_ layout: TextLayout, at origin: CGPoint) -> CGRect {
-            guard !layout.lines.isEmpty || !layout.decorations.isEmpty else { return .zero }
+            guard !layout.lines.isEmpty else { return .zero }
+            if layout.prepared.hasParagraphDecorations {
+                return clamp(CGRect(x: 0, y: origin.y - 4, width: rowWidth, height: layout.size.height + 8))
+            }
             let minLineX: CGFloat =
-                if !layout.lines.isEmpty, layout.lines.count <= 32 {
+                if layout.lines.count <= 32 {
                     layout.lines.reduce(CGFloat.infinity) { min($0, $1.x) }
                 } else {
                     0
                 }
-            // Pad horizontally and vertically for glyph overhang (italic
-            // bearings, accents, emoji) and inline-code/stroke edges.
-            var rect = CGRect(
+            let rect = CGRect(
                 x: origin.x + minLineX - 4, y: origin.y - 2,
                 width: max(0, layout.size.width - minLineX) + 8, height: layout.size.height + 4)
-            if !layout.decorations.isEmpty {
-                if layout.decorations.count <= 64 {
-                    for decoration in layout.decorations {
-                        rect = rect.union(
-                            decoration.rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -2, dy: -2))
-                    }
-                } else {
-                    return rowRect
-                }
-            }
             return clamp(rect)
         }
         switch self {
@@ -112,7 +94,7 @@ nonisolated extension RowContentLayout {
             return .zero
         case .text(let layout, let origin):
             return textRect(layout, at: origin)
-        case .bubble(let layout, _, let textOrigin, _, _):
+        case .bubble(let layout, _, let textOrigin):
             return textRect(layout, at: textOrigin)
         case .notice(let layout, let frame, let textOrigin):
             return textRect(layout, at: CGPoint(x: frame.minX + textOrigin.x, y: textOrigin.y))
@@ -128,20 +110,11 @@ nonisolated extension RowContentLayout {
                 x: frame.minX, y: frame.minY + code.headerHeight,
                 width: frame.width, height: max(0, frame.height - code.headerHeight))
             let bodyOrigin = CGPoint(x: frame.minX + code.bodyOrigin.x, y: frame.minY + code.bodyOrigin.y)
-            let bodyRect: CGRect =
-                if let body = code.materializedBody {
-                    textRect(body, at: bodyOrigin).intersection(bodyClip)
-                } else {
-                    CGRect(
-                        x: bodyOrigin.x - 4, y: bodyOrigin.y - 2,
-                        width: code.bodySize.width + 8, height: code.bodySize.height + 4
-                    ).intersection(bodyClip)
-                }
+            let bodyRect = textRect(code.body, at: bodyOrigin).intersection(bodyClip)
             if labelRect.isEmpty { return bodyRect.isNull ? .zero : clamp(bodyRect) }
             if bodyRect.isNull || bodyRect.isEmpty { return labelRect }
             return clamp(labelRect.union(bodyRect))
         case .codeBody, .tableBody:
-            // Wide bodies are already sized tightly to `contentWidth × height`.
             return rowRect
         case .table(let table, let frame):
             guard drawsWideBody else { return .zero }
@@ -153,8 +126,6 @@ nonisolated extension RowContentLayout {
         }
     }
 
-    /// The body of a code block or table wider than the row, which scrolls
-    /// sideways in a scroller of its own; nil for everything else.
     var wideBody: WideBlockBody? {
         switch self {
         case .code(let code, let frame) where code.isWiderThanBlock:

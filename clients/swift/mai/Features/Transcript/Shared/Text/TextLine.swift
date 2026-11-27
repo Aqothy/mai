@@ -1,37 +1,48 @@
 import CoreGraphics
 import Foundation
 
-/// One laid-out line, in layout coordinates (top-down).
-nonisolated struct TextLine: Sendable {
-    /// The line's top and its baseline.
+/// One fitted line of a `TextLayout` (top-down layout coordinates).
+/// Holds only geometry and its UTF-16 range (~64 bytes); glyphs, carets, and
+/// inline decorations are computed on demand strictly for visible or queried
+/// lines (`REDESIGN.md §4, §9`).
+nonisolated struct TextLine: Equatable, Sendable {
     let top: CGFloat
     let baseline: CGFloat
     let height: CGFloat
-    /// Where the line starts (its indent) and its width without trailing
-    /// whitespace.
+    /// Where the line starts (its indent, or right-aligned origin for RTL) and
+    /// its visible width without trailing whitespace.
     let x: CGFloat
     let width: CGFloat
     /// The UTF-16 range of the layout's text on this line.
     let range: Range<Int>
-    /// The caret's x for each UTF-16 offset from `range.lowerBound` through
-    /// `range.upperBound`, from Core Text (`CTLineEnumerateCaretOffsets`):
-    /// hit testing and selection rects without the line object.
-    let caretOffsets: [CGFloat]
-    /// The runs of `TextLayout.runs` on this line.
-    let runs: Range<Int>
-    /// The decorations of `TextLayout.decorations` emitted for this line.
-    let decorations: Range<Int>
-    /// The line ends at a hard break (its last character is a newline), so
-    /// the caret after that character starts the next line.
+    /// Index into `PreparedText.paragraphs`.
+    let paragraphIndex: Int
+    /// Vertical gap above this line (`lineSpacing + spacingBefore` when starting
+    /// a subsequent paragraph), used to connect quote bars across line gaps.
+    let gapAbove: CGFloat
+    /// True for the first visual line of its `StyledParagraph` (task markers).
+    let isParagraphStart: Bool
+    /// The line ends at a hard break (newline), so the caret after that
+    /// character starts the next line.
     let endsWithNewline: Bool
-    /// The line contains right-to-left or Core Text reordered runs whose
-    /// per-run `visualWidth` and Core Text caret offsets are populated.
-    let hasComplexBiDi: Bool
+    /// True when any `StyledRun` overlapping `range` carries inline code,
+    /// underline, strikethrough, or a link.
+    let hasInlineDecorations: Bool
+    /// For unwrapped pure-ASCII code lines: byte range in `PreparedText.text`
+    /// excluding trailing `\r`/`\n`, enabling O(visible columns) horizontal
+    /// slicing and O(1) hit-testing even on multi-MB single lines.
+    let fastASCIIByteRange: Range<Int>?
+    let hasTabs: Bool
+    /// UAX #9 BiDi base writing direction of the hard sub-paragraph containing
+    /// this line, passed to `CTParagraphStyle` when shaping/drawing BiDi lines
+    /// standalone so wrapped continuation lines preserve paragraph BiDi order.
+    let bidiIsRTL: Bool
 
     init(
         top: CGFloat, baseline: CGFloat, height: CGFloat, x: CGFloat, width: CGFloat, range: Range<Int>,
-        caretOffsets: [CGFloat], runs: Range<Int>, decorations: Range<Int>, endsWithNewline: Bool,
-        hasComplexBiDi: Bool = false
+        paragraphIndex: Int = 0, gapAbove: CGFloat = 0, isParagraphStart: Bool = false, endsWithNewline: Bool,
+        hasInlineDecorations: Bool = false, fastASCIIByteRange: Range<Int>? = nil, hasTabs: Bool = false,
+        bidiIsRTL: Bool = false
     ) {
         self.top = top
         self.baseline = baseline
@@ -39,11 +50,14 @@ nonisolated struct TextLine: Sendable {
         self.x = x
         self.width = width
         self.range = range
-        self.caretOffsets = caretOffsets
-        self.runs = runs
-        self.decorations = decorations
+        self.paragraphIndex = paragraphIndex
+        self.gapAbove = gapAbove
+        self.isParagraphStart = isParagraphStart
         self.endsWithNewline = endsWithNewline
-        self.hasComplexBiDi = hasComplexBiDi
+        self.hasInlineDecorations = hasInlineDecorations
+        self.fastASCIIByteRange = fastASCIIByteRange
+        self.hasTabs = hasTabs
+        self.bidiIsRTL = bidiIsRTL
     }
 
     var bottom: CGFloat { top + height }

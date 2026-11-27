@@ -35,6 +35,10 @@
         /// controls sit over the rows they belong to.
         let contentView = TranscriptTextInputView()
         private let rowsView = UIView()
+        /// Dedicated container right above `rowsView` (and beneath UIKit's
+        /// `UITextInteraction` selection highlights & grab handles) holding
+        /// wide code blocks and wide tables.
+        private let wideBlocksView = UIView()
         let mounter: TranscriptRowMounter
         private(set) var palette: TextPalette?
         private var updateLink: UIUpdateLink?
@@ -46,6 +50,10 @@
         private var accessoryButtons: [String: [TranscriptAccessoryControl]] = [:]
         private var accessoryPool: [TranscriptAccessoryControl] = []
         let tapDelegate = TranscriptTapGestureDelegate()
+        var wideBlockPanDelegate: TranscriptWideBlockPanDelegate?
+        var wideBlockPan: UIPanGestureRecognizer?
+        var activeWidePan: (scroller: TranscriptWideBlockScroller, startX: CGFloat)?
+        var wideDecel: (scroller: TranscriptWideBlockScroller, velocity: CGFloat, lastTime: CFTimeInterval)?
         private var keyboardTransition: KeyboardTransition?
         private var lastNotifiedSelectionRects: [CGRect] = []
 
@@ -77,7 +85,9 @@
             automaticallyAdjustsScrollIndicatorInsets = false
             backgroundColor = .clear
             rowsView.isUserInteractionEnabled = false
+            wideBlocksView.isUserInteractionEnabled = false
             contentView.addSubview(rowsView)
+            contentView.addSubview(wideBlocksView)
             contentView.alpha = 0
             addSubview(contentView)
             NotificationCenter.default.addObserver(
@@ -113,13 +123,10 @@
         override func didMoveToWindow() {
             super.didMoveToWindow()
             guard window != nil else {
+                updateLink?.isEnabled = false
+                updateLink = nil
                 controller.detach(self)
                 return
-            }
-            if updateLink == nil {
-                let link = UIUpdateLink(view: self)
-                link.addAction(target: self, selector: #selector(frameDidTick))
-                updateLink = link
             }
             updatePalette()
             controller.attach(self)
@@ -158,6 +165,10 @@
                 controller.viewportDidChange()
             }
             placeRowsIfNeeded()
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            stopWideBlockDeceleration()
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -237,6 +248,7 @@
             if contentView.frame != frame {
                 contentView.frame = frame
                 rowsView.frame = contentView.bounds
+                wideBlocksView.frame = contentView.bounds
             }
         }
 
@@ -288,7 +300,7 @@
         }
 
         private func notifySelectionGeometryIfChanged() {
-            guard controller.selection != nil else { return }
+            guard controller.selection != nil, !isTracking, !isDecelerating else { return }
             let current = currentSelectionRects()
             guard current != lastNotifiedSelectionRects else { return }
             lastNotifiedSelectionRects = current
@@ -303,13 +315,26 @@
             setContentOffset(contentOffset, animated: false)
         }
 
-        private func updateFrameLink() {
-            updateLink?.isEnabled = needsFrames
-            updateLink?.requiresContinuousUpdates = needsFrames
+        func updateFrameLink() {
+            let active = (needsFrames || wideDecel != nil) && window?.windowScene != nil
+            if active, updateLink == nil {
+                let link = UIUpdateLink(view: self)
+                link.addAction(target: self, selector: #selector(frameDidTick))
+                updateLink = link
+            }
+            updateLink?.isEnabled = active
+            updateLink?.requiresContinuousUpdates = active
+        }
+
+        func stopWideBlockDeceleration() {
+            guard wideDecel != nil else { return }
+            wideDecel = nil
+            updateFrameLink()
         }
 
         @objc private func frameDidTick() {
-            controller.frameDidTick()
+            if needsFrames { controller.frameDidTick() }
+            stepWideBlockDeceleration()
         }
 
         // MARK: Rows
@@ -330,10 +355,8 @@
 
         private func placeRows() {
             guard let palette, controller.columnWidth > 0 else { return }
-            let budget = isContentVisible ? controller.configuration.syncFallbackBudget : 0
-            let deadline = budget > 0 ? CACurrentMediaTime() + budget : 0
-            if deadline > 0 {
-                controller.prepareVisibleSynchronously(in: visibleRect, deadline: deadline)
+            if isContentVisible {
+                controller.ensureVisibleRowsReady(in: visibleRect)
             }
             matchContentWidth()
             CATransaction.begin()
@@ -342,7 +365,7 @@
             UIView.performWithoutAnimation {
                 mounter.place(
                     controller, visible: visibleRect, documentWidth: bounds.width, palette: palette, scale: scale,
-                    colorSpace: colorSpace, showsContent: isContentVisible, syncDeadline: deadline)
+                    colorSpace: colorSpace, showsContent: isContentVisible)
             }
             // Notify UIKit only when the selection's highlight rects actually
             // moved or changed layout, not unconditionally on every scroll placement.
@@ -353,12 +376,12 @@
 
         func showWideBlock(
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
-            visible: CGRect, streamed: DrawnBands?, syncDeadline: CFTimeInterval
+            visible: CGRect, streamed: DrawnBands?
         ) {
             let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScroller()
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
-                if scroller.superview == nil { contentView.addSubview(scroller) }
+                if scroller.superview == nil { wideBlocksView.addSubview(scroller) }
                 scroller.isHidden = false
                 scroller.onHorizontalScroll = { [weak self] in
                     self?.notifySelectionGeometryIfChanged()
@@ -374,7 +397,7 @@
                 rowID: rowID, offset: controller.wideBlockOffsets[rowID] ?? 0, body: body, key: key,
                 palette: palette, scale: scale, colorSpace: colorSpace,
                 drawsOffMain: controller.configuration.drawsOffMain, drawn: localDrawn, visible: localVisible,
-                streamed: streamed, syncDeadline: syncDeadline)
+                streamed: streamed)
         }
 
         /// The reader scrolled a wide block: keep its sideways offset across
@@ -390,6 +413,8 @@
 
         func removeWideBlock(rowID: String) {
             guard let scroller = wideBlocks.removeValue(forKey: rowID) else { return }
+            if activeWidePan?.scroller === scroller { activeWidePan = nil }
+            if wideDecel?.scroller === scroller { stopWideBlockDeceleration() }
             scroller.resetForReuse()
             scroller.isHidden = true
             if wideBlockPool.count < 8 {

@@ -1,8 +1,8 @@
 import Foundation
 
 /// A message of the transcript, of any kind (user, assistant, reasoning): its
-/// Markdown is parsed whole off the main thread (`LayoutQueue`), and its kind
-/// decides only presentation (a bubble, one row per block, or muted text).
+/// Markdown is parsed whole off the main thread, and its kind decides only
+/// presentation (a bubble, one row per top-level block, or muted text).
 nonisolated struct TranscriptMessage: Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         case user
@@ -28,15 +28,11 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
         }
     }
 
-    /// Row ID for the `index`-th parsed row of a message. Preserves the
-    /// single-row IDs `"user|\(id)"` and `"thought|\(id)"` for row 0 so saved
-    /// places and pending-row lookups stay stable whether a message is 1 row
-    /// or flattened into bounded slices.
     static func parsedRowID(kind: Kind, id: String, at index: Int) -> String {
         switch kind {
         case .assistant: "\(id)#\(index)"
-        case .user: index == 0 ? "user|\(id)" : "user|\(id)#\(index)"
-        case .thought: index == 0 ? "thought|\(id)" : "thought|\(id)#\(index)"
+        case .user: "user|\(id)"
+        case .thought: "thought|\(id)"
         }
     }
 
@@ -55,19 +51,33 @@ nonisolated struct TranscriptMessage: Hashable, Sendable {
         }
     }
 
-    /// The row the message shows as until it is parsed: O(1) estimated height,
-    /// blank until its off-main parse lands.
+    /// Produces the row kinds for a parsed message's `blocks` — strictly one
+    /// row per top-level block with no slicing (`REDESIGN.md §7 R2`).
+    static func rowKinds(for blocks: [MarkdownBlock], kind: Kind) -> [TranscriptRowKind] {
+        switch kind {
+        case .user:
+            [.userMessage(blocks)]
+        case .thought:
+            [.thought(blocks)]
+        case .assistant:
+            blocks.enumerated().map { index, block in
+                .markdownBlock(block, .of(index, in: blocks))
+            }
+        }
+    }
+
+    /// The row the message shows as until it is parsed.
     func pendingRow(source: String) -> TranscriptRow {
         TranscriptRow(
             id: pendingRowID, sourceID: id, kind: .pendingMessage(self, source: source),
             messageID: messageID, role: role, turnID: turnID)
     }
 
-    /// Turns parsed Markdown `blocks` into this message's bounded rows via
-    /// `TranscriptBlockFlattener`. Pass precomputed `metrics` (counted
-    /// off-main) so rebuilding rows on the main thread never scans text.
+    /// Turns parsed Markdown `blocks` into this message's rows (one per
+    /// top-level block for assistant messages; one bubble/thought row for user
+    /// and reasoning).
     func rows(from blocks: [MarkdownBlock], metrics: [TextMetrics]? = nil) -> [TranscriptRow] {
-        let kinds = TranscriptBlockFlattener.kinds(for: blocks, kind: kind)
+        let kinds = Self.rowKinds(for: blocks, kind: kind)
         return kinds.indices.map { index in
             let rowMetrics = metrics.flatMap { index < $0.count ? $0[index] : nil }
             return TranscriptRow(

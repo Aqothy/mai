@@ -11,7 +11,7 @@ nonisolated struct TextLayoutDirectionTests {
     /// paragraph. A long line with no strong character (digits, punctuation,
     /// emoji) scans to its end to find none: once is O(length), per wrapped
     /// line it was O(lines x length) (128 KB of digits: 4.0 s vs 0.10 s).
-    @Test(.serialized) func aNeutralParagraphLaysOutAsFastAsALetterParagraph() async {
+    @Test func aNeutralParagraphLaysOutAsFastAsALetterParagraph() async {
         let style = await TextStyle.current()
         let options = TextLayoutEngine.Options(lineSpacing: style.lineSpacing, quoteBarWidth: style.quoteBarWidth)
         func best(_ unit: String) -> Duration {
@@ -76,8 +76,8 @@ nonisolated struct TextLayoutDirectionTests {
         // Trailing combining mark in RTL run must not shift the selection rect right into " def".
         let combined = AttributedTextBuilder.build([.paragraph([MarkdownInline(text: "abc شً def\nnext")])], style: style)
         let combinedLayout = TextLayoutEngine.layout(combined, width: 400, options: options)
-        let line0 = try #require(combinedLayout.lines.first)
-        #expect(line0.hasComplexBiDi)
+        _ = try #require(combinedLayout.lines.first)
+        #expect(combinedLayout.shapedLine(at: 0).hasComplexBiDi)
         let rtlRect = try #require(combinedLayout.selectionRects(for: 4..<6).first)
         let ltrAfterRect = try #require(combinedLayout.selectionRects(for: 6..<10).first)
         #expect(rtlRect.maxX <= ltrAfterRect.minX + 0.5)
@@ -94,7 +94,7 @@ nonisolated struct TextLayoutDirectionTests {
             style: style)
         let linkLayout = TextLayoutEngine.layout(linkStyled, width: 400, options: options)
         let linkLine = try #require(linkLayout.lines.first)
-        #expect(linkLine.hasComplexBiDi)
+        #expect(linkLayout.shapedLine(at: 0).hasComplexBiDi)
         let midY = (linkLine.top + linkLine.bottom) / 2
         let arabicRect = try #require(linkLayout.selectionRects(for: 0..<5).first)
         let worldRect = try #require(linkLayout.selectionRects(for: 6..<11).first)

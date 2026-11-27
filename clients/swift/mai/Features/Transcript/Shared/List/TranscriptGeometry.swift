@@ -30,6 +30,11 @@ nonisolated struct TranscriptGeometry {
 
     /// 1-based Fenwick tree over `heights`.
     private var tree: [CGFloat] = [0]
+    /// Per-row selectable UTF-16 span (`utf16Length + 1` for selectable rows,
+    /// `0` for non-selectable rows) and its 1-based Fenwick tree so UIKit's
+    /// `offset(from:to:)` is O(log n) even on 20 MB Select All.
+    private var selectableSpans: [Int] = []
+    private var selectableTree: [Int] = [0]
     private var indices: [String: IndexEntry] = [:]
     private var sourceStarts: [String: IndexEntry] = [:]
     /// Pending structural splices applied on lookup so mid-history splices
@@ -77,6 +82,7 @@ nonisolated struct TranscriptGeometry {
     /// a duplicate resolves to its first row instead of trapping.
     mutating func replace(
         ids: [String], sources: [String], measured: [String: CGFloat] = [:],
+        selectableSpans newSpans: [Int]? = nil,
         estimate: (Int) -> CGFloat
     ) {
         let oldHeights = heights
@@ -98,15 +104,19 @@ nonisolated struct TranscriptGeometry {
                 heights.append(Self.clamped(estimate(index)))
             }
         }
+        selectableSpans =
+            if let newSpans, newSpans.count == ids.count { newSpans } else { [Int](repeating: 0, count: ids.count) }
         rebuildIndex()
         rebuildTree()
+        rebuildSelectableTree()
     }
 
     /// Replaces the rows in `range` with new ones: records one O(1) shift for
     /// surviving tail entries (compacting once every `maxPendingEdits` splices)
     /// instead of rehashing every row after `range.lowerBound`.
     mutating func replaceRows(
-        _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat]
+        _ range: Range<Int>, ids newIDs: [String], sources newSources: [String], heights newHeights: [CGFloat],
+        selectableSpans newSpans: [Int]? = nil
     ) {
         let start = range.lowerBound
         let oldEnd = range.upperBound
@@ -128,13 +138,18 @@ nonisolated struct TranscriptGeometry {
 
         ids.replaceSubrange(range, with: newIDs)
         sources.replaceSubrange(range, with: newSources)
+        let resolvedSpans =
+            if let newSpans, newSpans.count == newIDs.count { newSpans } else { [Int](repeating: 0, count: newIDs.count) }
         if delta == 0 {
             for offset in 0..<clampedHeights.count {
                 setHeight(clampedHeights[offset], at: start + offset)
+                setSelectableSpan(resolvedSpans[offset], at: start + offset)
             }
         } else {
             heights.replaceSubrange(range, with: clampedHeights)
+            selectableSpans.replaceSubrange(range, with: resolvedSpans)
             updateTreeAfterReplace(start: start)
+            updateSelectableTreeAfterReplace(start: start)
         }
 
         if mustRebuild {
@@ -407,5 +422,70 @@ nonisolated struct TranscriptGeometry {
             if parent <= count { tree[parent] += tree[node] }
         }
         totalHeight = sum
+    }
+
+    mutating func setSelectableSpan(_ span: Int, at index: Int) {
+        guard selectableSpans.indices.contains(index) else { return }
+        let clamped = max(0, span)
+        let delta = clamped - selectableSpans[index]
+        guard delta != 0 else { return }
+        selectableSpans[index] = clamped
+        var node = index + 1
+        while node < selectableTree.count {
+            selectableTree[node] += delta
+            node += node & -node
+        }
+    }
+
+    /// Sum of selectable UTF-16 spans over `range` (`start..<end`) in O(log n).
+    func selectableSpan(in range: Range<Int>) -> Int {
+        let lo = max(0, min(range.lowerBound, ids.count))
+        let hi = max(lo, min(range.upperBound, ids.count))
+        guard lo < hi else { return 0 }
+        return selectablePrefix(hi) - selectablePrefix(lo)
+    }
+
+    private func selectablePrefix(_ count: Int) -> Int {
+        var node = min(count, ids.count)
+        var sum = 0
+        while node > 0 {
+            sum += selectableTree[node]
+            node -= node & -node
+        }
+        return sum
+    }
+
+    private mutating func updateSelectableTreeAfterReplace(start: Int) {
+        guard ids.count - start <= 64 else {
+            rebuildSelectableTree()
+            return
+        }
+        selectableTree.removeSubrange((start + 1)...)
+        let base = selectablePrefix(start)
+        var running = base
+        var suffixPrefixes: [Int] = []
+        suffixPrefixes.reserveCapacity(ids.count - start)
+        for index in start..<ids.count {
+            running += selectableSpans[index]
+            suffixPrefixes.append(running)
+            let node = index + 1
+            let from = node - (node & -node)
+            let before =
+                from >= start ? (from == start ? base : suffixPrefixes[from - start - 1]) : selectablePrefix(from)
+            selectableTree.append(running - before)
+        }
+    }
+
+    private mutating func rebuildSelectableTree() {
+        let count = selectableSpans.count
+        selectableTree.removeAll(keepingCapacity: true)
+        selectableTree.reserveCapacity(count + 1)
+        selectableTree.append(0)
+        guard count > 0 else { return }
+        selectableTree.append(contentsOf: selectableSpans)
+        for node in 1...count {
+            let parent = node + (node & -node)
+            if parent <= count { selectableTree[parent] += selectableTree[node] }
+        }
     }
 }

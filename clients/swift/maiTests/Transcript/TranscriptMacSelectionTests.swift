@@ -124,11 +124,13 @@
                 then: [event(.leftMouseUp, fixture.window, at: word, clicks: 2)])
             #expect(fixture.controller.selection != nil)
             guard let layout = fixture.controller.layout(forRowAt: 0),
-                let line = layout.content.textSegments.first?.layout.lines.first
+                let textLayout = layout.content.textSegments.first?.layout,
+                let line = textLayout.lines.first
             else { return }
+            let carets = textLayout.caretOffsets(forLineAt: 0)
             // Across the midpoint between two characters' carets.
             let start = point(fixture, row: 0, fraction: 0)
-            let x = start.x - line.x + (line.caretOffsets[2] + line.caretOffsets[3]) / 2
+            let x = start.x - line.x + (carets[2] + carets[3]) / 2
             let down = NSPoint(x: x - 0.75, y: start.y)
             let up = NSPoint(x: x + 0.75, y: start.y)
             click(

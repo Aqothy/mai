@@ -1,12 +1,13 @@
 import Foundation
 
 /// What a row shows. Each case carries everything its layout needs, as
-/// values, so a row can be laid out on any thread.
+/// values, so a row can be laid out on any thread. One row per top-level
+/// block, with no slicing (`REDESIGN.md §1, §7 R2`).
 nonisolated enum TranscriptRowKind: Hashable, Sendable {
     /// A user prompt: one bubble, its parsed Markdown blocks laid out inside.
     case userMessage([MarkdownBlock])
-    /// One top-level Markdown block (or bounded prose slice) of a message.
-    case markdownBlock(MarkdownBlock, TranscriptBlockPosition, TranscriptBlockContext = .default)
+    /// One top-level Markdown block of an assistant message.
+    case markdownBlock(MarkdownBlock, TranscriptBlockPosition)
     /// Reasoning, in muted text: parsed Markdown blocks laid out as one text.
     case thought([MarkdownBlock])
     /// A message (user, assistant, or reasoning) not parsed yet; shown by O(1)
@@ -20,8 +21,7 @@ nonisolated enum TranscriptRowKind: Hashable, Sendable {
     /// The agent is working: the last row while a turn runs, a sparkle and
     /// a whimsical verb (the turn's header already says "Working").
     case working(phrase: String)
-    /// Warnings and errors, and in Phase 1 the kinds still to be drawn
-    /// natively (requests, handoffs, envelopes, stop notes, plans).
+    /// Warnings, errors, notices, plans, handoffs, and envelopes.
     case notice(title: String, text: String?)
 }
 
@@ -34,13 +34,5 @@ nonisolated extension TranscriptRowKind {
         case .userMessage, .markdownBlock, .pendingMessage, .thought, .notice: true
         case .activity, .turnHeader, .turnActions, .working: false
         }
-    }
-
-    /// The text joining this row to the selectable row before it: `""` for a
-    /// flattened slice that continues the previous slice's text at a cut that
-    /// consumed nothing, `"\n"` for every other row.
-    var separatorBefore: String {
-        if case .markdownBlock(_, _, let context) = self, context.joinsInline { return "" }
-        return "\n"
     }
 }

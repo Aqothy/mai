@@ -3,24 +3,18 @@ import Foundation
 /// The size of a row's text, which its estimated height is made from
 /// (`HeightEstimator`): counted once off the main thread where message rows
 /// are parsed (`LayoutQueue`, `TranscriptStreamWorker`), so estimating a row
-/// on the main thread is O(1) and never scans text. Pending messages and
-/// notices use only `.utf8.count` (O(1) on contiguous Swift strings).
+/// on the main thread is O(1) and never scans text.
 nonisolated struct TextMetrics: Hashable, Sendable {
-    /// UTF-8 bytes of text, newlines excluded.
     var bytes = 0
-    /// Hard lines (0: unknown).
     var lines = 0
-    /// Top-level blocks.
     var blocks = 0
     /// Exact selectable UTF-16 length, precomputed off-main for parsed rows so
-    /// `TranscriptController.offset(from:to:)` stays O(1) per row without
-    /// rebuilding `NSAttributedString`s for off-screen rows. Nil for unparsed
-    /// `.pendingMessage` (computed lazily once if queried) and non-selectable rows.
+    /// `TranscriptController.offset(from:to:)` stays O(1) per row.
     var selectableUTF16: Int?
 
     init(_ kind: TranscriptRowKind) {
         switch kind {
-        case .markdownBlock(let block, _, _):
+        case .markdownBlock(let block, _):
             add(block)
             blocks = 1
             selectableUTF16 = RowSelectableText.utf16Length(for: kind)
@@ -38,8 +32,6 @@ nonisolated struct TextMetrics: Hashable, Sendable {
         }
     }
 
-    /// Hard lines a block's text wraps into at `perLine` characters a line:
-    /// each hard line's last line is half full on average.
     func wrappedLines(perLine: Double) -> Double {
         max(Double(max(1, lines)), Double(bytes) / perLine + Double(lines) / 2)
     }
@@ -65,7 +57,6 @@ nonisolated struct TextMetrics: Hashable, Sendable {
         }
     }
 
-    /// Counts `text`'s bytes and the line breaks inside it.
     private mutating func add(_ text: String) {
         var newlines = 0
         for byte in text.utf8 where byte == 0x0A { newlines += 1 }

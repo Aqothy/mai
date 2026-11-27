@@ -173,7 +173,7 @@ extension TranscriptController {
             let utf16 = text.utf16
             let lower = utf16.index(utf16.startIndex, offsetBy: from)
             let upper = utf16.index(utf16.startIndex, offsetBy: to)
-            if hasPart { result += row.kind.separatorBefore }
+            if hasPart { result += "\n" }
             result += text[lower..<upper]
             hasPart = true
         }
@@ -208,13 +208,11 @@ extension TranscriptController {
                 guard let previous = rows[..<index].lastIndex(where: \.kind.isSelectable),
                     let previousLength = selectableLength(ofRowAt: previous)
                 else { return nil }
-                let sep = rows[index].kind.separatorBefore.utf16.count
-                offset += previousLength + sep
+                offset += previousLength + 1
                 index = previous
             } else if offset > length {
                 guard let next = rows[(index + 1)...].firstIndex(where: \.kind.isSelectable) else { return nil }
-                let sep = rows[next].kind.separatorBefore.utf16.count
-                offset -= length + sep
+                offset -= length + 1
                 index = next
             } else {
                 if direction != 0, offset > 0, offset < length, let text = selectableText(ofRowAt: index) {
@@ -242,43 +240,20 @@ extension TranscriptController {
         var remaining = abs(lineOffset)
         let step = lineOffset > 0 ? 1 : -1
 
-        enum RowLines {
-            case materialized([(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)])
-            case virtualized(body: VirtualCodeBody, bodyTop: CGFloat)
-
-            var count: Int {
-                switch self {
-                case .materialized(let list): list.count
-                case .virtualized(let body, _): body.lineCount
-                }
-            }
-
-            func midY(at index: Int) -> CGFloat {
-                switch self {
-                case .materialized(let list): (list[index].top + list[index].bottom) / 2
-                case .virtualized(let body, let bodyTop): bodyTop + (CGFloat(index) + 0.5) * body.lineHeight
-                }
-            }
-        }
-
         func columnKey(of segment: TextSegment) -> CGFloat {
             segment.hitRect?.minX ?? segment.origin.x
         }
 
-        func rowLines(in rowIndex: Int, matchingColumnX: CGFloat? = nil) -> RowLines? {
+        func rowLines(
+            in rowIndex: Int, matchingColumnX: CGFloat? = nil
+        ) -> [(segment: TextSegment, line: TextLine, top: CGFloat, bottom: CGFloat)]? {
             guard let layout = layouts[rows[rowIndex].id] else { return nil }
             let rowTop = geometry.offset(at: rowIndex)
-            if let (virtual, origin) = layout.content.virtualCodeBody {
-                return virtual.lineCount > 0 ? .virtualized(body: virtual, bodyTop: rowTop + origin.y) : nil
-            }
             let segments = layout.content.textSegments
             let activeColumnX: CGFloat?
             if let matchingColumnX {
                 activeColumnX = matchingColumnX
             } else if segments.count > 1 {
-                // Entering a multi-column table from outside: pick the column
-                // closest to `targetX` so horizontal sibling cells are never
-                // counted as separate vertical lines.
                 let localX = targetX - columnX + (layout.content.wideBody != nil ? scrollX(rows[rowIndex].id) : 0)
                 activeColumnX = segments.min { a, b in
                     let aDist = a.hitRect.map { localX < $0.minX ? $0.minX - localX : (localX > $0.maxX ? localX - $0.maxX : 0) }
@@ -300,7 +275,7 @@ extension TranscriptController {
                     result.append((segment, line, top, top + line.height))
                 }
             }
-            return result.isEmpty ? nil : .materialized(result)
+            return result.isEmpty ? nil : result
         }
 
         let currentColumnX: CGFloat? = {
@@ -310,23 +285,12 @@ extension TranscriptController {
             return columnKey(of: seg)
         }()
 
-        guard var currentLines = rowLines(in: rowIndex, matchingColumnX: currentColumnX) else { return nil }
-        var lineIdx: Int
-        switch currentLines {
-        case .virtualized(let body, _):
-            lineIdx = body.lineIndex(forUTF16Offset: position.offset)
-        case .materialized(let list):
-            // Use `.lastIndex` so a caret at the start of line N+1 (where
-            // line[N].upperBound == line[N+1].lowerBound) matches line N+1
-            // rather than stalling on line N (agrees with `caretRect`).
-            guard
-                let found = list.lastIndex(where: {
-                    position.offset >= $0.segment.start + $0.line.range.lowerBound
-                        && position.offset <= $0.segment.start + $0.line.range.upperBound
-                })
-            else { return nil }
-            lineIdx = found
-        }
+        guard var currentLines = rowLines(in: rowIndex, matchingColumnX: currentColumnX),
+            var lineIdx = currentLines.lastIndex(where: {
+                position.offset >= $0.segment.start + $0.line.range.lowerBound
+                    && position.offset <= $0.segment.start + $0.line.range.upperBound
+            })
+        else { return nil }
 
         while remaining > 0 {
             let count = currentLines.count
@@ -352,7 +316,8 @@ extension TranscriptController {
             }
         }
 
-        let docPoint = CGPoint(x: targetX, y: currentLines.midY(at: lineIdx))
+        let chosen = currentLines[lineIdx]
+        let docPoint = CGPoint(x: targetX, y: (chosen.top + chosen.bottom) / 2)
         return self.position(inRowAt: rowIndex, point: docPoint, columnX: columnX, scrollX: scrollX)
     }
 
@@ -374,20 +339,18 @@ extension TranscriptController {
     }
 
     /// The characters from `a` to `b`, negative when `b` comes first.
+    /// O(log n) via `TranscriptGeometry`'s selectable-span Fenwick tree.
     func offset(from a: TextPosition, to b: TextPosition) -> Int {
         guard let first = geometry.index(for: a.rowID), let second = geometry.index(for: b.rowID) else { return 0 }
         if first == second { return b.offset - a.offset }
         if second < first { return -offset(from: b, to: a) }
-        var count = (selectableLength(ofRowAt: first) ?? 0) - a.offset
-        for index in (first + 1)..<second where rows[index].kind.isSelectable {
-            count += rows[index].kind.separatorBefore.utf16.count + (selectableLength(ofRowAt: index) ?? 0)
-        }
-        return count + rows[second].kind.separatorBefore.utf16.count + b.offset
+        let startTail = (selectableLength(ofRowAt: first) ?? 0) - a.offset
+        let middle = geometry.selectableSpan(in: (first + 1)..<second)
+        return startTail + middle + 1 + b.offset
     }
 
     /// Highlight rects from `start` to `end` (document coordinates) for rows
-    /// with layouts (those near the viewport, the only ones on screen). Wide
-    /// block rects are clipped to their horizontal scroller's frame.
+    /// with layouts, clipped to wide blocks' horizontal scroller frames.
     ///
     /// `isStart` is true only on the first rect of `start`'s actual row, and
     /// `isEnd` only on the last rect of `end`'s actual row — so when either
@@ -400,6 +363,7 @@ extension TranscriptController {
     ) -> [(rect: CGRect, isStart: Bool, isEnd: Bool)] {
         guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
         else { return [] }
+
         var result: [(rect: CGRect, isStart: Bool, isEnd: Bool)] = []
         for index in first...last where rows[index].kind.isSelectable {
             guard let layout = layouts[rows[index].id], let length = selectableLength(ofRowAt: index) else { continue }
@@ -497,8 +461,22 @@ extension TranscriptController {
 
     // MARK: Granularity
 
-    /// Every selectable row's text, first to last.
+    /// Selects the entire current message (user or assistant) when a selection
+    /// is active inside a message; otherwise selects every selectable row in
+    /// the transcript (e.g. Cmd+A with no active selection).
     func selectAll() {
+        if let selection, let anchorIdx = geometry.index(for: selection.anchor.rowID),
+            rows.indices.contains(anchorIdx), let messageID = rows[anchorIdx].messageID,
+            let first = rows.firstIndex(where: { $0.messageID == messageID && $0.kind.isSelectable }),
+            let last = rows.lastIndex(where: { $0.messageID == messageID && $0.kind.isSelectable }),
+            let length = selectableLength(ofRowAt: last)
+        {
+            setSelection(
+                TranscriptSelection(
+                    anchor: TextPosition(rowID: rows[first].id, offset: 0),
+                    focus: TextPosition(rowID: rows[last].id, offset: length)))
+            return
+        }
         guard let first = rows.firstIndex(where: \.kind.isSelectable),
             let last = rows.lastIndex(where: \.kind.isSelectable), let length = selectableLength(ofRowAt: last)
         else { return }

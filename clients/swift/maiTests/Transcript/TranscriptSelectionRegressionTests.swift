@@ -8,7 +8,7 @@ import Testing
 /// the message's text, a selection survives a pending message being parsed,
 /// and iOS gets both grab handles when an end sits on a row boundary.
 struct TranscriptSelectionRegressionTests {
-    @Test func flattenedParagraphAndJSONCopyMatchesSourceExactly() {
+    @Test func giantParagraphAndJSONStayOneRowAndCopyMatchesSourceExactly() {
         let prose = Array(repeating: "configuration", count: 2_000).joined(separator: " ")
         let unbrokenToken = String(repeating: "configuration", count: 2_000)
         let jsonPrompt = "[" + String(repeating: #"{"config":"value","n":12345},"#, count: 1_000) + "]"
@@ -20,34 +20,19 @@ struct TranscriptSelectionRegressionTests {
         ] {
             let message = TranscriptMessage(kind: kind, turnID: "t", ref: "r")
             let rows = message.rows(from: MarkdownPlanner.blocks(from: source))
-            #expect(rows.count >= 2, "expected a payload over the slice size to split into slices")
+            #expect(rows.count == 1, "expected one row per block with no slicing")
 
             let controller = TranscriptController(configuration: .testing)
             controller.setRows(rows)
             controller.selectAll()
             let copied = controller.selectedText()
-            #expect(copied == source, "copying across flattened slices must match the source verbatim")
+            #expect(copied == source, "copying must match the source verbatim")
 
             if let first = controller.firstTextPosition, let last = controller.lastTextPosition {
                 #expect(controller.offset(from: first, to: last) == copied.utf16.count)
                 let stepped = controller.position(from: first, offset: copied.utf16.count)
                 #expect(stepped == last)
             }
-        }
-    }
-
-    @Test func flattenedListPreservesExactItemSpacingAtSeam() {
-        let style = TextStyle.current()
-        let itemText = String(repeating: "item detail ", count: 30)
-        let md = (0..<80).map { "- Item \($0): \(itemText)" }.joined(separator: "\n")
-        let rows = TranscriptMessage(kind: .assistant, turnID: "t", ref: "l").rows(from: MarkdownPlanner.blocks(from: md))
-        #expect(rows.count >= 2)
-        if case .markdownBlock(_, let pos, let ctx) = rows[1].kind {
-            #expect(ctx.joinsAbove)
-            #expect(ctx.joinSpacingAbove == .tight)
-            #expect(ctx.spacingAbove(pos, style: style) == style.lineSpacing + style.listItemSpacing)
-        } else {
-            Issue.record("expected flattened tight list continuation row")
         }
     }
 
@@ -166,5 +151,71 @@ struct TranscriptSelectionRegressionTests {
             columnX: 0, scrollX: { _ in 0 })
         #expect(!rects.contains { $0.isStart })
         #expect(rects.contains { $0.isEnd })
+    }
+
+    /// Multi-row selections keep ragged-right per-line rects with exact
+    /// `isStart`/`isEnd` endpoint tags, and O(log n) `offset(from:to:)` matches
+    /// the exact sum of selectable row lengths + newline separators.
+    @Test func crossRowSelectionKeepsRaggedRectsAndOffsetIsExact() throws {
+        let controller = TranscriptController(configuration: .testing)
+        controller.columnWidth = 320
+        let rows = (0..<80).map { i in
+            TranscriptRow(
+                id: "p\(i)",
+                kind: .markdownBlock(
+                    .paragraph([MarkdownInline(text: "Paragraph \(i) with enough words to wrap across lines.")]),
+                    .single))
+        }
+        controller.setRows(rows)
+        var heights: [String: CGFloat] = [:]
+        for row in controller.rows {
+            let layout = RowLayoutBuilder.layout(controller.request(row))
+            controller.storeLayout(layout)
+            heights[row.id] = layout.height
+        }
+        controller.setHeights(heights)
+        controller.selectAll()
+        let first = try #require(controller.firstTextPosition)
+        let last = try #require(controller.lastTextPosition)
+
+        let rects = controller.taggedSelectionRects(from: first, to: last, columnX: 16, scrollX: { _ in 0 })
+        #expect(rects.first?.isStart == true)
+        #expect(rects.last?.isEnd == true)
+        #expect(rects.count >= 80)
+        // Short last lines stay ragged-right (narrower than columnWidth).
+        #expect(rects.contains { $0.rect.width < 300 })
+
+        // O(log n) offset(from:to:) matches exact sum of row lengths + newlines.
+        let expectedLen = controller.text(from: first, to: last).utf16.count
+        #expect(controller.offset(from: first, to: last) == expectedLen)
+        #expect(controller.offset(from: last, to: first) == -expectedLen)
+    }
+
+    /// Select All with an active selection inside a message selects all rows of
+    /// that message (user or assistant) instead of the entire transcript.
+    @Test func selectAllScopesToCurrentMessageWhenSelectionIsActive() throws {
+        let controller = TranscriptController(configuration: .testing)
+        controller.columnWidth = 320
+        let rows = [
+            TranscriptRow(
+                id: "u1", kind: .userMessage([.paragraph([MarkdownInline(text: "User question")])]),
+                messageID: "msg-user", role: .user),
+            TranscriptRow(
+                id: "a1", kind: .markdownBlock(.paragraph([MarkdownInline(text: "Agent part one")]), .single),
+                messageID: "msg-agent", role: .assistant),
+            TranscriptRow(
+                id: "a2", kind: .markdownBlock(.code(language: "swift", code: "let x = 1"), .single),
+                messageID: "msg-agent", role: .assistant),
+            TranscriptRow(
+                id: "u2", kind: .userMessage([.paragraph([MarkdownInline(text: "Follow up")])]),
+                messageID: "msg-user-2", role: .user),
+        ]
+        controller.setRows(rows)
+        controller.setSelection(
+            TranscriptSelection(
+                anchor: TextPosition(rowID: "a1", offset: 0),
+                focus: TextPosition(rowID: "a1", offset: 5)))
+        controller.selectAll()
+        #expect(controller.selectedText() == "Agent part one\nlet x = 1")
     }
 }
