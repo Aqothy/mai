@@ -409,20 +409,77 @@ extension TranscriptController {
         return result
     }
 
+    /// Highlight rects as iOS's own text views draw a selection: the first
+    /// line from `start` to the column's edge, the column's full width
+    /// below it, and the last line from the column's edge to `end` (edges
+    /// follow each endpoint's paragraph direction). Bands break only at rows
+    /// that cannot be selected (turn headers, buttons), so a selection is a
+    /// few rects however many lines it covers: one rect per line was 130,832
+    /// rects and 246 ms per UIKit query for Select All on 1,000 turns.
+    /// `isStart`/`isEnd` mark the endpoints' lines when their rows have
+    /// layouts, so UIKit puts its handles only where the text is.
+    func columnSelectionRects(
+        from start: TextPosition, to end: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat
+    ) -> [(rect: CGRect, isStart: Bool, isEnd: Bool)] {
+        guard let first = geometry.index(for: start.rowID), let last = geometry.index(for: end.rowID), first <= last
+        else { return [] }
+        let left = columnX
+        let right = columnX + columnWidth
+        func endpoint(_ position: TextPosition) -> (caret: CGRect, x: CGFloat, isRightToLeft: Bool)? {
+            guard let caret = caretRect(for: position, columnX: columnX, scrollX: scrollX),
+                let layout = layouts[position.rowID]
+            else { return nil }
+            return (caret, min(max(caret.minX, left), right), layout.content.isRightToLeft(at: position.offset))
+        }
+        let from = endpoint(start)
+        let to = endpoint(end)
+        if let from, let to, abs(from.caret.minY - to.caret.minY) < 0.5 {
+            let rect = CGRect(
+                x: min(from.x, to.x), y: from.caret.minY, width: abs(to.x - from.x), height: from.caret.height)
+            return [(rect, true, true)]
+        }
+        var result: [(rect: CGRect, isStart: Bool, isEnd: Bool)] = []
+        if let from {
+            let x0 = from.isRightToLeft ? left : from.x
+            let x1 = from.isRightToLeft ? from.x : right
+            result.append((CGRect(x: x0, y: from.caret.minY, width: x1 - x0, height: from.caret.height), true, false))
+        }
+        let bandsBottom = to?.caret.minY ?? geometry.offset(at: last) + geometry.height(at: last)
+        var top = from?.caret.maxY ?? geometry.offset(at: first)
+        func band(to bottom: CGFloat) {
+            guard bottom > top else { return }
+            result.append((CGRect(x: left, y: top, width: right - left, height: bottom - top), false, false))
+        }
+        for index in first...last where !rows[index].kind.isSelectable {
+            let rowTop = geometry.offset(at: index)
+            band(to: min(rowTop, bandsBottom))
+            top = max(top, rowTop + geometry.height(at: index))
+        }
+        band(to: bandsBottom)
+        if let to {
+            let x0 = to.isRightToLeft ? to.x : left
+            let x1 = to.isRightToLeft ? right : to.x
+            result.append((CGRect(x: x0, y: to.caret.minY, width: x1 - x0, height: to.caret.height), false, true))
+        }
+        return result
+    }
+
     func selectionRects(
         from start: TextPosition, to end: TextPosition, columnX: CGFloat, scrollX: (String) -> CGFloat
     ) -> [CGRect] {
         taggedSelectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX).map(\.rect)
     }
 
-    /// Highlight rects for the current selection in document order.
-    func currentSelectionRects(columnX: CGFloat, scrollX: (String) -> CGFloat) -> [CGRect] {
+    /// Highlight rects for the current selection in document order, one per
+    /// line, or iOS's (`columnSelectionRects`) when `fullWidth`.
+    func currentSelectionRects(columnX: CGFloat, scrollX: (String) -> CGFloat, fullWidth: Bool = false) -> [CGRect] {
         guard let selection, !selection.isEmpty, let anchorFirst = isBefore(selection.anchor, selection.focus) else {
             return []
         }
         let start = anchorFirst ? selection.anchor : selection.focus
         let end = anchorFirst ? selection.focus : selection.anchor
-        return selectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX)
+        guard fullWidth else { return selectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX) }
+        return columnSelectionRects(from: start, to: end, columnX: columnX, scrollX: scrollX).map(\.rect)
     }
 
     /// The caret before `position` (document coordinates), when its row has
@@ -464,19 +521,24 @@ extension TranscriptController {
     /// Selects the entire current message (user or assistant) when a selection
     /// is active inside a message; otherwise selects every selectable row in
     /// the transcript (e.g. Cmd+A with no active selection).
-    func selectAll() {
-        if let selection, let anchorIdx = geometry.index(for: selection.anchor.rowID),
+    /// Select All on iOS: the message the selection is in, as Claude for iOS
+    /// does; everything when nothing is selected.
+    func selectCurrentMessage() {
+        guard let selection, let anchorIdx = geometry.index(for: selection.anchor.rowID),
             rows.indices.contains(anchorIdx), let messageID = rows[anchorIdx].messageID,
             let first = rows.firstIndex(where: { $0.messageID == messageID && $0.kind.isSelectable }),
             let last = rows.lastIndex(where: { $0.messageID == messageID && $0.kind.isSelectable }),
             let length = selectableLength(ofRowAt: last)
-        {
-            setSelection(
-                TranscriptSelection(
-                    anchor: TextPosition(rowID: rows[first].id, offset: 0),
-                    focus: TextPosition(rowID: rows[last].id, offset: length)))
-            return
-        }
+        else { return selectAll() }
+        setSelection(
+            TranscriptSelection(
+                anchor: TextPosition(rowID: rows[first].id, offset: 0),
+                focus: TextPosition(rowID: rows[last].id, offset: length)))
+    }
+
+    /// Select All on the Mac (Cmd+A): the whole transcript, as browsers and
+    /// Claude for Mac do.
+    func selectAll() {
         guard let first = rows.firstIndex(where: \.kind.isSelectable),
             let last = rows.lastIndex(where: \.kind.isSelectable), let length = selectableLength(ofRowAt: last)
         else { return }

@@ -191,9 +191,9 @@ struct TranscriptSelectionRegressionTests {
         #expect(controller.offset(from: last, to: first) == -expectedLen)
     }
 
-    /// Select All with an active selection inside a message selects all rows of
-    /// that message (user or assistant) instead of the entire transcript.
-    @Test func selectAllScopesToCurrentMessageWhenSelectionIsActive() throws {
+    /// iOS's Select All takes the message the selection is in; the Mac's
+    /// (Cmd+A) takes the whole transcript, even from inside a message.
+    @Test func selectAllTakesTheTranscriptAndSelectCurrentMessageItsMessage() throws {
         let controller = TranscriptController(configuration: .testing)
         controller.columnWidth = 320
         let rows = [
@@ -215,7 +215,88 @@ struct TranscriptSelectionRegressionTests {
             TranscriptSelection(
                 anchor: TextPosition(rowID: "a1", offset: 0),
                 focus: TextPosition(rowID: "a1", offset: 5)))
-        controller.selectAll()
+        controller.selectCurrentMessage()
         #expect(controller.selectedText() == "Agent part one\nlet x = 1")
+        controller.selectAll()
+        #expect(controller.selectedText() == "User question\nAgent part one\nlet x = 1\nFollow up")
+        controller.setSelection(nil)
+        controller.selectCurrentMessage()
+        #expect(controller.selectedText() == "User question\nAgent part one\nlet x = 1\nFollow up")
+    }
+
+    private func laidOut(_ rows: [TranscriptRow], width: CGFloat = 320) -> TranscriptController {
+        let controller = TranscriptController(configuration: .testing)
+        controller.columnWidth = width
+        controller.setRows(rows)
+        var heights: [String: CGFloat] = [:]
+        for row in controller.rows {
+            let layout = RowLayoutBuilder.layout(controller.request(row))
+            controller.storeLayout(layout)
+            heights[row.id] = layout.height
+        }
+        controller.setHeights(heights)
+        return controller
+    }
+
+    private func paragraph(_ id: String, _ text: String) -> TranscriptRow {
+        TranscriptRow(id: id, kind: .markdownBlock(.paragraph([MarkdownInline(text: text)]), .single))
+    }
+
+    /// iOS's highlight: the first line from the start to the column's edge,
+    /// the column's full width below, the last line from the edge to the
+    /// end, a few rects however long, broken only at rows that cannot be
+    /// selected.
+    @Test func iosHighlightIsFullWidthBetweenItsEnds() throws {
+        let text = "Paragraph with enough words in it to wrap across several lines of the column."
+        var rows = (0..<200).map { paragraph("p\($0)", "\($0) " + text) }
+        rows.insert(TranscriptRow(id: "actions", kind: .turnActions(turnID: "t", hasReply: true)), at: 100)
+        let controller = laidOut(rows)
+        let columnX: CGFloat = 16
+        let right = columnX + 320
+        let start = TextPosition(rowID: "p0", offset: 6)
+        let end = TextPosition(rowID: "p199", offset: 12)
+        let rects = controller.columnSelectionRects(from: start, to: end, columnX: columnX, scrollX: { _ in 0 })
+        let startCaret = try #require(controller.caretRect(for: start, columnX: columnX))
+        let endCaret = try #require(controller.caretRect(for: end, columnX: columnX))
+
+        #expect(rects.count == 4, "first line, a band, a band past the buttons, last line: \(rects.map(\.rect))")
+        let first = try #require(rects.first)
+        #expect(first.isStart && !first.isEnd)
+        #expect(first.rect.minX == startCaret.minX && first.rect.maxX == right && first.rect.minY == startCaret.minY)
+        let last = try #require(rects.last)
+        #expect(last.isEnd && !last.isStart)
+        #expect(last.rect.minX == columnX && last.rect.maxX == endCaret.minX && last.rect.minY == endCaret.minY)
+        let bands = rects.dropFirst().dropLast().map(\.rect)
+        #expect(bands.allSatisfy { $0.minX == columnX && $0.maxX == right })
+        #expect(bands.first?.minY == startCaret.maxY && bands.last?.maxY == endCaret.minY)
+        let actions = try #require(controller.geometry.index(for: "actions"))
+        let actionsTop = controller.geometry.offset(at: actions)
+        #expect(bands.first?.maxY == actionsTop)
+        #expect(bands.last?.minY == actionsTop + controller.geometry.height(at: actions))
+
+        // Within one line: between the two carets.
+        let inLine = controller.columnSelectionRects(
+            from: TextPosition(rowID: "p5", offset: 2), to: TextPosition(rowID: "p5", offset: 9), columnX: columnX,
+            scrollX: { _ in 0 })
+        let a = try #require(controller.caretRect(for: TextPosition(rowID: "p5", offset: 2), columnX: columnX))
+        let b = try #require(controller.caretRect(for: TextPosition(rowID: "p5", offset: 9), columnX: columnX))
+        #expect(inLine.count == 1 && inLine[0].isStart && inLine[0].isEnd)
+        #expect(inLine.first?.rect == CGRect(x: a.minX, y: a.minY, width: b.minX - a.minX, height: a.height))
+    }
+
+    /// In a right-to-left paragraph the first line runs from the start to
+    /// the column's left edge and the last from its right edge to the end.
+    @Test func iosHighlightFollowsARightToLeftParagraph() throws {
+        let text = "هذه فقرة عربية طويلة بما يكفي لتلتف عبر عدة أسطر في العمود الضيق جدا هنا الآن."
+        let controller = laidOut([paragraph("r0", text)], width: 200)
+        let columnX: CGFloat = 16
+        let start = TextPosition(rowID: "r0", offset: 3)
+        let end = TextPosition(rowID: "r0", offset: (text as NSString).length - 3)
+        let rects = controller.columnSelectionRects(from: start, to: end, columnX: columnX, scrollX: { _ in 0 })
+        let startCaret = try #require(controller.caretRect(for: start, columnX: columnX))
+        let endCaret = try #require(controller.caretRect(for: end, columnX: columnX))
+        #expect(startCaret.minY < endCaret.minY)
+        #expect(rects.first?.rect.minX == columnX && rects.first?.rect.maxX == startCaret.minX)
+        #expect(rects.last?.rect.minX == endCaret.minX && rects.last?.rect.maxX == columnX + 200)
     }
 }

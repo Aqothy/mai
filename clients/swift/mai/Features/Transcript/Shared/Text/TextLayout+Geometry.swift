@@ -158,6 +158,11 @@ nonisolated extension TextLayout {
         return CGRect(x: x, y: line.top, width: 2, height: line.height)
     }
 
+    /// Whether the paragraph holding `utf16Offset` runs right to left.
+    func isRightToLeft(at utf16Offset: Int) -> Bool? {
+        lineIndex(forUTF16Offset: utf16Offset).map { lines[$0].bidiIsRTL }
+    }
+
     /// Highlight rects for `range`, one per line it touches (layout
     /// coordinates). For giant selections spanning > 512 lines, emits exact
     /// first/last line rects and one solid interior block.

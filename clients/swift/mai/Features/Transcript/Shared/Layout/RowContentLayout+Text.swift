@@ -121,6 +121,16 @@ nonisolated extension RowContentLayout {
         return nil
     }
 
+    /// Whether the paragraph holding `utf16Offset` runs right to left.
+    func isRightToLeft(at utf16Offset: Int) -> Bool {
+        for segment in textSegments where utf16Offset >= segment.start && utf16Offset <= segment.end {
+            if let isRightToLeft = segment.layout.isRightToLeft(at: utf16Offset - segment.start) {
+                return isRightToLeft
+            }
+        }
+        return false
+    }
+
     func selectionRects(for range: Range<Int>) -> [CGRect] {
         var rects: [CGRect] = []
         for segment in textSegments {

@@ -171,7 +171,7 @@
 
         func firstRect(for range: UITextRange) -> CGRect {
             guard let range = range as? TranscriptTextRange, let controller else { return .null }
-            return controller.taggedSelectionRects(
+            return controller.columnSelectionRects(
                 from: range.from.position, to: range.to.position, columnX: columnX(), scrollX: scrollX
             ).first?.rect
                 ?? controller.caretRect(for: range.from.position, columnX: columnX(), scrollX: scrollX)
@@ -185,7 +185,7 @@
 
         func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
             guard let range = range as? TranscriptTextRange, let controller else { return [] }
-            let items = controller.taggedSelectionRects(
+            let items = controller.columnSelectionRects(
                 from: range.from.position, to: range.to.position, columnX: columnX(), scrollX: scrollX)
             return items.map { TranscriptSelectionRect($0.rect, isStart: $0.isStart, isEnd: $0.isEnd) }
         }
@@ -218,7 +218,7 @@
         }
 
         override func selectAll(_ sender: Any?) {
-            controller?.selectAll()
+            controller?.selectCurrentMessage()
         }
 
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

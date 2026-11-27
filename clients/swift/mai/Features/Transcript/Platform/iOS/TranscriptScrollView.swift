@@ -288,7 +288,7 @@
         }
 
         private func currentSelectionRects() -> [CGRect] {
-            controller.currentSelectionRects(columnX: columnX, scrollX: { wideBlocks[$0]?.scrollX ?? 0 })
+            controller.currentSelectionRects(columnX: columnX, scrollX: { wideBlocks[$0]?.scrollX ?? 0 }, fullWidth: true)
         }
 
         private func notifySelectionGeometryIfChanged() {
