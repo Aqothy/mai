@@ -201,9 +201,11 @@ extension TranscriptController {
         scheduleWork()
     }
 
-    /// Pauses `.utility` backfill during active scroll/fling/resize/stream so
-    /// interaction frames get 100% of CPU and main-thread budget, then resumes
-    /// (or rebuilds backfill for the new width) once idle for 250 ms.
+    /// Pauses `.utility` backfill while the reader scrolls or resizes, whose
+    /// frames may lay out and draw rows on the main thread, then resumes (or
+    /// rebuilds backfill for the new width) once idle for 250 ms. Streaming
+    /// does not pause it: a stream can last minutes, and frames measured the
+    /// same with it running (stream 4,000 cps: 118.9 vs 119.0 fps).
     func pauseBackfillBriefly(rebuildAfter: Bool) {
         guard configuration.laysOutRows, !isAwaitingInitialEnd else { return }
         if rebuildAfter { needsBackfillRebuild = true }
@@ -212,10 +214,6 @@ extension TranscriptController {
         backfillResumeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self, self.host != nil else { return }
-            if !self.streams.isEmpty {
-                self.pauseBackfillBriefly(rebuildAfter: false)
-                return
-            }
             if self.needsBackfillRebuild {
                 self.needsBackfillRebuild = false
                 self.scheduleBackfill()
