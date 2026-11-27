@@ -35,9 +35,9 @@
                 ordered.append((row.frame.minY, element))
             }
             rowElements = kept
-            // Controls on the rows (copy, fork) and code scrollers, in
-            // reading order with the rows.
-            for view in subviews where !view.isHidden && view.isUserInteractionEnabled {
+            // Controls on the rows (copy, fork), in reading order with the
+            // rows. A row's element already reads a wide block's whole text.
+            for view in subviews where !view.isHidden && view is UIControl {
                 ordered.append((view.frame.minY, view))
             }
             return ordered.sorted { $0.y < $1.y }.map(\.element)

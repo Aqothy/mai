@@ -35,10 +35,11 @@
         /// controls sit over the rows they belong to.
         let contentView = TranscriptTextInputView()
         private let rowsView = UIView()
-        /// Dedicated container right above `rowsView` (and beneath UIKit's
-        /// `UITextInteraction` selection highlights & grab handles) holding
-        /// wide code blocks and wide tables.
-        private let wideBlocksView = UIView()
+        /// The code blocks and tables wider than the column, above the rows
+        /// and below the views UIKit's text interaction adds later (highlight,
+        /// handles), so a scroller never covers the selection. Only the
+        /// scrollers' scroll bars take touches (see `makeWideBlockScroller`).
+        private let wideBlocksView = PassthroughView()
         let mounter: TranscriptRowMounter
         private(set) var palette: TextPalette?
         private var updateLink: UIUpdateLink?
@@ -50,10 +51,6 @@
         private var accessoryButtons: [String: [TranscriptAccessoryControl]] = [:]
         private var accessoryPool: [TranscriptAccessoryControl] = []
         let tapDelegate = TranscriptTapGestureDelegate()
-        var wideBlockPanDelegate: TranscriptWideBlockPanDelegate?
-        var wideBlockPan: UIPanGestureRecognizer?
-        var activeWidePan: (scroller: TranscriptWideBlockScroller, startX: CGFloat)?
-        var wideDecel: (scroller: TranscriptWideBlockScroller, velocity: CGFloat, lastTime: CFTimeInterval)?
         private var keyboardTransition: KeyboardTransition?
         private var lastNotifiedSelectionRects: [CGRect] = []
 
@@ -85,7 +82,6 @@
             automaticallyAdjustsScrollIndicatorInsets = false
             backgroundColor = .clear
             rowsView.isUserInteractionEnabled = false
-            wideBlocksView.isUserInteractionEnabled = false
             contentView.addSubview(rowsView)
             contentView.addSubview(wideBlocksView)
             contentView.alpha = 0
@@ -140,7 +136,7 @@
                 let localVisible = visible.offsetBy(dx: -scroller.frame.minX, dy: -scroller.frame.minY)
                 scroller.releaseOffscreenBands(keeping: localVisible)
             }
-            for scroller in wideBlockPool { scroller.removeFromSuperview() }
+            for scroller in wideBlockPool { discard(scroller) }
             wideBlockPool.removeAll()
             for button in accessoryPool { button.removeFromSuperview() }
             accessoryPool.removeAll()
@@ -165,10 +161,6 @@
                 controller.viewportDidChange()
             }
             placeRowsIfNeeded()
-        }
-
-        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-            stopWideBlockDeceleration()
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -315,8 +307,8 @@
             setContentOffset(contentOffset, animated: false)
         }
 
-        func updateFrameLink() {
-            let active = (needsFrames || wideDecel != nil) && window?.windowScene != nil
+        private func updateFrameLink() {
+            let active = needsFrames && window?.windowScene != nil
             if active, updateLink == nil {
                 let link = UIUpdateLink(view: self)
                 link.addAction(target: self, selector: #selector(frameDidTick))
@@ -326,15 +318,8 @@
             updateLink?.requiresContinuousUpdates = active
         }
 
-        func stopWideBlockDeceleration() {
-            guard wideDecel != nil else { return }
-            wideDecel = nil
-            updateFrameLink()
-        }
-
         @objc private func frameDidTick() {
-            if needsFrames { controller.frameDidTick() }
-            stepWideBlockDeceleration()
+            controller.frameDidTick()
         }
 
         // MARK: Rows
@@ -378,10 +363,9 @@
             rowID: String, body: WideBlockBody, key: RowLayoutKey, origin: CGPoint, drawn: CGRect,
             visible: CGRect, streamed: DrawnBands?
         ) {
-            let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? TranscriptWideBlockScroller()
+            let scroller = wideBlocks[rowID] ?? wideBlockPool.popLast() ?? makeWideBlockScroller()
             if wideBlocks[rowID] == nil {
                 wideBlocks[rowID] = scroller
-                if scroller.superview == nil { wideBlocksView.addSubview(scroller) }
                 scroller.isHidden = false
                 scroller.onHorizontalScroll = { [weak self] in
                     self?.notifySelectionGeometryIfChanged()
@@ -400,6 +384,23 @@
                 streamed: streamed)
         }
 
+        /// UIKit's text gestures take a touch only when the touched view is
+        /// `contentView` or above it, not a view inside it (measured on iOS
+        /// 27). So a touch in a block lands on `contentView` (all but the
+        /// block's scroll bar), and the block's pan listens there instead
+        /// (UIKit lets a scroll view's pan sit on another view).
+        private func makeWideBlockScroller() -> TranscriptWideBlockScroller {
+            let scroller = TranscriptWideBlockScroller()
+            wideBlocksView.addSubview(scroller)
+            contentView.addGestureRecognizer(scroller.panGestureRecognizer)
+            return scroller
+        }
+
+        private func discard(_ scroller: TranscriptWideBlockScroller) {
+            contentView.removeGestureRecognizer(scroller.panGestureRecognizer)
+            scroller.removeFromSuperview()
+        }
+
         /// The reader scrolled a wide block: keep its sideways offset across
         /// remounts (browser `scrollLeft`).
         private func wideBlockDidScroll(_ scroller: TranscriptWideBlockScroller) {
@@ -413,14 +414,12 @@
 
         func removeWideBlock(rowID: String) {
             guard let scroller = wideBlocks.removeValue(forKey: rowID) else { return }
-            if activeWidePan?.scroller === scroller { activeWidePan = nil }
-            if wideDecel?.scroller === scroller { stopWideBlockDeceleration() }
             scroller.resetForReuse()
             scroller.isHidden = true
             if wideBlockPool.count < 8 {
                 wideBlockPool.append(scroller)
             } else {
-                scroller.removeFromSuperview()
+                discard(scroller)
             }
         }
 
@@ -481,5 +480,13 @@
         #if DEBUG
             var mountedRowCount: Int { mounter.mountedRowCount }
         #endif
+    }
+
+    /// Takes no touches itself, only through its subviews.
+    private final class PassthroughView: UIView {
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            let hit = super.hitTest(point, with: event)
+            return hit === self ? nil : hit
+        }
     }
 #endif

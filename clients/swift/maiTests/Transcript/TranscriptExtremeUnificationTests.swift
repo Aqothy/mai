@@ -242,16 +242,60 @@ nonisolated struct TranscriptExtremeUnificationTests {
     }
 
     #if os(iOS)
-        @MainActor @Test func iosWideBlockAndTextInputPreventSelectionAndKeyboardRegressions() {
+        /// A wide code block on iOS is a real scroll view, so the reader pans,
+        /// flings, bounces and grabs its scroll bar natively, while every other
+        /// touch, inside it or not, lands on the text input, so a long press
+        /// inside it starts a selection.
+        @MainActor @Test func iosWideCodeBlockIsANativeScrollViewWhoseTouchesReachTheText() throws {
+            let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
             let controller = TranscriptController(configuration: .testing)
             let scrollView = TranscriptScrollView(controller: controller)
-            #expect(scrollView.contentView.inputView != nil)
+            scrollView.frame = window.bounds
+            window.addSubview(scrollView)
+            window.isHidden = false
+            defer {
+                scrollView.removeFromSuperview()
+                window.isHidden = true
+            }
+            scrollView.layoutIfNeeded()
             #expect(scrollView.contentView.inputView?.frame == .zero)
-            #expect(scrollView.wideBlockPan != nil)
 
-            let scroller = TranscriptWideBlockScroller()
-            #expect(!scroller.isUserInteractionEnabled)
-            #expect(scroller.subviews.first?.isUserInteractionEnabled == false)
+            let code = (0..<12).map { "line \($0) " + String(repeating: "x", count: 400) }.joined(separator: "\n")
+            let blocks = MarkdownPlanner.blocks(from: "Intro paragraph.\n\n```\n\(code)\n```")
+            let rows = blocks.indices.map { index in
+                TranscriptRow(
+                    id: "m#\(index)", sourceID: "m", kind: .markdownBlock(blocks[index], .of(index, in: blocks)),
+                    messageID: "m", role: .assistant, turnID: "t")
+            }
+            controller.setRows(rows)
+            var heights: [String: CGFloat] = [:]
+            for row in rows {
+                let layout = RowLayoutBuilder.layout(controller.request(row))
+                controller.storeLayout(layout)
+                heights[row.id] = layout.height
+            }
+            controller.setHeights(heights)
+            controller.alignInitialEndIfPossible()
+            scrollView.layoutIfNeeded()
+
+            // UIKit's text gestures take a touch only when the touched view is
+            // the text view or above it, so a touch in the block lands on the
+            // text view, where the block's own pan listens too.
+            let scroller = try #require(scrollView.wideBlocks["m#1"])
+            #expect(scroller.contentSize.width > scroller.bounds.width)
+            #expect(scroller.panGestureRecognizer.view === scrollView.contentView)
+            let inBlock = scrollView.convert(CGPoint(x: scroller.frame.midX, y: scroller.frame.midY), from: scrollView.contentView)
+            #expect(scrollView.hitTest(inBlock, with: nil) === scrollView.contentView)
+            // Its scroll bar's strip, which holds no text, is the scroller's.
+            let onBar = scrollView.convert(CGPoint(x: scroller.frame.midX, y: scroller.frame.maxY - 4), from: scrollView.contentView)
+            #expect(scrollView.hitTest(onBar, with: nil) === scroller)
+            let intro = controller.geometry.frame(at: 0)
+            #expect(intro.minY + intro.height <= scroller.frame.minY)
+            let inIntro = scrollView.convert(
+                CGPoint(x: scroller.frame.midX, y: intro.minY + intro.height / 2), from: scrollView.contentView)
+            #expect(scrollView.hitTest(inIntro, with: nil) === scrollView.contentView)
         }
     #endif
 

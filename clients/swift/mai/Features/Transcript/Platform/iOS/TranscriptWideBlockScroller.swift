@@ -2,9 +2,13 @@
     import UIKit
 
     /// The horizontal scroller of a code block or table wider than its row,
-    /// pooled by the transcript. Vertical pans pass to the transcript on
-    /// their own: this view has nothing to scroll vertically (PLAN 3.9). Only
-    /// the transcript answers the status-bar tap.
+    /// pooled by the transcript. Only its scroll bar takes touches: its pan
+    /// sits on the transcript's text view, so a long press inside the block
+    /// starts a selection like anywhere else (see
+    /// `TranscriptScrollView.makeWideBlockScroller`).
+    /// Vertical pans pass to the transcript on their own: this view has
+    /// nothing to scroll vertically (PLAN 3.9). Only the transcript answers
+    /// the status-bar tap.
     final class TranscriptWideBlockScroller: UIScrollView, UIScrollViewDelegate {
         private let body = UIView()
         private let row = RowLayer()
@@ -29,15 +33,9 @@
             alwaysBounceVertical = false
             alwaysBounceHorizontal = false
             isDirectionalLockEnabled = true
-            delaysContentTouches = false
             showsVerticalScrollIndicator = false
             scrollsToTop = false
             backgroundColor = .clear
-            // Keep the scroller non-hit-testable so touches inside wide code
-            // blocks and tables hit `TranscriptTextInputView` directly, giving
-            // 100% native `UITextInteraction` selection, handles, and menus;
-            // `TranscriptScrollView`'s horizontal pan gesture drives scrolling.
-            isUserInteractionEnabled = false
             body.isUserInteractionEnabled = false
             body.layer.addSublayer(row)
             addSubview(body)
@@ -46,6 +44,26 @@
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+
+        /// Only the scroll bar's strip at the bottom takes touches, so its
+        /// indicator can be grabbed; the rest of the block passes them to the
+        /// text view underneath. The strip holds no text: code ends 16 pt and
+        /// table cells 12 pt above the bottom (`TextStyle`).
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            super.point(inside: point, with: event) && point.y >= bounds.maxY - 12
+        }
+
+        /// The pan hears every touch on the text view: it scrolls this block
+        /// only for a drag that starts on it.
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === panGestureRecognizer {
+                guard rowID != nil, !isHidden else { return false }
+                let now = panGestureRecognizer.location(in: self)
+                let moved = panGestureRecognizer.translation(in: self)
+                guard bounds.contains(CGPoint(x: now.x - moved.x, y: now.y - moved.y)) else { return false }
+            }
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -148,15 +166,6 @@
 
         /// How far the body is scrolled: hit testing adds it to a point.
         var scrollX: CGFloat { contentOffset.x }
-        var maxScrollX: CGFloat { max(0, contentSize.width - bounds.width) }
-
-        /// Drives horizontal scrolling from `TranscriptScrollView`'s latched
-        /// horizontal pan gesture and momentum deceleration.
-        func pan(toX x: CGFloat) {
-            let clamped = min(max(0, x), maxScrollX)
-            guard abs(contentOffset.x - clamped) > 0.1 else { return }
-            contentOffset = CGPoint(x: clamped, y: contentOffset.y)
-        }
 
         func resetForReuse() {
             rowID = nil
@@ -167,7 +176,9 @@
             lastContentWidth = 0
             lastHorizontalDrawnX = .nan
             lastHorizontalDrawnSpan = nil
-            contentOffset = .zero
+            // Unlike assigning the offset, this also ends a fling, which
+            // would otherwise carry on into the next row shown here.
+            setContentOffset(.zero, animated: false)
             row.resetForReuse()
         }
     }
