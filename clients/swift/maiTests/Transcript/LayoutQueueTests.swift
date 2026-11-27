@@ -78,8 +78,8 @@ nonisolated struct LayoutQueueTests {
             work: .layout(RowLayoutRequest(rowID: "urgent-0", kind: kind, key: key, style: style), drawing: nil),
             priority: 0)
 
-        queue.markBackfillPaused(true)
-        await queue.setBackfill(backfillJobs, paused: true)
+        queue.setBackfillPaused(true)
+        await queue.setBackfill(backfillJobs)
         await queue.submit(urgent: [urgentJob], generation: 1, replacingUrgent: true)
         for _ in 0..<100 where urgentDelivered.withLock({ $0.count }) < 1 {
             try await Task.sleep(for: .milliseconds(5))
@@ -88,8 +88,8 @@ nonisolated struct LayoutQueueTests {
         #expect(urgentDelivered.withLock { $0 } == ["urgent-0"])
         #expect(backfillDelivered.withLock { $0 }.isEmpty)
 
-        queue.markBackfillPaused(false)
-        await queue.setBackfillPaused(false)
+        queue.setBackfillPaused(false)
+        await queue.resumeBackfillIfNeeded()
         for _ in 0..<150 where backfillDelivered.withLock({ $0.count }) < backfillJobs.count {
             try await Task.sleep(for: .milliseconds(5))
         }

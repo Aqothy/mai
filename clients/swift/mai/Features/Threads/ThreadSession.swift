@@ -25,9 +25,9 @@ struct ThreadSession {
     /// Remembered measured row heights keyed by `(columnWidth, styleVersion)`
     /// so reopening a thread starts with exact geometry (zero scrollbar jump).
     var transcriptMeasuredHeights: TranscriptMeasuredHeights?
-    /// Monotonic token incremented on every detach/write so an older off-main
-    /// height snapshot cannot overwrite a newer one after a quick reopen.
-    var transcriptMeasuredHeightsGeneration = 0
+    /// In-flight off-main height snapshot for this session; cancelled on a
+    /// newer save, direct overwrite, or unsubscribe so stale snapshots never land.
+    var measuredHeightsTask: Task<Void, Never>?
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
     /// Events that arrived while the snapshot was on its way.

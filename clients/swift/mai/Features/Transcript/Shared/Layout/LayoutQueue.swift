@@ -53,9 +53,9 @@ actor LayoutQueue {
     /// Backfill jobs sorted by descending priority so `popLast()` takes the
     /// nearest row in O(1) without O(N) dictionary scans.
     private var backfillStack: [Job] = []
-    private var backfillPaused = false
-    /// Synchronous pause flag so `MainActor` selection/scroll changes suppress
-    /// backfill starts and in-flight deliveries without waiting for an actor hop.
+    /// Single source of truth for backfill pause state, mutated synchronously
+    /// on `MainActor` so rapid pause/resume toggles can never reorder across
+    /// actor hops and in-flight backfill deliveries stop immediately.
     private let backfillPausedBox = Mutex<Bool>(false)
     private var latestUrgentGeneration = 0
     private let generationBox = GenerationBox()
@@ -72,7 +72,7 @@ actor LayoutQueue {
         self.deliver = deliver
     }
 
-    nonisolated func markBackfillPaused(_ paused: Bool) {
+    nonisolated func setBackfillPaused(_ paused: Bool) {
         backfillPausedBox.withLock { $0 = paused }
     }
 
@@ -106,19 +106,14 @@ actor LayoutQueue {
 
     /// Replaces the low-priority exact-geometry backfill queue (called once
     /// after open and after a settled width change, never per frame).
-    func setBackfill(_ jobs: [Job], paused: Bool = false) {
+    func setBackfill(_ jobs: [Job]) {
         backfillStack = jobs.sorted { $0.priority > $1.priority }
-        backfillPaused = paused
-        backfillPausedBox.withLock { $0 = paused }
         pump()
     }
 
-    /// Pauses or resumes `.utility` backfill while the reader is actively
-    /// scrolling, resizing, or holding a selection.
-    func setBackfillPaused(_ paused: Bool) {
-        backfillPaused = paused
-        backfillPausedBox.withLock { $0 = paused }
-        if !paused { pump() }
+    /// Wakes backfill after `setBackfillPaused(false)` on the caller.
+    func resumeBackfillIfNeeded() {
+        pump()
     }
 
     /// Cancels all queued work (called when a transcript detaches so
@@ -152,7 +147,7 @@ actor LayoutQueue {
         }
         // Backfill runs at most 1 `.utility` job at a time and yields completely
         // whenever paused or any urgent work is queued or in flight.
-        guard !backfillPaused, !backfillPausedBox.withLock({ $0 }), runningBackfillCount == 0, running.isEmpty else {
+        guard !backfillPausedBox.withLock({ $0 }), runningBackfillCount == 0, running.isEmpty else {
             return nil
         }
         while let job = backfillStack.popLast() {
@@ -166,7 +161,7 @@ actor LayoutQueue {
     private func finish(_ job: Job, isBackfill: Bool, _ result: Result) {
         running[job.id] = nil
         if isBackfill { runningBackfillCount = max(0, runningBackfillCount - 1) }
-        if isBackfill, backfillPaused || backfillPausedBox.withLock({ $0 }) {
+        if isBackfill, backfillPausedBox.withLock({ $0 }) {
             backfillStack.append(job)
         } else {
             deliver(result, isBackfill)

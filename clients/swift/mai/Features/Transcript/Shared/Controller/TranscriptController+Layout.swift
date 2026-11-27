@@ -212,16 +212,13 @@ extension TranscriptController {
     func syncBackfillPause() {
         guard configuration.laysOutRows, !isAwaitingInitialEnd else { return }
         let paused = shouldPauseBackfill
-        queue.markBackfillPaused(paused)
-        if paused {
-            Task { await queue.setBackfillPaused(true) }
-            return
-        }
+        queue.setBackfillPaused(paused)
+        guard !paused else { return }
         if needsBackfillRebuild {
             needsBackfillRebuild = false
             scheduleBackfill()
         } else {
-            Task { await queue.setBackfillPaused(false) }
+            Task { await queue.resumeBackfillIfNeeded() }
         }
         if !deferredBackfillResults.isEmpty {
             drainInbox()
@@ -306,9 +303,8 @@ extension TranscriptController {
             }
         }
         guard !backfillJobs.isEmpty else { return }
-        let paused = shouldPauseBackfill
-        queue.markBackfillPaused(paused)
-        Task { await queue.setBackfill(backfillJobs, paused: paused) }
+        queue.setBackfillPaused(shouldPauseBackfill)
+        Task { await queue.setBackfill(backfillJobs) }
     }
 
     private var currentDrawing: DrawnBands.Drawing? {

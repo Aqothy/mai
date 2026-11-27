@@ -73,22 +73,30 @@ final class ThreadStore {
         sessionsByID[threadID]?.transcriptMeasuredHeights
     }
 
-    func nextMeasuredHeightsGeneration(for threadID: String) -> Int {
-        guard var session = sessionsByID[threadID] else { return 0 }
-        session.transcriptMeasuredHeightsGeneration &+= 1
+    func setTranscriptMeasuredHeights(_ heights: TranscriptMeasuredHeights?, for threadID: String) {
+        guard var session = sessionsByID[threadID] else { return }
+        session.measuredHeightsTask?.cancel()
+        session.measuredHeightsTask = nil
+        session.transcriptMeasuredHeights = heights
         sessionsByID[threadID] = session
-        return session.transcriptMeasuredHeightsGeneration
     }
 
-    func setTranscriptMeasuredHeights(
-        _ heights: TranscriptMeasuredHeights?, for threadID: String, generation: Int? = nil
+    func saveTranscriptMeasuredHeights(
+        for threadID: String,
+        compute: @escaping @Sendable () -> TranscriptMeasuredHeights?
     ) {
         guard var session = sessionsByID[threadID] else { return }
-        if let generation, generation != session.transcriptMeasuredHeightsGeneration { return }
-        if generation == nil {
-            session.transcriptMeasuredHeightsGeneration &+= 1
+        session.measuredHeightsTask?.cancel()
+        session.measuredHeightsTask = Task(priority: .userInitiated) { [weak self] in
+            let snapshot = await Task.detached(priority: .userInitiated, operation: compute).value
+            guard !Task.isCancelled, let self else { return }
+            guard var current = self.sessionsByID[threadID] else { return }
+            current.measuredHeightsTask = nil
+            if let snapshot, current.detail != nil {
+                current.transcriptMeasuredHeights = snapshot
+            }
+            self.sessionsByID[threadID] = current
         }
-        session.transcriptMeasuredHeights = heights
         sessionsByID[threadID] = session
     }
 
@@ -1266,6 +1274,8 @@ final class ThreadStore {
         // Unwatched, its content goes stale: reopening it waits for the
         // daemon's caught-up snapshot rather than showing it first.
         session.detail = nil
+        session.measuredHeightsTask?.cancel()
+        session.measuredHeightsTask = nil
         session.transcriptMeasuredHeights = nil
         sessionsByID[id] = session
         streamingTextByThreadID[id] = nil

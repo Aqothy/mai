@@ -975,9 +975,9 @@ struct TranscriptControllerScrollTests {
     }
 
     /// Detaching computes `TranscriptMeasuredHeights` off the main thread and
-    /// persists it onto `ThreadStore`, while rejecting stale generations so an
-    /// older exit never clobbers a newer one.
-    @Test func detachSavesMeasuredHeightsOffMainWithGenerationOrdering() async throws {
+    /// persists it onto `ThreadStore`, while a newer direct write cancels any
+    /// in-flight snapshot so stale heights never overwrite it.
+    @Test func detachSavesMeasuredHeightsOffMainAndCancelsStaleSnapshots() async throws {
         let thread = ChatSyntheticBenchmarkThread.thread(turnCount: 4)
         let store = ThreadStore(previewThreads: [thread.summary], selectedThread: thread)
 
@@ -997,17 +997,22 @@ struct TranscriptControllerScrollTests {
         let persisted = try #require(store.transcriptMeasuredHeights(for: thread.id))
         #expect(persisted.rowHeights[firstRowID] == 142)
 
-        // A stale generation must not overwrite a newer snapshot.
-        let olderGen = store.nextMeasuredHeightsGeneration(for: thread.id)
-        let newerGen = store.nextMeasuredHeightsGeneration(for: thread.id)
-        let newer = TranscriptMeasuredHeights(
-            width: persisted.width, styleVersion: persisted.styleVersion,
-            rowHeights: [firstRowID: 288], sourceHeights: [:])
+        // A slower background snapshot superseded by a newer direct write must
+        // be cancelled and must not clobber the newer value.
+        let gate = DispatchSemaphore(value: 0)
         let stale = TranscriptMeasuredHeights(
             width: persisted.width, styleVersion: persisted.styleVersion,
             rowHeights: [firstRowID: 99], sourceHeights: [:])
-        store.setTranscriptMeasuredHeights(newer, for: thread.id, generation: newerGen)
-        store.setTranscriptMeasuredHeights(stale, for: thread.id, generation: olderGen)
+        let newer = TranscriptMeasuredHeights(
+            width: persisted.width, styleVersion: persisted.styleVersion,
+            rowHeights: [firstRowID: 288], sourceHeights: [:])
+        store.saveTranscriptMeasuredHeights(for: thread.id) {
+            gate.wait()
+            return stale
+        }
+        store.setTranscriptMeasuredHeights(newer, for: thread.id)
+        gate.signal()
+        try await Task.sleep(for: .milliseconds(30))
         #expect(store.transcriptMeasuredHeights(for: thread.id)?.rowHeights[firstRowID] == 288)
     }
 }

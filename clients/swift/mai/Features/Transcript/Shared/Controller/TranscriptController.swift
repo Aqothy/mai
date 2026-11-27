@@ -44,7 +44,7 @@ final class TranscriptController {
         rememberedHeights = nil
         turns = []
         turnRevisions = []
-        DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(retained) {} }
+        Task.detached(priority: .userInitiated) { _ = retained }
     }
 
     /// Thread-safe handoff from `LayoutQueue` workers so finished viewport
@@ -197,6 +197,7 @@ final class TranscriptController {
             viewportBecameAvailable(viewport)
         }
         alignInitialEndIfPossible()
+        queue.setBackfillPaused(shouldPauseBackfill)
         if !isAwaitingInitialEnd { scheduleBackfill() }
         host.setNeedsRowPlacement()
         updateFrameUpdates()
@@ -212,16 +213,16 @@ final class TranscriptController {
         detachedTop = host.viewport != nil ? host.viewportTop : baselineTop
         detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
         persistSavedPlace()
-        let stalePreDrawn = preDrawnBands
+        let stale = (preDrawnBands, deferredBackfillResults)
         preDrawnBands = [:]
-        if !stalePreDrawn.isEmpty {
-            DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(stalePreDrawn) {} }
+        deferredBackfillResults = []
+        if !stale.0.isEmpty || !stale.1.isEmpty {
+            Task.detached(priority: .userInitiated) { _ = stale }
         }
         backfillResumeTask?.cancel()
         backfillResumeTask = nil
         isBackfillTemporarilyPaused = false
-        deferredBackfillResults.removeAll()
-        queue.markBackfillPaused(false)
+        queue.setBackfillPaused(false)
         Task { await queue.cancelAll() }
         host.setNeedsFrameUpdates(false)
         self.host = nil
@@ -650,25 +651,8 @@ final class TranscriptController {
     private func persistSavedPlace() {
         guard let store, let threadID else { return }
         if columnWidth > 0, !measuredRowHeights.isEmpty {
-            let width = columnWidth
-            let styleVersion = style.version
-            let rowsSnapshot = rows
-            let turnsSnapshot = turns
-            let streamSourceIDs = Set(streams.keys)
-            let measuredSnapshot = measuredRowHeights
-            let rememberedSnapshot = rememberedHeights
-            let generation = store.nextMeasuredHeightsGeneration(for: threadID)
-            Task.detached(priority: .userInitiated) { [weak store] in
-                guard
-                    let snapshot = Self.buildMeasuredHeightsSnapshot(
-                        width: width, styleVersion: styleVersion, rows: rowsSnapshot, turns: turnsSnapshot,
-                        streamSourceIDs: streamSourceIDs, measuredRowHeights: measuredSnapshot,
-                        rememberedHeights: rememberedSnapshot)
-                else { return }
-                await MainActor.run {
-                    store?.setTranscriptMeasuredHeights(snapshot, for: threadID, generation: generation)
-                }
-            }
+            let input = measuredHeightsInput()
+            store.saveTranscriptMeasuredHeights(for: threadID) { input.build() }
         }
         guard !isAwaitingInitialEnd else { return }
         store.setSavedTranscriptPlace(savedPlace(), for: threadID)
@@ -703,64 +687,74 @@ final class TranscriptController {
         if !updates.isEmpty { setHeights(updates) }
     }
 
-    /// Snapshots all measured row and message-source heights for finished turns
-    /// at the current `(columnWidth, style.version)` for persistence on
-    /// `ThreadSession`. Running/streaming turns are excluded so mid-stream
-    /// heights never become stale if the turn finishes while detached.
-    func snapshotMeasuredHeights() -> TranscriptMeasuredHeights? {
-        Self.buildMeasuredHeightsSnapshot(
+    private struct MeasuredHeightsInput: Sendable {
+        let width: CGFloat
+        let styleVersion: Int
+        let rows: [TranscriptRow]
+        let turns: [TranscriptTurn]
+        let streamSourceIDs: Set<String>
+        let measuredRowHeights: [String: CGFloat]
+        let rememberedHeights: TranscriptMeasuredHeights?
+
+        nonisolated func build() -> TranscriptMeasuredHeights? {
+            guard width > 0 else { return nil }
+            let runningTurnIDs = Set(turns.lazy.filter(\.isRunning).map(\.id))
+            var volatileRowIDs: Set<String> = []
+            var volatileSourceIDs = streamSourceIDs
+            for row in rows {
+                if streamSourceIDs.contains(row.sourceID) || row.turnID.map({ runningTurnIDs.contains($0) }) == true {
+                    volatileRowIDs.insert(row.id)
+                    volatileSourceIDs.insert(row.sourceID)
+                }
+            }
+            var rowHeights: [String: CGFloat] = [:]
+            var sourceHeights: [String: CGFloat] = [:]
+            if let remembered = rememberedHeights,
+                remembered.width == width, remembered.styleVersion == styleVersion
+            {
+                rowHeights = remembered.rowHeights
+                sourceHeights = remembered.sourceHeights
+            }
+            for (id, height) in measuredRowHeights where !volatileRowIDs.contains(id) {
+                rowHeights[id] = height
+            }
+            for id in volatileRowIDs { rowHeights.removeValue(forKey: id) }
+            for sourceID in volatileSourceIDs { sourceHeights.removeValue(forKey: sourceID) }
+            guard !rowHeights.isEmpty || !sourceHeights.isEmpty else { return nil }
+            // Sum measured heights per sourceID so unparsed `.pendingMessage` rows
+            // on the next open start with the exact total height of their blocks.
+            var totals: [String: (sum: CGFloat, complete: Bool)] = [:]
+            for row in rows where !volatileSourceIDs.contains(row.sourceID) {
+                if case .pendingMessage = row.kind { continue }
+                var entry = totals[row.sourceID] ?? (0, true)
+                if let height = rowHeights[row.id] {
+                    entry.sum += height
+                } else {
+                    entry.complete = false
+                }
+                totals[row.sourceID] = entry
+            }
+            for (sourceID, entry) in totals where entry.complete && entry.sum > 0 {
+                sourceHeights[sourceID] = entry.sum
+            }
+            return TranscriptMeasuredHeights(
+                width: width, styleVersion: styleVersion, rowHeights: rowHeights, sourceHeights: sourceHeights)
+        }
+    }
+
+    private func measuredHeightsInput() -> MeasuredHeightsInput {
+        MeasuredHeightsInput(
             width: columnWidth, styleVersion: style.version, rows: rows, turns: turns,
             streamSourceIDs: Set(streams.keys), measuredRowHeights: measuredRowHeights,
             rememberedHeights: rememberedHeights)
     }
 
-    nonisolated private static func buildMeasuredHeightsSnapshot(
-        width: CGFloat, styleVersion: Int, rows: [TranscriptRow], turns: [TranscriptTurn],
-        streamSourceIDs: Set<String>, measuredRowHeights: [String: CGFloat],
-        rememberedHeights: TranscriptMeasuredHeights?
-    ) -> TranscriptMeasuredHeights? {
-        guard width > 0 else { return nil }
-        let runningTurnIDs = Set(turns.lazy.filter(\.isRunning).map(\.id))
-        var volatileRowIDs: Set<String> = []
-        var volatileSourceIDs = streamSourceIDs
-        for row in rows {
-            if streamSourceIDs.contains(row.sourceID) || row.turnID.map({ runningTurnIDs.contains($0) }) == true {
-                volatileRowIDs.insert(row.id)
-                volatileSourceIDs.insert(row.sourceID)
-            }
-        }
-        var rowHeights: [String: CGFloat] = [:]
-        var sourceHeights: [String: CGFloat] = [:]
-        if let remembered = rememberedHeights,
-            remembered.width == width, remembered.styleVersion == styleVersion
-        {
-            rowHeights = remembered.rowHeights
-            sourceHeights = remembered.sourceHeights
-        }
-        for (id, height) in measuredRowHeights where !volatileRowIDs.contains(id) {
-            rowHeights[id] = height
-        }
-        for id in volatileRowIDs { rowHeights.removeValue(forKey: id) }
-        for sourceID in volatileSourceIDs { sourceHeights.removeValue(forKey: sourceID) }
-        guard !rowHeights.isEmpty || !sourceHeights.isEmpty else { return nil }
-        // Sum measured heights per sourceID so unparsed `.pendingMessage` rows
-        // on the next open start with the exact total height of their blocks.
-        var totals: [String: (sum: CGFloat, complete: Bool)] = [:]
-        for row in rows where !volatileSourceIDs.contains(row.sourceID) {
-            if case .pendingMessage = row.kind { continue }
-            var entry = totals[row.sourceID] ?? (0, true)
-            if let height = rowHeights[row.id] {
-                entry.sum += height
-            } else {
-                entry.complete = false
-            }
-            totals[row.sourceID] = entry
-        }
-        for (sourceID, entry) in totals where entry.complete && entry.sum > 0 {
-            sourceHeights[sourceID] = entry.sum
-        }
-        return TranscriptMeasuredHeights(
-            width: width, styleVersion: styleVersion, rowHeights: rowHeights, sourceHeights: sourceHeights)
+    /// Snapshots all measured row and message-source heights for finished turns
+    /// at the current `(columnWidth, style.version)` for persistence on
+    /// `ThreadSession`. Running/streaming turns are excluded so mid-stream
+    /// heights never become stale if the turn finishes while detached.
+    func snapshotMeasuredHeights() -> TranscriptMeasuredHeights? {
+        measuredHeightsInput().build()
     }
 
     /// Where initial alignment wants the viewport: the restored saved place if
