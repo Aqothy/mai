@@ -235,7 +235,7 @@ nonisolated struct TranscriptExtremeUnificationTests {
 
     @MainActor @Test func devExtremeThreadsCatalogBuildsBlankingStressThread() {
         let catalog = ChatSyntheticBenchmarkThread.devExtremeThreads()
-        #expect(catalog.count == 11)
+        #expect(catalog.count == 12)
         let blanking = catalog.first(where: { $0.summary.id == "synthetic-benchmark-blanking" })?.build()
         #expect(blanking != nil)
         #expect((blanking?.turns.count ?? 0) >= 90)
