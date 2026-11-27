@@ -20,24 +20,19 @@ func TestLoadSessionTimeoutCleansLoadState(t *testing.T) {
 		},
 	}
 	h := newWireTestHandle(t, agent)
-	recorder := &eventRecorder{}
-	h.runtimeEventListener = recorder.listener
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := h.StartSession(ctx, provider.StartSessionInput{ThreadID: "thread-1", ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"})}); err == nil {
-		t.Fatal("StartSession err = nil, want load timeout")
-	}
-	if got := h.sessionIDForThread("thread-1"); got != "" {
-		t.Fatalf("thread remains bound to %q after load timeout", got)
+	if _, err := h.Open(ctx, provider.OpenInput{Session: "old", Workspace: workspace}); err == nil {
+		t.Fatal("Open err = nil, want load timeout")
 	}
 	h.mu.Lock()
 	session := h.sessions["old"]
 	h.mu.Unlock()
 	if session != nil {
-		t.Fatalf("load timeout left session state %#v, want unbound", session)
+		t.Fatalf("load timeout left session state %#v, want none", session)
 	}
-	if events := recorder.snapshot(); len(events) != 0 {
+	if events := h.events.Snapshot(); len(events) != 0 {
 		t.Fatalf("events after failed load = %#v, want none", events)
 	}
 }
@@ -46,13 +41,9 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 	h := newWireTestHandle(t, &fakeWireAgent{})
 	stream := &sessionStream{
 		sessionID: "old",
-		session:   h.agent().AttachSession("old"),
+		session:   h.agentPeer.AttachSession("old"),
 		barriers:  make(map[string]*sessionBarrier),
 	}
-	h.bindSession("thread-old", "old")
-	h.mu.Lock()
-	h.sessions[stream.sessionID].stream = stream
-	h.mu.Unlock()
 
 	drained := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
@@ -79,13 +70,9 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 
 	cause := errors.New("session stream died")
 	h.abandonSessionStream(stream, cause)
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, cause) {
-			t.Fatalf("awaitSessionBarrier err = %v, want %v", err, cause)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for abandoned barrier to release")
+	err := waitFor(t, errCh, "timed out waiting for abandoned barrier to release")
+	if !errors.Is(err, cause) {
+		t.Fatalf("awaitSessionBarrier err = %v, want %v", err, cause)
 	}
 	select {
 	case <-drained:
@@ -94,7 +81,9 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 	}
 }
 
-func TestResumeSessionBarrierTimeoutUnbindsSession(t *testing.T) {
+// A resume whose updates can't be delivered before the caller's deadline
+// fails, and leaves no live session behind.
+func TestResumeSessionBarrierTimeoutDetachesSession(t *testing.T) {
 	agent := &fakeWireAgent{
 		capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}},
 		onResumeSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
@@ -106,7 +95,7 @@ func TestResumeSessionBarrierTimeoutUnbindsSession(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	h.runtimeEventListener = func(provider.RuntimeEvent) {
+	h.host.Emit = func(provider.Event) {
 		once.Do(func() {
 			close(entered)
 			<-release
@@ -117,25 +106,16 @@ func TestResumeSessionBarrierTimeoutUnbindsSession(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := h.StartSession(ctx, provider.StartSessionInput{ThreadID: "thread-1", ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"})})
+		_, err := h.Open(ctx, provider.OpenInput{Session: "old", Workspace: workspace})
 		errCh <- err
 	}()
-	select {
-	case <-entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for resume update to block the barrier")
+	waitFor(t, entered, "timed out waiting for resume update to block the barrier")
+	err := waitFor(t, errCh, "timed out waiting for Open to fail on resume barrier deadline")
+	if err == nil || !strings.Contains(err.Error(), "context deadline") {
+		t.Fatalf("Open err = %v, want barrier context deadline", err)
 	}
-	select {
-	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "context deadline") {
-			t.Fatalf("StartSession err = %v, want barrier context deadline", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for StartSession to fail on resume barrier deadline")
+	if h.live("old") {
+		t.Fatal("session stayed live after the resume barrier timed out")
 	}
-	if got := h.sessionIDForThread("thread-1"); got != "" {
-		t.Fatalf("thread remains bound to %q after resume barrier timeout", got)
-	}
-
 	close(release)
 }

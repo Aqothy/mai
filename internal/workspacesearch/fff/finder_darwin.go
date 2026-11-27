@@ -3,8 +3,11 @@
 package fff
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../../third_party/fff/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/fff/lib/darwin-arm64 -lfff_c -Wl,-rpath,${SRCDIR}/../../../third_party/fff/lib/darwin-arm64
+// The FFF release is the version in these paths (make fff reads it from
+// here): a new one changes this file, so Go rebuilds the package against
+// its header instead of reusing one built against the old.
+#cgo CFLAGS: -I${SRCDIR}/../../../build/fff/v0.11.0/include
+#cgo LDFLAGS: -L${SRCDIR}/../../../build/fff/v0.11.0/lib -lfff_c -Wl,-rpath,${SRCDIR}/../../../build/fff/v0.11.0/lib
 
 #include <stdlib.h>
 #include "fff.h"
@@ -170,28 +173,6 @@ func (f *finder) SearchFiles(query string, limit int) ([]FileMatch, error) {
 		})
 	}
 	return matches, nil
-}
-
-func (f *finder) ScanProgress() (ScanProgress, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.closed {
-		return ScanProgress{}, ErrClosed
-	}
-	handle, _, err := consumeResult(C.fff_get_scan_progress(f.handle), "scan progress")
-	if err != nil {
-		return ScanProgress{}, err
-	}
-	progress := (*C.FffScanProgress)(handle)
-	if progress == nil {
-		return ScanProgress{}, fmt.Errorf("fff: scan progress returned no payload")
-	}
-	defer C.fff_free_scan_progress(progress)
-	return ScanProgress{
-		ScannedFiles: uint64(progress.scanned_files_count),
-		Scanning:     bool(progress.is_scanning),
-		WatcherReady: bool(progress.is_watcher_ready),
-	}, nil
 }
 
 func (f *finder) Close() error {

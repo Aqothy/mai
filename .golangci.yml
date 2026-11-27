@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      # The defaults, and ST1005 off: error strings here start with a product
+      # name ("Codex thread …", "Claude Code session …") or are sentences
+      # shown to the user as they are.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1005", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+  exclusions:
+    # Deferred Close, os.Remove of a temporary and printing to stdout: errors
+    # nothing can act on.
+    presets:
+      - std-error-handling

@@ -1,4 +1,4 @@
-// Command fff-smoke proves the vendored FFF dylib loads and serves a real
+// Command fff-smoke proves the pinned FFF dylib loads and serves a real
 // search through internal/workspacesearch/fff. `make fff-verify` stages this
 // binary next to the dylib in an empty directory to verify relocatable
 // (@loader_path) loading outside the repository.
@@ -56,13 +56,6 @@ func run() error {
 	}
 	if len(matches) == 0 || matches[0].RelativePath != "src/smoke_target.go" {
 		return fmt.Errorf("expected src/smoke_target.go, got %v", matches)
-	}
-	progress, err := finder.ScanProgress()
-	if err != nil {
-		return fmt.Errorf("scan progress: %w", err)
-	}
-	if progress.ScannedFiles == 0 {
-		return fmt.Errorf("expected non-zero scanned file count")
 	}
 	return finder.Close()
 }

@@ -1,11 +1,12 @@
 #!/bin/sh
-# Stages the fff-smoke binary and the vendored dylib into an otherwise empty
-# directory, strips the repository rpath, and proves the pinned FFF library
-# loads relocatably via @loader_path with ad-hoc signatures.
+# usage: verify_staged.sh <FFF lib dir>
+# Stages the fff-smoke binary and the FFF dylib (make fff) into an otherwise
+# empty directory, strips the repository rpath, and proves the pinned FFF
+# library loads relocatably via @loader_path with ad-hoc signatures.
 set -eu
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-libdir="$repo/third_party/fff/lib/darwin-arm64"
+libdir="$(cd "$1" && pwd)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 

@@ -4,8 +4,10 @@ import WebKit
 
 struct ACPRegistryRow: View {
     let entry: ACPRegistryEntry
-    let isInstalling: Bool
+    let isBusy: Bool
     let install: () -> Void
+    let edit: () -> Void
+    let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -29,17 +31,61 @@ struct ACPRegistryRow: View {
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
+                if let blockerMessage = entry.blockerMessage {
+                    Text(blockerMessage)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if entry.state == .failed, let errorMessage = entry.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                        .foregroundStyle(.red)
+                }
+                ACPRegistryRowLinks(entry: entry)
             }
 
             Spacer(minLength: 0)
 
             ACPRegistryRowAction(
                 entry: entry,
-                isInstalling: isInstalling,
-                install: install
+                isBusy: isBusy,
+                install: install,
+                edit: edit,
+                remove: remove
             )
         }
         .contentShape(.rect)
+    }
+}
+
+private struct ACPRegistryRowLinks: View {
+    let entry: ACPRegistryEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let url = entry.repositoryURL {
+                link("Repository", systemImage: "chevron.left.forwardslash.chevron.right", url)
+            }
+            if let url = entry.websiteURL {
+                link("Website", systemImage: "globe", url)
+            }
+            if let url = entry.licenseURL {
+                link("License", systemImage: "doc.text", url)
+            }
+        }
+        .font(.caption)
+        .buttonStyle(.borderless)
+    }
+
+    private func link(_ title: LocalizedStringKey, systemImage: String, _ url: URL) -> some View {
+        Link(destination: url) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .help(title)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -49,9 +95,10 @@ private struct ACPRegistryIcon: View {
     var body: some View {
         Group {
             if let iconURL {
-                ACPRegistryIconContent(iconURL: iconURL)
+                ACPRegistrySVGIcon(iconURL: iconURL)
             } else {
-                fallbackGlyph
+                Image(systemName: "puzzlepiece.extension")
+                    .imageScale(.large)
             }
         }
         .frame(width: 28, height: 28)
@@ -60,45 +107,68 @@ private struct ACPRegistryIcon: View {
     }
 }
 
-private var fallbackGlyph: some View {
-    Image(systemName: "puzzlepiece.extension")
-        .imageScale(.large)
-}
+#if os(macOS)
+    private struct ACPRegistrySVGIcon: NSViewRepresentable {
+        let iconURL: URL
 
-private struct ACPRegistryIconContent: View {
-    let iconURL: URL
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
 
-    var body: some View {
-        ACPRegistrySVGIcon(iconURL: iconURL)
+        func makeNSView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            // AppKit WKWebView has no isOpaque/backgroundColor surface;
+            // this documented key is the supported transparency switch.
+            webView.setValue(false, forKey: "drawsBackground")
+            return webView
+        }
+
+        func updateNSView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
     }
-}
+#else
+    private struct ACPRegistrySVGIcon: UIViewRepresentable {
+        let iconURL: URL
 
-private struct ACPRegistrySVGIcon: UIViewRepresentable {
-    let iconURL: URL
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+        func makeUIView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            webView.isOpaque = false
+            webView.backgroundColor = .clear
+            webView.scrollView.backgroundColor = .clear
+            webView.scrollView.isScrollEnabled = false
+            webView.isUserInteractionEnabled = false
+            return webView
+        }
+
+        func updateUIView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
     }
+#endif
 
-    func makeUIView(context: Context) -> WKWebView {
+extension ACPRegistrySVGIcon {
+    fileprivate static func configuration() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.isUserInteractionEnabled = false
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.load(iconURL, in: webView)
+        return configuration
     }
 
     @MainActor
     final class Coordinator {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private var currentURL: URL?
         private var loadTask: Task<Void, Never>?
 
@@ -137,27 +207,72 @@ private struct ACPRegistrySVGIcon: UIViewRepresentable {
 
 struct ACPRegistryRowAction: View {
     let entry: ACPRegistryEntry
-    let isInstalling: Bool
+    let isBusy: Bool
     let install: () -> Void
+    let edit: () -> Void
+    let remove: () -> Void
 
     var body: some View {
-        if isInstalling {
+        HStack(spacing: 8) {
+            status
+            if entry.isInstalled {
+                manageMenu
+            }
+        }
+    }
+
+    private var manageMenu: some View {
+        Menu("Manage \(entry.name)", systemImage: "ellipsis.circle") {
+            if entry.source == .custom {
+                Button("Edit…", systemImage: "pencil", action: edit)
+            }
+            Button("Remove…", systemImage: "trash", role: .destructive, action: remove)
+        }
+        .labelStyle(.iconOnly)
+        .menuIndicator(.hidden)
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .disabled(isBusy)
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if entry.isWorking {
+            ProgressView {
+                Text(entry.state == .updating ? "Updating…" : "Installing…")
+                    .font(.caption)
+            }
+            .controlSize(.small)
+        } else if isBusy {
             ProgressView()
                 .controlSize(.small)
+        } else if entry.state == .failed, entry.availableVersion != nil {
+            actionButton("Retry", prominent: false)
         } else if !entry.isInstalled {
-            Button("Install", action: install)
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .disabled(entry.availableVersion == nil)
+            actionButton("Install", prominent: false)
         } else if entry.hasUpdate {
-            Button("Update", action: install)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
+            actionButton("Update", prominent: true)
         } else {
             Label("Installed", systemImage: "checkmark")
                 .labelStyle(.iconOnly)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Installed")
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ title: LocalizedStringKey, prominent: Bool) -> some View {
+        let isAvailable = entry.availableVersion != nil && entry.blocker == nil
+        if prominent {
+            Button(title, action: install)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(!isAvailable)
+        } else {
+            Button(title, action: install)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .disabled(!isAvailable)
         }
     }
 }

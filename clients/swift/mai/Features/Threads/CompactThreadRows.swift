@@ -4,7 +4,7 @@ import SwiftUI
 /// header carries project context and the row stays quiet: title, plus live
 /// status (or recency when idle) at the trailing edge.
 struct CompactThreadRow: View {
-    let thread: ThreadListEntry
+    let thread: ThreadSummary
     let isUnread: Bool
 
     var body: some View {
@@ -30,35 +30,6 @@ struct CompactThreadRow: View {
             }
         }
         .contentShape(.rect)
-    }
-}
-
-/// The terminal counterpart, marked by a glyph in place of project context.
-struct CompactTerminalRow: View {
-    let summary: TerminalSummary
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text(summary.displayTitle)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 8)
-
-            if let status = summary.rowIndicatorStatus {
-                ThreadRowStatusView(status: status)
-            } else {
-                ThreadRowTimestampText(updatedAt: summary.updatedAt)
-            }
-        }
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Terminal, \(summary.displayTitle)")
     }
 }
 
@@ -88,21 +59,26 @@ struct ThreadRowTimestampText: View {
     }
 }
 
-extension ThreadListEntry {
+extension ThreadSummary {
     /// The same status precedence ThreadRow renders, exposed for row
-    /// variants that live outside that view.
+    /// variants that live outside that view. A chat, or one it started,
+    /// that needs the user comes first.
     var rowIndicatorStatus: ThreadRowIndicatorStatus? {
-        if hasPendingApprovals {
+        if attention.needsInput {
             return .needsInput
         }
-        if latestTurn?.turnState == .running {
+        switch threadStatus {
+        case .running:
             return .working
-        }
-        if latestTurn?.turnState == .error || session?.sessionStatus == .error {
-            return .failed
-        }
-        if latestTurn?.turnState == .interrupted {
+        case .waiting:
+            return .needsInput
+        case .held:
             return .interrupted
+        case .idle, nil:
+            break
+        }
+        if attention.failed {
+            return .failed
         }
         return nil
     }

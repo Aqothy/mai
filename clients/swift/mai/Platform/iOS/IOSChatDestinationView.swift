@@ -1,10 +1,12 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSChatDestinationView: View {
     let route: IOSNavigationRoute
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
+    let openThread: (String) -> Void
+    let openDraft: () -> Void
 
     var body: some View {
         Group {
@@ -13,39 +15,28 @@ struct IOSChatDestinationView: View {
                 ChatView(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
-                    initialWorkingDirectory: workingDirectory
+                    initialWorkingDirectory: workingDirectory,
+                    openThread: openThread,
+                    openDraft: openDraft
                 )
             case .thread(let threadID):
                 if store.selectedThreadID == threadID {
                     ChatView(
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        openThread: openThread,
+                        openDraft: openDraft
                     )
                 } else {
                     ProgressView("Opening Chat…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            case .terminal, .agentRegistry, .sessionImport:
+            case .agentRegistry, .sessionImport:
                 // Containers route these destinations before this view.
                 EmptyView()
             }
         }
-        // Thread-list routes normally publish their selection before
-        // navigation so the bounded initial page is ready on arrival. The
-        // task remains the fallback for restored routes and owns new-draft
-        // selection after the destination appears.
-        .task(id: route) {
-            switch route {
-            case .newChat:
-                store.startNewDraft()
-            case .thread(let threadID):
-                guard store.selectedThreadID != threadID else { return }
-                store.selectThread(threadID)
-            case .terminal, .agentRegistry, .sessionImport:
-                break
-            }
-        }
     }
 }
+
+#endif

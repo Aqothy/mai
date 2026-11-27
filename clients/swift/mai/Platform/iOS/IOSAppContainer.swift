@@ -1,10 +1,9 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
-    let terminalStore: TerminalStore
 
     @State private var path: [IOSNavigationRoute] = []
 
@@ -12,20 +11,12 @@ struct IOSAppContainer: View {
         NavigationStack(path: $path) {
             IOSThreadListView(
                 store: store,
-                terminalStore: terminalStore,
-                projectFolders: projectFolders,
                 newChat: { workingDirectory in
                     path.append(.newChat(workingDirectory: workingDirectory))
-                },
-                newTerminal: { request in
-                    path.append(.terminal(request))
                 },
                 selectThread: { threadID in
                     store.selectThread(threadID)
                     path.append(.thread(threadID))
-                },
-                selectTerminal: { terminalID in
-                    path.append(.terminal(.existing(terminalID: terminalID)))
                 },
                 openAgentRegistry: {
                     path.append(.agentRegistry)
@@ -45,38 +36,43 @@ struct IOSAppContainer: View {
                             path = [.thread(threadID)]
                         }
                     )
-                } else if case .terminal(let request) = route {
-                    TerminalThreadScreen(store: terminalStore, request: request)
                 } else {
                     IOSChatDestinationView(
                         route: route,
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        openThread: { threadID in
+                            store.selectThread(threadID)
+                            path.append(.thread(threadID))
+                        },
+                        openDraft: {
+                            path.append(.newChat(workingDirectory: nil))
+                        }
                     )
                 }
             }
-            .toolbar {
-                if ChatPerformanceLab.isEnabled {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            MockChatView()
-                        } label: {
-                            Label("Mock Chat", systemImage: "ladybug")
-                        }
+        }
+        // NavigationStack's path decides iOS thread selection; call sites that
+        // push a thread select it first only so its first page loads before
+        // the push. Following the path, not a destination's onDisappear, keeps
+        // a delayed pop completion from clearing a freshly re-pushed thread.
+        .onChange(of: path, initial: true) { _, newPath in
+            let target = IOSNavigationRoute.selectedThreadID(in: newPath)
+            if store.selectedThreadID != target {
+                store.selectThread(target)
+            }
+        }
+        #if DEBUG
+            .modifier(
+                ChatRealThreadBenchmarkRunner(
+                    store: store,
+                    selectThread: { threadID in
+                        store.selectThread(threadID)
+                        path = [.thread(threadID)]
                     }
-                }
-            }
-        }
-        .onChange(of: path, initial: true) { _, path in
-            // Detach is navigation-driven: when the visible top of the stack
-            // stops being a terminal, release control; the shell keeps
-            // running on the daemon.
-            if case .terminal = path.last {
-                return
-            }
-            terminalStore.closeActiveTerminal()
-        }
+                )
+            )
+        #endif
     }
 }
 
@@ -84,9 +80,9 @@ struct IOSAppContainer: View {
     #Preview("iOS App") {
         IOSAppContainer(
             store: PreviewData.threadStore(),
-            draftStore: ThreadDraftStore(),
-            projectFolders: ProjectFolderStore(defaults: nil),
-            terminalStore: TerminalStore()
+            draftStore: ThreadDraftStore()
         )
     }
+#endif
+
 #endif

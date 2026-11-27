@@ -33,9 +33,9 @@ type WorkspaceBrowseDirectoriesResult struct {
 }
 
 // WorkspaceSearchFilesParams identifies one workspace and one fuzzy path
-// query. Exactly one of ThreadID (existing thread; the daemon resolves the
-// canonical cwd from orchestration state) or Cwd (local draft; validated
-// like a thread-create cwd) must be set. Query is limited to 256 UTF-8
+// query. Exactly one of ThreadID (existing thread; the daemon searches its
+// cwd) or Cwd (local draft; refused like a thread-create cwd unless a
+// project allows it) must be set. Query is limited to 256 UTF-8
 // bytes and may be empty for default ordering. An omitted Limit defaults to
 // 50 and is clamped to 1...100.
 type WorkspaceSearchFilesParams struct {

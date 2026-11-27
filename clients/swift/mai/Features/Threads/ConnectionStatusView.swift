@@ -5,18 +5,14 @@ struct ConnectionStatusView: View {
 
     var body: some View {
         // Keep one pill mounted throughout retries. Only its contents change
-        // between the countdown, connection attempt, and manual retry states.
+        // between the countdown and the connection attempt.
         if store.connectionState != .connected {
             HStack(spacing: 8) {
-                if store.automaticReconnectsExhausted {
-                    Image(systemName: "wifi.slash")
-                        .foregroundStyle(.secondary)
-                    Text("Disconnected")
+                ProgressView()
+                    .controlSize(.small)
+                ReconnectCountdownView(nextReconnectAt: store.nextReconnectAt)
+                if store.nextReconnectAt != nil {
                     Button("Retry", action: store.retry)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                    ReconnectCountdownView(nextReconnectAt: store.nextReconnectAt)
                 }
             }
             .font(.footnote)

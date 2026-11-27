@@ -5,94 +5,80 @@ import Testing
 
 struct ACPRegistryModelTests {
     @Test
-    func searchMatchesNamesDescriptionsIDsAndCustomAgents() async throws {
+    func sameNamedProvidersRemainDistinguishable() async throws {
         let rpc = ACPRegistryMockRPCClient()
-        rpc.registryAgents = [
-            makeRegistryAgent(
-                id: "codex",
-                name: "Codex",
-                description: "OpenAI coding agent",
-                icon: "https://cdn.example.test/codex.svg"
-            ),
-            makeRegistryAgent(
-                id: "claude-code",
-                name: "Claude Code",
-                description: "Anthropic coding agent"
-            ),
+        rpc.providers = [try newJSONDecoder().decode(InstanceInfo.self, from: Data("""
+            {"auth":{"status":"authenticated"},"capabilities":{"history":"exact","historyVersion":1},"driver":"codex-app-server",
+             "instanceId":"codex-app-server","name":"Codex","status":"initialized",
+             "initializedAt":"2026-09-23T00:00:00Z","startedAt":"2026-09-23T00:00:00Z"}
+            """.utf8))]
+        rpc.agents = [
+            makeInstalledAgent(id: "codex-acp", name: "Codex"),
+            makeCustomAgent(id: "Codex", name: "Codex"),
+            makeCustomAgent(id: "Gemini", name: "Gemini"),
         ]
-        rpc.installedAgents = [makeCustomAgent(id: "Local Agent", name: "Local Agent")]
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        let choices = store.availableProviders
+        #expect(choices.map(\.id) == ["codex-app-server", "custom-Codex", "registry-codex-acp", "custom-Gemini"])
+        #expect(choices.map(\.kind) == ["Built-in", "Custom ACP", "ACP Registry", "Custom ACP"])
+        #expect(choices.map(\.title) == [
+            "Codex (Built-in)", "Codex (Custom ACP)", "Codex (ACP Registry)", "Gemini",
+        ])
+
+        let suite = "SameNamedProviders-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let draft = DraftPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults))
+        draft.selectProvider(id: "registry-codex-acp")
+        #expect(draft.selectedProviderID == "registry-codex-acp")
+        #expect(draft.providerLabel == "Codex (ACP Registry)")
+    }
+
+    /// What the daemon says happens to a row, on any device: the row follows,
+    /// and only an installed agent reaches the provider picker.
+    @Test
+    func rowsFollowTheDaemonsList() async throws {
+        let rpc = ACPRegistryMockRPCClient()
+        rpc.agents = [makeRegistryAgent(id: "goose", name: "Goose", description: "An agent")]
         let store = ThreadStore(rpc: rpc)
         await store.start()
         let model = ACPRegistryModel(store: store)
         await model.load()
+        #expect(model.entries.first?.isInstalled == false)
 
-        #expect(model.entries.map(\.name) == ["Claude Code", "Codex", "Local Agent"])
-        #expect(
-            model.entries.first(where: { $0.id == "codex" })?.iconURL
-                == URL(string: "https://cdn.example.test/codex.svg")
-        )
+        await rpc.send(.preview(id: "goose", name: "Goose", state: .installing, availableVersion: "1.0.0"))
+        model.rebuildEntries()
+        #expect(model.entries.first?.isWorking == true)
+        #expect(store.availableProviders.isEmpty)
 
-        model.searchText = "openai"
-        #expect(model.entries.map(\.id) == ["codex"])
+        await rpc.send(.preview(id: "goose", name: "Goose", state: .failed, availableVersion: "1.0.0", error: "npm failed"))
+        model.rebuildEntries()
+        #expect(model.entries.first?.errorMessage == "npm failed")
+        #expect(model.entries.first?.isInstalled == false)
 
-        model.searchText = "LOCAL AGENT"
-        #expect(model.entries.map(\.id) == ["Local Agent"])
-
-        model.searchText = ""
-        model.filter = .installed
-        #expect(model.entries.map(\.id) == ["Local Agent"])
-
-        model.filter = .notInstalled
-        #expect(model.entries.map(\.id) == ["claude-code", "codex"])
+        let released = Date(timeIntervalSince1970: 1_800_000_000)
+        await rpc.send(.preview(
+            id: "goose", name: "Goose", installedVersion: "1.0.0", availableVersion: "2.0.0", availableReleasedAt: released
+        ))
+        model.rebuildEntries()
+        let updatable = try #require(model.entries.first)
+        #expect(updatable.hasUpdate)
+        #expect(updatable.versionLabel.hasPrefix("1.0.0 · 2.0.0 available, released"))
+        #expect(store.availableProviders.map(\.id) == ["registry-goose"])
     }
 
     @Test
-    func addingCustomAgentUsesNameDerivedIdentityWithoutStartingAProvider() async throws {
-        let rpc = ACPRegistryMockRPCClient()
-        let store = ThreadStore(rpc: rpc)
-        let configuration = try CustomACPAgentConfiguration(
-            name: "My Agent",
-            command: "/usr/local/bin/my-agent",
-            argumentText: "--acp --profile work",
-            environment: [("API_URL", "https://example.test")]
-        )
-
-        let installed = try await store.addCustomACPAgent(configuration)
-
-        #expect(installed.id == "My Agent")
-        #expect(installed.instanceID == "custom-My Agent")
-        #expect(store.acpAgentChoices.map(\.id) == ["custom-My Agent"])
-        #expect(rpc.providers.isEmpty)
-        let input = try #require(rpc.customAgentInput)
-        #expect(input.name == "My Agent")
-        #expect(input.command == "/usr/local/bin/my-agent")
-        #expect(input.args == ["--acp", "--profile", "work"])
-        #expect(input.env == ["API_URL": "https://example.test"])
-    }
-
-    @Test
-    func customAgentOccupyingRegistryIDReplacesCatalogEntry() async throws {
-        let rpc = ACPRegistryMockRPCClient()
-        rpc.registryAgents = [
-            makeRegistryAgent(
-                id: "codex-acp",
-                name: "Codex",
-                description: "Registry description"
-            )
-        ]
-        rpc.installedAgents = [makeCustomAgent(id: "codex-acp", name: "codex-acp")]
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        let model = ACPRegistryModel(store: store)
-        await model.load()
-
-        #expect(model.entries.count == 1)
-        let entry = try #require(model.entries.first)
-        #expect(entry.id == "codex-acp")
-        #expect(entry.name == "codex-acp")
-        #expect(entry.source == .custom)
-        #expect(entry.isInstalled)
-        #expect(!entry.hasUpdate)
+    func linksFromTheIndexAreWebOnly() throws {
+        var agent = ACPRegistryAgent.preview(id: "a", name: "A")
+        agent.repository = "javascript:alert(1)"
+        agent.website = "file:///etc/passwd"
+        agent.licenseURL = "https://example.test/license"
+        let entry = ACPRegistryEntry(agent)
+        #expect(entry.repositoryURL == nil)
+        #expect(entry.websiteURL == nil)
+        #expect(entry.licenseURL == URL(string: "https://example.test/license"))
     }
 
     @Test
@@ -123,68 +109,55 @@ struct ACPRegistryModelTests {
 private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     var onNotification: ((String, Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
-    var registryAgents: [ACPRegistryAgent] = []
-    var installedAgents: [ACPRegistryInstalledAgent] = []
+    var agents: [ACPRegistryAgent] = []
     var providers: [InstanceInfo] = []
-    private(set) var customAgentInput: ACPCustomAgentAddParams?
+    var removedIDs: [String] = []
+    var removalRefusal: RPCError?
+
+    /// Sends the row the way the daemon does: as the whole list, notified.
+    func send(_ agent: ACPRegistryAgent) async {
+        agents = [agent]
+        notifyList()
+    }
+
+    private func notifyList() {
+        let params = ACPRegistryList(agents: agents)
+        struct Frame: Encodable { let params: ACPRegistryList }
+        let encoder = newJSONEncoder()
+        guard let data = try? encoder.encode(Frame(params: params)) else { return }
+        onNotification?(MaidRPCMethod.acpRegistryList, data)
+    }
+
+    func removeInstalledAgent(_ registryID: String) async throws {
+        removedIDs.append(registryID)
+        if let removalRefusal { throw removalRefusal }
+        agents.removeAll { $0.id == registryID }
+        notifyList()
+    }
 
     func connect() {}
     func disconnect() {}
+    func checkConnection() {}
 
-    func subscribeThreadList() async throws -> ThreadListStreamItem {
-        ThreadListStreamItem(
-            kind: "snapshot",
-            sequence: nil,
-            snapshot: ThreadListSnapshot(
-                snapshotSequence: 0,
-                threads: [],
-                updatedAt: .now
-            ),
-            thread: nil
-        )
+    func subscribeThreadList() async throws -> ThreadListItem {
+        ThreadListItem(kind: MaidThreadListKind.snapshot.rawValue, removed: nil, seq: 0, thread: nil, threads: [])
     }
 
-    func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem {
-        throw RPCError(code: nil, message: "Thread subscriptions are unavailable", data: nil)
+    func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {
+        throw RPCError("Thread subscriptions are unavailable")
     }
 
-    func unsubscribeThread(_ input: SubscribeThreadInput) async throws {}
     func listProviders() async throws -> [InstanceInfo] { providers }
-    func listRegistryAgents() async throws -> [ACPRegistryAgent] { registryAgents }
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { installedAgents }
-
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
-        customAgentInput = input
-        let installed = ACPRegistryInstalledAgent(
-            args: input.args,
-            description: nil,
-            icon: nil,
-            id: input.name,
-            installedAt: .now,
-            instanceID: "custom-\(input.name)",
-            name: input.name,
-            package: "",
-            source: "custom",
-            version: ""
-        )
-        installedAgents.append(installed)
-        return installed
-    }
+    func subscribeRegistryList() async throws -> ACPRegistryList { ACPRegistryList(agents: agents) }
+    func refreshRegistry() async throws -> ACPRegistryList { ACPRegistryList(agents: agents) }
 }
 
-private func makeCustomAgent(id: String, name: String) -> ACPRegistryInstalledAgent {
-    ACPRegistryInstalledAgent(
-        args: nil,
-        description: nil,
-        icon: nil,
-        id: id,
-        installedAt: .now,
-        instanceID: "custom-\(id)",
-        name: name,
-        package: "",
-        source: "custom",
-        version: ""
-    )
+private func makeCustomAgent(id: String, name: String) -> ACPRegistryAgent {
+    .preview(id: id, name: name, source: .custom)
+}
+
+private func makeInstalledAgent(id: String, name: String) -> ACPRegistryAgent {
+    .preview(id: id, name: name, installedVersion: "2.0.0")
 }
 
 private func makeRegistryAgent(
@@ -193,14 +166,7 @@ private func makeRegistryAgent(
     description: String,
     icon: String? = nil
 ) -> ACPRegistryAgent {
-    ACPRegistryAgent(
-        args: nil,
-        description: description,
-        icon: icon,
-        id: id,
-        instanceID: "registry-\(id)",
-        name: name,
-        package: "\(id)-acp@1.0.0",
-        version: "1.0.0"
+    .preview(
+        id: id, name: name, state: .notInstalled, description: description, icon: icon, availableVersion: "1.0.0"
     )
 }

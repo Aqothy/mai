@@ -106,7 +106,7 @@ struct SearchableSelectionSheet: View {
             .listStyle(.plain)
             .searchable(text: $model.searchText, prompt: "Search")
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", systemImage: "xmark") {
@@ -118,5 +118,8 @@ struct SearchableSelectionSheet: View {
         }
         .tint(.accentColor)
         .foregroundStyle(.primary)
+        #if os(macOS)
+            .frame(minWidth: 440, minHeight: 360)
+        #endif
     }
 }

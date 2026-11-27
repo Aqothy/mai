@@ -1,6 +1,6 @@
 //go:build darwin && arm64 && cgo
 
-// Warm native path-query benchmarks against the plan's budget:
+// Warm native path-query benchmarks against the budget:
 // p95 under 20ms on a 100,000-path workspace.
 //
 //	go test ./internal/workspacesearch/fff -bench . -benchtime 1000x
@@ -56,8 +56,4 @@ func BenchmarkWarmSearch100k(b *testing.B) {
 	b.Run("scoped", func(b *testing.B) { benchmarkWarmSearch(b, files, "pkg042/mod05") })
 	b.Run("nomatch", func(b *testing.B) { benchmarkWarmSearch(b, files, "zzzzqqqqxxxx") })
 	b.Run("empty", func(b *testing.B) { benchmarkWarmSearch(b, files, "") })
-}
-
-func BenchmarkWarmSearchSmall(b *testing.B) {
-	benchmarkWarmSearch(b, 2_000, "file0004go")
 }

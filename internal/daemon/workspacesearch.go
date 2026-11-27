@@ -10,34 +10,34 @@ import (
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
 
-// searchWorkspaceFiles serves the composer `@file` picker. All validation
-// happens before the workspace-search service is touched, so an invalid
-// request can never create an index. Query text is never logged.
+// searchWorkspaceFiles serves the composer `@file` picker. The root is
+// canonical and allowed before the search service may create an index for
+// it: a chat's cwd, or a draft's folder the engine allows. Query text is
+// never logged.
 func (s *Server) searchWorkspaceFiles(ctx context.Context, params wire.WorkspaceSearchFilesParams) (wire.WorkspaceSearchFilesResult, error) {
-	if s.workspaceSearch == nil {
-		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("workspace search is unavailable")
-	}
 	hasThread := params.ThreadID != ""
 	hasCwd := params.Cwd != ""
 	if hasThread == hasCwd {
 		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: workspace.searchFiles requires exactly one of threadId or cwd", jsonrpc2.ErrInvalidParams)
 	}
-	if len(params.Query) > workspacesearch.MaxQueryBytes {
-		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: query exceeds %d bytes", jsonrpc2.ErrInvalidParams, workspacesearch.MaxQueryBytes)
-	}
 
-	root := params.Cwd
+	var root string
 	if hasThread {
-		cwd, ok := s.orchestration.ThreadCwd(params.ThreadID)
-		if !ok {
-			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: unknown thread %q", jsonrpc2.ErrInvalidParams, params.ThreadID)
+		workspace, err := s.engine.Workspace(ctx, params.ThreadID)
+		if err != nil {
+			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
-		root = cwd
+		root = workspace.Cwd
+	} else {
+		var err error
+		if root, err = s.engine.WorkspaceRoot(ctx, params.Cwd); err != nil {
+			return wire.WorkspaceSearchFilesResult{}, err
+		}
 	}
 
 	result, err := s.workspaceSearch.Search(ctx, root, params.Query, params.Limit)
 	if err != nil {
-		if errors.Is(err, workspacesearch.ErrInvalidRoot) || errors.Is(err, workspacesearch.ErrQueryTooLong) {
+		if errors.Is(err, workspacesearch.ErrQueryTooLong) {
 			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
 		return wire.WorkspaceSearchFilesResult{}, err

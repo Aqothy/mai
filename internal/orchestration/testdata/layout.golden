@@ -1,0 +1,411 @@
+maid.db layout 1
+
+# Tables and indexes
+
+CREATE TABLE deliveries (
+	delivery_id TEXT PRIMARY KEY,
+	thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+	to_participant TEXT NOT NULL,
+	from_actor TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	mode TEXT NOT NULL,
+	body TEXT,
+	state TEXT NOT NULL,
+	turn_id TEXT NOT NULL DEFAULT '',
+	hops INTEGER NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
+	wants_reply INTEGER NOT NULL DEFAULT 0,
+	answers TEXT NOT NULL DEFAULT '',
+	answer TEXT,
+	position REAL NOT NULL,
+	sent_at TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX deliveries_answers ON deliveries(answers) WHERE answers <> '';
+CREATE INDEX deliveries_thread ON deliveries(thread_id, state);
+CREATE TABLE native_mirror (
+	instance_id TEXT NOT NULL,
+	native_session TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	frames BLOB NOT NULL,
+	PRIMARY KEY (instance_id, native_session, seq),
+	FOREIGN KEY (instance_id, native_session) REFERENCES sessions(instance_id, native_session) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE participants (
+	participant_id TEXT PRIMARY KEY,
+	thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+	instance_id TEXT NOT NULL,
+	settings TEXT,
+	native_session TEXT NOT NULL DEFAULT '',
+	seen_through TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE UNIQUE INDEX participants_native ON participants(instance_id, native_session) WHERE native_session <> '';
+CREATE TABLE projects (
+	path TEXT PRIMARY KEY,
+	added_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE receipts (
+	actor TEXT NOT NULL,
+	key TEXT NOT NULL,
+	result TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (actor, key)
+) STRICT;
+CREATE TABLE session_entries (
+	instance_id TEXT NOT NULL,
+	native_session TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	ref TEXT NOT NULL,
+	turn_ref TEXT NOT NULL,
+	entry TEXT NOT NULL,
+	authored TEXT NOT NULL,
+	PRIMARY KEY (instance_id, native_session, seq),
+	FOREIGN KEY (instance_id, native_session) REFERENCES sessions(instance_id, native_session) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX session_entries_in_progress ON session_entries(instance_id, native_session, seq) WHERE json_extract(entry, '$.status') = 'in_progress';
+CREATE UNIQUE INDEX session_entries_ref ON session_entries(instance_id, native_session, ref);
+CREATE INDEX session_entries_turn ON session_entries(instance_id, native_session, turn_ref, seq);
+CREATE TABLE sessions (
+	instance_id TEXT NOT NULL,
+	native_session TEXT NOT NULL,
+	participant_id TEXT REFERENCES participants(participant_id) ON DELETE CASCADE,
+	marker TEXT NOT NULL DEFAULT '',
+	version INTEGER NOT NULL DEFAULT 0,
+	touched_at TEXT NOT NULL,
+	PRIMARY KEY (instance_id, native_session)
+) STRICT;
+CREATE INDEX sessions_participant ON sessions(participant_id);
+CREATE INDEX sessions_unowned ON sessions(instance_id) WHERE participant_id IS NULL;
+CREATE TABLE threads (
+	thread_id TEXT PRIMARY KEY,
+	title TEXT NOT NULL,
+	workspace TEXT NOT NULL,
+	origin_kind TEXT NOT NULL,
+	parent_id TEXT REFERENCES threads(thread_id) ON DELETE CASCADE,
+	origin_by TEXT NOT NULL DEFAULT '',
+	origin_at TEXT NOT NULL DEFAULT '',
+	contract TEXT,
+	accepts_input INTEGER NOT NULL DEFAULT 0,
+	forked_from_thread TEXT REFERENCES threads(thread_id) ON DELETE SET NULL,
+	forked_from_turn TEXT NOT NULL DEFAULT '',
+	address TEXT NOT NULL DEFAULT '',
+	hold TEXT NOT NULL DEFAULT '',
+	policy TEXT,
+	seen_at TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+) STRICT;
+CREATE INDEX threads_parent ON threads(parent_id);
+CREATE TABLE turns (
+	turn_id TEXT PRIMARY KEY,
+	thread_id TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+	participant_id TEXT NOT NULL,
+	native_session TEXT NOT NULL,
+	native_ref TEXT NOT NULL,
+	started_by TEXT NOT NULL,
+	by_agent INTEGER NOT NULL DEFAULT 0,
+	hops INTEGER NOT NULL,
+	state TEXT NOT NULL,
+	stop_reason TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	report TEXT,
+	started_at TEXT NOT NULL,
+	settled_at TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE UNIQUE INDEX turns_native ON turns(thread_id, native_session, native_ref);
+CREATE INDEX turns_order ON turns(thread_id, started_at, turn_id);
+
+# JSON in columns: every field the stored type encodes
+
+threads.workspace (provider.Workspace)
+{
+  "cwd": "text",
+  "additionalDirectories": [
+    "text"
+  ]
+}
+
+threads.contract (orchestration.Contract)
+{
+  "brief": "text",
+  "resultSchema": {
+    "any": "json"
+  },
+  "wake": "text",
+  "access": "text"
+}
+
+threads.policy (orchestration.TreePolicy)
+{
+  "maxDepth": 1,
+  "maxRunning": 1,
+  "hopLimit": 1
+}
+
+participants.settings ([]provider.ConfigOptionSelection)
+[
+  {
+    "optionId": "text",
+    "value": "any",
+    "category": "text"
+  }
+]
+
+deliveries.from_actor (orchestration.Actor)
+{
+  "kind": "text",
+  "device": "text",
+  "thread": "text",
+  "participant": "text"
+}
+
+deliveries.body (orchestration.MessageBody)
+{
+  "text": "text",
+  "attachments": [
+    {
+      "id": "text",
+      "kind": "text",
+      "name": "text",
+      "title": "text",
+      "description": "text",
+      "mimeType": "text",
+      "data": "text",
+      "uri": "text",
+      "size": 1,
+      "annotations": {
+        "audience": [
+          "text"
+        ],
+        "priority": 1.5,
+        "lastModified": "text",
+        "_meta": {
+          "text": "any"
+        }
+      },
+      "_meta": {
+        "text": "any"
+      },
+      "resourceMeta": {
+        "text": "any"
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "id": "text",
+      "messageId": "text",
+      "role": "text",
+      "quote": "text",
+      "note": "text"
+    }
+  ]
+}
+
+deliveries.answer (orchestration.Answer)
+{
+  "text": "text",
+  "report": {
+    "any": "json"
+  },
+  "state": "text",
+  "reported": true
+}
+
+receipts.result (orchestration.CommandResult)
+{
+  "thread": "text",
+  "participant": "text",
+  "delivery": "text"
+}
+
+session_entries.entry (provider.Entry)
+{
+  "ref": "text",
+  "turn": "text",
+  "kind": "text",
+  "status": "text",
+  "title": "text",
+  "text": "text",
+  "attachments": [
+    {
+      "id": "text",
+      "kind": "text",
+      "name": "text",
+      "title": "text",
+      "description": "text",
+      "mimeType": "text",
+      "data": "text",
+      "uri": "text",
+      "size": 1,
+      "annotations": {
+        "audience": [
+          "text"
+        ],
+        "priority": 1.5,
+        "lastModified": "text",
+        "_meta": {
+          "text": "any"
+        }
+      },
+      "_meta": {
+        "text": "any"
+      },
+      "resourceMeta": {
+        "text": "any"
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "id": "text",
+      "messageId": "text",
+      "role": "text",
+      "quote": "text",
+      "note": "text"
+    }
+  ],
+  "tool": {
+    "action": "text",
+    "name": "text",
+    "namespace": "text",
+    "providerKind": "text",
+    "command": "text",
+    "query": "text",
+    "cwd": "text",
+    "output": "text",
+    "outputFormat": "text",
+    "error": "text",
+    "locations": [
+      {
+        "path": "text",
+        "line": 1
+      }
+    ],
+    "changes": [
+      {
+        "path": "text",
+        "kind": "text",
+        "diff": "text",
+        "oldText": "text",
+        "newText": "text",
+        "movePath": "text"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "text",
+        "kind": "text",
+        "name": "text",
+        "title": "text",
+        "description": "text",
+        "mimeType": "text",
+        "data": "text",
+        "uri": "text",
+        "size": 1,
+        "annotations": {
+          "audience": [
+            "text"
+          ],
+          "priority": 1.5,
+          "lastModified": "text",
+          "_meta": {
+            "text": "any"
+          }
+        },
+        "_meta": {
+          "text": "any"
+        },
+        "resourceMeta": {
+          "text": "any"
+        }
+      }
+    ],
+    "exitCode": 1,
+    "durationMilliseconds": 1,
+    "background": true
+  },
+  "envelope": {
+    "kind": "text",
+    "delivery": "text",
+    "from": "text",
+    "thread": "text",
+    "covers": "text",
+    "answers": "text",
+    "body": "text"
+  },
+  "request": {
+    "request": "text",
+    "ask": {
+      "message": "text",
+      "url": "text",
+      "questions": [
+        {
+          "id": "text",
+          "kind": "text",
+          "title": "text",
+          "description": "text",
+          "required": true,
+          "multiSelect": true,
+          "allowsFreeText": true,
+          "options": [
+            {
+              "value": "text",
+              "label": "text",
+              "description": "text"
+            }
+          ],
+          "default": [
+            "text"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "text",
+          "label": "text",
+          "decision": "text",
+          "submit": true
+        }
+      ],
+      "details": {
+        "any": "json"
+      }
+    },
+    "action": "text",
+    "answers": {
+      "text": [
+        "text"
+      ]
+    }
+  },
+  "delivery": "text",
+  "local": true,
+  "at": "2026-01-02T03:04:05.000000006Z"
+}
+
+# Values stored as text, in columns and in the JSON above
+
+AccessLevel: read_only ask edit full
+ActorKind: device agent daemon
+ApprovalDecision: accept acceptForSession decline cancel
+AttachmentKind: image audio resource resource_link
+ConfigOptionCategory: model mode model_config thought_level other
+DeliveryKind: prompt message reply notice
+DeliveryMode: queue steer
+DeliveryState: queued sending delivered refused cancelled
+EnvelopeKind: handoff message reply notice instructions
+FileChangeKind: add update delete move
+Hold: stoppedPerson stoppedAgent failed hops
+ItemKind: user_message assistant_message reasoning command_execution file_change mcp_tool_call tool_call warning error web_search image_view image_generation context_compaction envelope request
+ItemStatus: in_progress completed failed interrupted declined
+OriginKind: user spawn native
+OutputFormat: markdown
+QuestionKind: text number integer choice
+StartedBy: delivery provider found
+StopReason: max_tokens max_turn_requests refusal
+ToolAction: read search
+TurnState: running completed failed interrupted
+WakeMode: settled needsInput
+
+Not closed sets (IDs, or a type api/wire lists no values for): DeliveryID DeviceID InstanceID ParticipantID ThreadID TurnID

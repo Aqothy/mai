@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ThreadRow: View {
-    let thread: ThreadListEntry
+    let thread: ThreadSummary
     let isUnread: Bool
     var providerName: String?
 
@@ -40,6 +40,13 @@ struct ThreadRow: View {
                     Text(providerName)
                 }
 
+                if thread.children > 0 {
+                    Text("·")
+                    Label("\(thread.children)", systemImage: "arrow.triangle.branch")
+                        .labelStyle(.titleAndIcon)
+                        .accessibilityLabel("^[\(thread.children) chat](inflect: true) it started")
+                }
+
                 Spacer(minLength: 8)
 
                 ThreadRowStatusView(
@@ -54,8 +61,8 @@ struct ThreadRow: View {
     }
 
     private var workingDirectoryName: String? {
-        guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
-        return URL(filePath: cwd).lastPathComponent
+        let cwd = thread.workspace.cwd
+        return cwd.isEmpty ? nil : URL(filePath: cwd).lastPathComponent
     }
 }
 
