@@ -24,15 +24,21 @@ nonisolated struct ShapedLineInfo: Sendable {
 ///
 /// Holds width-independent `PreparedText` + fitted `[TextLine]` (~64 B/line).
 /// Core Text shapes and draws strictly the visible lines; carets and run ranges
-/// are computed on demand and held in a tiny bounded cache (max 64 lines).
+/// are computed on demand and held in a small bounded cache.
 nonisolated struct TextLayout: Sendable {
+    /// Shaping a line for its carets costs 0.1 ms for prose and 224 ms for a
+    /// 100,000-character code line, and a selection drag asks again on every
+    /// move: the lines asked for last are kept, up to 64 and to a million
+    /// carets (8 MB; a longer line is kept alone).
     private final class ShapedLineCache: Sendable {
         struct State {
             var entries: [Int: ShapedLineInfo] = [:]
             var order: [Int] = []
+            var caretCount = 0
         }
 
         static let maxCachedLines = 64
+        static let maxCachedCarets = 1 << 20
         let state = Mutex<State>(State())
 
         func info(for lineIndex: Int) -> ShapedLineInfo? {
@@ -41,13 +47,17 @@ nonisolated struct TextLayout: Sendable {
 
         func insert(_ info: ShapedLineInfo, for lineIndex: Int) {
             state.withLock { state in
-                if state.entries[lineIndex] == nil {
+                if let replaced = state.entries.updateValue(info, forKey: lineIndex) {
+                    state.caretCount -= replaced.caretOffsets.count
+                } else {
                     state.order.append(lineIndex)
                 }
-                state.entries[lineIndex] = info
-                while state.order.count > Self.maxCachedLines {
+                state.caretCount += info.caretOffsets.count
+                while state.order.count > Self.maxCachedLines
+                    || (state.caretCount > Self.maxCachedCarets && state.order.count > 1)
+                {
                     let oldest = state.order.removeFirst()
-                    state.entries.removeValue(forKey: oldest)
+                    state.caretCount -= state.entries.removeValue(forKey: oldest)?.caretOffsets.count ?? 0
                 }
             }
         }
