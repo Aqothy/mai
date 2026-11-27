@@ -367,6 +367,68 @@
             return ThreadFixtures.detail(summary: summary, turns: turns)
         }
 
+        static let extremeStreaming10MBID = "synthetic-benchmark-10mb-stream"
+
+        /// ~10 MB rich + extreme chat used as the starting state for continuous
+        /// live streaming in `-ChatDevExtremeThreads YES`.
+        static func extremeStreaming10MBThread(identity: String = extremeStreaming10MBID) -> ThreadDetail {
+            let base = Date(timeIntervalSince1970: 1_800_000_000)
+            let summary = ThreadFixtures.summary(
+                id: identity, title: "Extreme 10 MB live-streaming", cwd: "/Users/example/Project",
+                agent: ("synthetic", "Synthetic"), createdAt: base, updatedAt: base)
+            let paraUnit = "streaming layout analysis across large documents "
+            let para1MB = String(repeating: paraUnit, count: 1_048_576 / paraUnit.utf8.count)
+            let code25k =
+                "```swift\n"
+                + (0..<25_000).map { "let item\($0) = process(index: \($0), tag: \"stream\") // ok" }
+                    .joined(separator: "\n")
+                + "\n```"
+            let logLine = "[2026-11-26 13:00:00] INFO worker=4 batch=42 latency_ms=1.2 status=ok\n"
+            let user500KB = String(repeating: logLine, count: 500_000 / logLine.utf8.count)
+            let fixtures = [
+                ChatMarkdownFixtures.longMarkdown, ChatMarkdownFixtures.codeHeavy, ChatMarkdownFixtures.richBlocks,
+                ChatMarkdownFixtures.essay(wordCount: 2_000), ChatMarkdownFixtures.componentCatalog,
+            ]
+            var turns: [TurnView] = []
+            turns.reserveCapacity(42)
+            for turn in 0..<42 {
+                let turnID = "\(identity)-turn-\(turn)"
+                let startedAt = base.addingTimeInterval(Double(turn) * 120)
+                let prompt: String
+                let thought: String
+                let answer: String
+                if turn == 40 {
+                    prompt = "Paste 500 KB logs:\n\n" + user500KB
+                    thought = "Analyzing 500 KB logs before writing 1 MB summary."
+                    answer = para1MB
+                } else if turn == 41 {
+                    prompt = "Dump 25,000-line code file"
+                    thought = "Generating full module snapshot."
+                    answer = code25k
+                } else {
+                    prompt = turn.isMultiple(of: 10) ? user500KB : userPrompt(turn: turn)
+                    thought = unique(ChatMarkdownFixtures.essay(wordCount: 250), tag: "\(identity)-t-\(turn)")
+                    var built = ""
+                    var idx = turn
+                    while built.utf8.count < 140_000 {
+                        built += fixtures[idx % fixtures.count] + "\n\n"
+                        idx += 1
+                    }
+                    answer = unique(built, tag: "\(identity)-\(turn)")
+                }
+                let entries = [
+                    ThreadFixtures.entry(ref: "\(turnID)-user", kind: .userMessage, text: prompt),
+                    ThreadFixtures.entry(ref: "\(turnID)-thought", kind: .reasoning, text: thought),
+                    ThreadFixtures.entry(ref: "\(turnID)-assistant", kind: .assistantMessage, text: answer),
+                ]
+                turns.append(
+                    ThreadFixtures.turn(
+                        id: turnID, participant: summary.participants[0].id, startedAt: startedAt,
+                        settledAt: startedAt.addingTimeInterval(30), entries: entries))
+            }
+            return ThreadFixtures.detail(summary: summary, turns: turns)
+        }
+
         /// Lazy sidebar catalog for `-ChatDevExtremeThreads YES` (zero up-front
         /// payload allocation until the developer taps a thread in the sidebar).
         static func devExtremeThreads() -> [(summary: ThreadSummary, build: () -> ThreadDetail)] {
@@ -382,6 +444,10 @@
                 (
                     summary(id: "synthetic-benchmark-blanking", title: "Blanking stress repro", offset: 1_100),
                     { blankingStressThread() }
+                ),
+                (
+                    summary(id: extremeStreaming10MBID, title: "Extreme 10 MB live-streaming", offset: 1_050),
+                    { extremeStreaming10MBThread() }
                 ),
                 (
                     summary(id: "synthetic-benchmark-20mb", title: "Extreme 20 MB mega-chat", offset: 1_000),

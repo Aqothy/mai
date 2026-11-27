@@ -112,6 +112,8 @@ final class ThreadStore {
     private var maintenanceTask: Task<Void, Never>?
     #if DEBUG
         @ObservationIgnored private var syntheticThreadProviders: [String: () -> ThreadDetail] = [:]
+        @ObservationIgnored private var syntheticStreamTask: Task<Void, Never>?
+        @ObservationIgnored private var syntheticStreamTurnCounter: [String: Int] = [:]
     #endif
 
     convenience init() {
@@ -876,6 +878,9 @@ final class ThreadStore {
                     sessionsByID[id] = session
                     noteSelectedSessionChanged(id)
                     performSubscriptionMaintenance(at: timestamp)
+                    if id == ChatSyntheticBenchmarkThread.extremeStreaming10MBID, syntheticStreamTask == nil {
+                        startSyntheticExtremeStreaming(threadID: id)
+                    }
                     return
                 }
                 if id.hasPrefix("synthetic-benchmark-"), var session = sessionsByID[id] {
@@ -1376,10 +1381,25 @@ final class ThreadStore {
         }
 
         func applySyntheticBenchmarkEvent(_ event: ThreadEvent) {
-            guard let selectedThreadID, selectedThreadID.hasPrefix("synthetic-benchmark-"),
-                event.thread == selectedThreadID
-            else { return }
+            guard event.thread.hasPrefix("synthetic-benchmark-"), sessionsByID[event.thread] != nil else { return }
             applyThreadEvent(event)
+        }
+
+        private func startSyntheticExtremeStreaming(threadID: String) {
+            syntheticStreamTask = Task { @MainActor [weak self] in
+                while let self, !Task.isCancelled, sessionsByID[threadID]?.detail != nil {
+                    let turnIndex = syntheticStreamTurnCounter[threadID, default: 0]
+                    syntheticStreamTurnCounter[threadID] = turnIndex + 1
+                    let benchmark = ChatSyntheticStreamingBenchmark(
+                        store: self, threadID: threadID, includesActivity: true,
+                        charactersPerSecond: 1_200, characterCount: 60_000,
+                        turnID: "synthetic-live-stream-\(turnIndex)")
+                    benchmark.prepare()
+                    await benchmark.run()
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                self?.syntheticStreamTask = nil
+            }
         }
     #endif
 
