@@ -499,22 +499,47 @@
         /// `tag`, so no block repeats across turns or chats, as in real chats
         /// (the rotating fixtures otherwise repeat six answers, which flatters
         /// anything keyed by content).
+        ///
+        /// Works on UTF-8 bytes, trimming spaces and tabs (the fixtures have
+        /// no other blanks and no `\r`): by `Character` it took 0.65 s of the
+        /// main thread to open the 20 MB dev chat on an iPhone 14.
         private static func unique(_ answer: String, tag: String) -> String {
-            answer.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let text = Array(answer.utf8)
+            let lineTag = Array(" \(tag)".utf8)
+            let cellTag = Array("| \(tag)".utf8)
+            func isBlank(_ byte: UInt8) -> Bool { byte == UInt8(ascii: " ") || byte == UInt8(ascii: "\t") }
+            var out: [UInt8] = []
+            out.reserveCapacity(text.count * 3 / 2)
+            var start = 0
+            while true {
+                let end = text[start...].firstIndex(of: UInt8(ascii: "\n")) ?? text.count
+                let line = text[start..<end]
+                let first = line.firstIndex { !isBlank($0) } ?? end
+                let trimmed = text[first..<(line.lastIndex { !isBlank($0) }.map { $0 + 1 } ?? first)]
+                func consists(of allowed: String) -> Bool { trimmed.allSatisfy { allowed.utf8.contains($0) } }
                 // Fences, rules and setext underlines keep their meaning.
-                if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
-                    || trimmed.allSatisfy({ "-*_= ".contains($0) })
+                if trimmed.isEmpty || trimmed.starts(with: "```".utf8) || trimmed.starts(with: "~~~".utf8)
+                    || consists(of: "-*_= ")
                 {
-                    return String(line)
-                }
-                if trimmed.hasPrefix("|") {
+                    out += line
+                } else if trimmed.first == UInt8(ascii: "|") {
                     // A table's delimiter row stays; a cell row tags its first cell.
-                    if trimmed.allSatisfy({ "|:- ".contains($0) }) { return String(line) }
-                    return String(line.replacing("|", with: "| \(tag)", maxReplacements: 1))
+                    if consists(of: "|:- ") {
+                        out += line
+                    } else {
+                        out += text[start..<first]
+                        out += cellTag
+                        out += text[(first + 1)..<end]
+                    }
+                } else {
+                    out += line
+                    out += lineTag
                 }
-                return line + " \(tag)"
-            }.joined(separator: "\n")
+                guard end < text.count else { break }
+                out.append(UInt8(ascii: "\n"))
+                start = end + 1
+            }
+            return String(decoding: out, as: UTF8.self)
         }
 
         private static func reasoningEntry(turnID: String, turn: Int) -> EntryView {
