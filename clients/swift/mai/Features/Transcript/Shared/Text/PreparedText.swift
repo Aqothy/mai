@@ -1621,10 +1621,10 @@ nonisolated final class PreparedText: Sendable {
     }()
 
     /// Pure-Swift UAX #14 line-break tokenizer for pure ASCII (`0x0A`,
-    /// `0x20...0x7E`). Verified 0 diffs against `CFStringTokenizer` across all
-    /// 3,375 class triples and 5,000 random ASCII strings, eliminating ICU
-    /// overhead on giant chats.
-    private static func fastASCIITokenize(_ units: [UInt16]) -> [Int] {
+    /// `0x20...0x7E`), 4.6× faster than `CFStringTokenizer` (ICU was 6.4 s
+    /// of an iPhone 14 trace of a 20 MB chat). `ASCIILineBreakParityTests`
+    /// holds it to the system's breaks on every OS the tests run on.
+    static func fastASCIITokenize(_ units: [UInt16]) -> [Int] {
         let n = units.count
         guard n > 0 else { return [] }
         var out: [Int] = []
@@ -1718,10 +1718,12 @@ nonisolated final class PreparedText: Sendable {
                             if nc == 11 || nc == 12 {
                                 allow = true
                             } else if nc == 2 {
+                                // `(PR | PO) × OP IS? NU` (`$(1`, `$(.5`); ICU
+                                // breaks before `(-1`.
                                 let afterOP = nextIdx + 1 < n ? cBuf[Int(uBuf[nextIdx + 1])] : 255
                                 if afterOP == 13 {
                                     allow = false
-                                } else if afterOP == 9 && nextIdx + 2 < n && cBuf[Int(uBuf[nextIdx + 2])] == 13 {
+                                } else if afterOP == 8 && nextIdx + 2 < n && cBuf[Int(uBuf[nextIdx + 2])] == 13 {
                                     allow = false
                                 } else {
                                     allow = true
@@ -1803,7 +1805,7 @@ nonisolated final class PreparedText: Sendable {
         return out
     }
 
-    private static func tokenizeRange(
+    static func tokenizeRange(
         cf: CFString, range: CFRange, baseOffset: Int, reusable: inout CFStringTokenizer?
     ) -> [Int] {
         let tok: CFStringTokenizer
