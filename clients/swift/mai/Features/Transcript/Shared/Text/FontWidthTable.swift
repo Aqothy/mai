@@ -65,8 +65,20 @@ nonisolated final class FontWidthTable: @unchecked Sendable {
         var bmpPairKern: [UInt32: Float] = [:]
     }
 
+    /// Where a font's table is built once: the first caller builds it while
+    /// callers for the same font wait. On a first open every layout worker
+    /// asks for the body font at once, and each build takes ~11 ms.
+    private final class Slot: @unchecked Sendable {
+        let font: CTFont
+        let table = Mutex<FontWidthTable?>(nil)
+
+        init(font: CTFont) {
+            self.font = font
+        }
+    }
+
     private static let fontKey = NSAttributedString.Key(kCTFontAttributeName as String)
-    private static let tableCache = Mutex<[CacheKey: [FontWidthTable]]>([:])
+    private static let tableCache = Mutex<[CacheKey: [Slot]]>([:])
 
     let font: CTFont
     let baseMetrics: LineFontMetrics
@@ -103,17 +115,16 @@ nonisolated final class FontWidthTable: @unchecked Sendable {
         let size = CTFontGetSize(font)
         let traits = CTFontGetSymbolicTraits(font).rawValue
         let key = CacheKey(name: name, sizeBits: Double(size).bitPattern, traits: traits)
-        if let existing = tableCache.withLock({ entries -> FontWidthTable? in
-            entries[key]?.first { CFEqual($0.font, font) }
-        }) {
-            return existing
+        let slot = tableCache.withLock { entries in
+            if let slot = entries[key]?.first(where: { CFEqual($0.font, font) }) { return slot }
+            let slot = Slot(font: font)
+            entries[key, default: []].append(slot)
+            return slot
         }
-        let built = FontWidthTable(font: font)
-        return tableCache.withLock { entries in
-            if let existing = entries[key]?.first(where: { CFEqual($0.font, font) }) {
-                return existing
-            }
-            entries[key, default: []].append(built)
+        return slot.table.withLock { table in
+            if let table { return table }
+            let built = FontWidthTable(font: font)
+            table = built
             return built
         }
     }
