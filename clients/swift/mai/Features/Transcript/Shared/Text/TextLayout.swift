@@ -30,11 +30,19 @@ nonisolated struct TextLayout: Sendable {
     /// 100,000-character code line, and a selection drag asks again on every
     /// move: the lines asked for last are kept, up to 64 and to a million
     /// carets (8 MB; a longer line is kept alone).
-    private final class ShapedLineCache: Sendable {
+    final class ShapedLineCache: Sendable {
         struct State {
             var entries: [Int: ShapedLineInfo] = [:]
             var order: [Int] = []
             var caretCount = 0
+
+            mutating func touch(_ lineIndex: Int) {
+                guard order.last != lineIndex else { return }
+                if let idx = order.firstIndex(of: lineIndex) {
+                    order.remove(at: idx)
+                }
+                order.append(lineIndex)
+            }
         }
 
         static let maxCachedLines = 64
@@ -42,16 +50,19 @@ nonisolated struct TextLayout: Sendable {
         let state = Mutex<State>(State())
 
         func info(for lineIndex: Int) -> ShapedLineInfo? {
-            state.withLock { $0.entries[lineIndex] }
+            state.withLock { state in
+                guard let info = state.entries[lineIndex] else { return nil }
+                state.touch(lineIndex)
+                return info
+            }
         }
 
         func insert(_ info: ShapedLineInfo, for lineIndex: Int) {
             state.withLock { state in
                 if let replaced = state.entries.updateValue(info, forKey: lineIndex) {
                     state.caretCount -= replaced.caretOffsets.count
-                } else {
-                    state.order.append(lineIndex)
                 }
+                state.touch(lineIndex)
                 state.caretCount += info.caretOffsets.count
                 while state.order.count > Self.maxCachedLines
                     || (state.caretCount > Self.maxCachedCarets && state.order.count > 1)

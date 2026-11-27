@@ -561,4 +561,29 @@ struct TextLayoutEngineTests {
         let measured = layout.lines.map(\.width).max() ?? 0
         #expect(abs(measured - drawn) < 0.5, "\(script): measured \(measured) pt, Core Text draws \(drawn) pt")
     }
+
+    /// Re-queried lines (such as a selection's anchor during a long drag) stay
+    /// cached under both the 64-line and 1M-caret limits instead of being
+    /// evicted in insertion order.
+    @Test func shapedLineCacheKeepsRecentlyQueriedAnchorAcrossEvictions() {
+        let small = ShapedLineInfo(caretOffsets: [0, 8], runs: [], hasComplexBiDi: false)
+        let lineCache = TextLayout.ShapedLineCache()
+        lineCache.insert(small, for: 0)
+        for index in 1...80 {
+            lineCache.insert(small, for: index)
+            #expect(lineCache.info(for: 0) != nil)
+        }
+        #expect(lineCache.info(for: 0) != nil)
+        #expect(lineCache.info(for: 1) == nil)
+
+        let big = ShapedLineInfo(caretOffsets: Array(repeating: 0, count: 100_001), runs: [], hasComplexBiDi: false)
+        let caretCache = TextLayout.ShapedLineCache()
+        caretCache.insert(big, for: 0)
+        for index in 1...12 {
+            caretCache.insert(big, for: index)
+            #expect(caretCache.info(for: 0) != nil)
+        }
+        #expect(caretCache.info(for: 0) != nil)
+        #expect(caretCache.info(for: 1) == nil)
+    }
 }
