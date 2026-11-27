@@ -624,7 +624,7 @@ final class TranscriptController {
     /// session cache on detach: every way a chat leaves (another chat selected,
     /// a pop, its window closing) takes its view out of the window. Never
     /// overwrites a saved place while still hidden waiting for initial alignment.
-    func persistSavedPlace() {
+    private func persistSavedPlace() {
         guard let store, let threadID else { return }
         if let snapshot = snapshotMeasuredHeights() {
             store.setTranscriptMeasuredHeights(snapshot, for: threadID)
