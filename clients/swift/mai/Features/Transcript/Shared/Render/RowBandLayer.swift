@@ -1,3 +1,4 @@
+import IOSurface
 import QuartzCore
 
 /// One horizontal slice of a row, at most `RowLayer.bandHeight` tall: a tall
@@ -64,7 +65,7 @@ nonisolated final class RowBandLayer: CALayer {
 
     @MainActor
     func show(_ bitmap: BandBitmap?, generation: Int) {
-        contents = bitmap?.surface
+        replaceContents(with: bitmap?.surface)
         shownGeneration = generation
         if pendingGeneration == generation { pendingGeneration = nil }
     }
@@ -72,10 +73,21 @@ nonisolated final class RowBandLayer: CALayer {
     /// Drops the bitmap (memory: far from the viewport, or reused).
     @MainActor
     func release() {
-        contents = nil
+        replaceContents(with: nil)
         shownGeneration = nil
         pendingGeneration = nil
         generation &+= 1
         oldestWanted = generation
+    }
+
+    /// Core Animation lets go of the old surface in the setter, and freeing
+    /// it there took 500 ms of the main thread in an 85 s iPhone 14 trace,
+    /// in bursts during flings: a background task holds the last reference.
+    @MainActor
+    private func replaceContents(with surface: IOSurface?) {
+        let old = (contents as? IOSurface).map(BandBitmap.init(surface:))
+        contents = surface
+        guard let old else { return }
+        Task.detached(priority: .userInitiated) { withExtendedLifetime(old) {} }
     }
 }

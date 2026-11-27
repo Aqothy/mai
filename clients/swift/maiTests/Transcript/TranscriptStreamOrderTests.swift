@@ -1,7 +1,9 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import ObjectiveC
 import QuartzCore
+import Synchronization
 import Testing
 
 #if os(macOS)
@@ -90,6 +92,51 @@ struct TranscriptStreamOrderTests {
         #expect(!band.wants(before))
         band.invalidate()
         #expect(band.wants(band.generation))
+    }
+
+    /// Whether the surface it was attached to was freed on the main thread.
+    private final class FreedThread: Sendable {
+        let onMain = Mutex<Bool?>(nil)
+    }
+
+    /// Attached to a surface, it goes when the surface does.
+    private final class FreedMarker: Sendable {
+        let thread: FreedThread
+
+        init(_ thread: FreedThread) {
+            self.thread = thread
+        }
+
+        deinit {
+            thread.onMain.withLock { $0 = Thread.isMainThread }
+        }
+    }
+
+    private static let freedMarkerKey = malloc(1)!
+
+    /// Replacing or dropping a band's bitmap frees the old one off the main
+    /// thread (iPhone 14: 500 ms of `-[IOSurface dealloc]` on main in 85 s,
+    /// in bursts during flings).
+    @Test(arguments: [false, true]) func aBandFreesItsOldBitmapOffTheMainThread(replacing: Bool) async throws {
+        let raster = BandRaster(
+            content: .empty, palette: TextPalette.resolveForTests, drawsWideBody: true,
+            rect: CGRect(x: 0, y: 0, width: 64, height: 64), scale: 2, colorSpace: RowLayer.colorSpace)
+        let band = RowBandLayer()
+        let freed = FreedThread()
+        do {
+            let bitmap = try #require(BandRasterizer.bitmap(raster))
+            objc_setAssociatedObject(bitmap.surface, Self.freedMarkerKey, FreedMarker(freed), .OBJC_ASSOCIATION_RETAIN)
+            band.show(bitmap, generation: band.generation)
+        }
+        if replacing {
+            band.show(BandRasterizer.bitmap(raster), generation: band.generation)
+        } else {
+            band.release()
+        }
+        for _ in 0..<200 where freed.onMain.withLock({ $0 }) == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(freed.onMain.withLock { $0 } == false)
     }
 
     /// A row that paints nothing (a turn's action buttons) holds no bitmap,
