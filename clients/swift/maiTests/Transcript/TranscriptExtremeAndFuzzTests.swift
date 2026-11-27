@@ -216,7 +216,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
             wideRows.map { RowLayoutBuilder.layout(RowLayoutRequest(rowID: $0.id, kind: $0.kind, key: key, style: style)) }
         }.value
         for layout in codeLayouts { controller.storeLayout(layout) }
-        #expect(controller.cachedLayoutBytes < 1_024_000)
+        #expect(controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes } < 1_024_000)
 
         // 40 × 12 KB prose rows hold compact segment + line geometry (< 3 MB total,
         // ~7× smaller than the old 12+ MB glyph-copying layout cache).
@@ -234,8 +234,7 @@ nonisolated struct TranscriptExtremeAndFuzzTests {
         }.value
         for layout in proseLayouts { proseController.storeLayout(layout) }
         #expect(proseController.layouts.count == 40)
-        #expect(proseController.cachedLayoutBytes < 4 << 20)
-        #expect(proseController.cachedLayoutBytes == proseController.layouts.values.reduce(0) { $0 + $1.content.retainedBytes })
+        #expect(proseController.layouts.values.reduce(0) { $0 + $1.content.retainedBytes } < 4 << 20)
     }
 
     // MARK: 4. Exact Geometry Backfill for 2,000-Block Messages (`REDESIGN.md §4.6, §7 R3`)

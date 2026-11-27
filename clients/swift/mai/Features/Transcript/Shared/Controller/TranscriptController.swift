@@ -83,10 +83,9 @@ final class TranscriptController {
     @ObservationIgnored var style: TextStyle
     @ObservationIgnored var palette: TextPalette?
     @ObservationIgnored var columnWidth: CGFloat = 0
-    /// Layouts of rows in and near the viewport (state: being shown or about
-    /// to be). Others are dropped by row count and total retained bytes.
+    /// Every laid-out row's layout, kept for the whole transcript so geometry
+    /// is exact and scrolling back never lays out again (`REDESIGN.md §8`).
     @ObservationIgnored var layouts: [String: RowLayout] = [:]
-    @ObservationIgnored var cachedLayoutBytes = 0
     /// Measured heights recorded at `(columnWidth, style.version)` during this
     /// controller's lifetime; persisted onto `ThreadSession` on detach.
     @ObservationIgnored var measuredRowHeights: [String: CGFloat] = [:]

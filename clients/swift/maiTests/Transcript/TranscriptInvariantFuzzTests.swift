@@ -314,7 +314,8 @@ nonisolated struct TranscriptInvariantFuzzTests {
         }.value
         for layout in built { controller.storeLayout(layout) }
         #expect(controller.layouts.count == 4)
-        #expect(controller.cachedLayoutBytes < 4 << 20, "4 × 200 KB prose layouts used \(controller.cachedLayoutBytes) B")
+        let bytes = controller.layouts.values.reduce(0) { $0 + $1.content.retainedBytes }
+        #expect(bytes < 4 << 20, "4 × 200 KB prose layouts used \(bytes) B")
     }
 
     // MARK: Pathological Markdown

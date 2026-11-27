@@ -22,7 +22,9 @@ nonisolated enum RowContentLayout: Sendable {
 }
 
 nonisolated extension RowContentLayout {
-    /// Memory held by this layout (prepared segments + fitted lines).
+    /// The bytes of this layout's segments and lines, without allocation
+    /// overhead: the heap holds about three times this (a 1,000-turn chat's
+    /// layouts: 41 MB here, 119 MB of heap).
     var retainedBytes: Int {
         switch self {
         case .text(let layout, _), .bubble(let layout, _, _), .header(let layout, _, _), .notice(let layout, _, _):

@@ -15,16 +15,11 @@ extension TranscriptController {
     }
 
     func storeLayout(_ layout: RowLayout) {
-        if let previous = layouts.updateValue(layout, forKey: layout.rowID) {
-            cachedLayoutBytes -= previous.content.retainedBytes
-        }
-        cachedLayoutBytes += layout.content.retainedBytes
+        layouts[layout.rowID] = layout
     }
 
     func removeLayout(for rowID: String) {
-        if let removed = layouts.removeValue(forKey: rowID) {
-            cachedLayoutBytes -= removed.content.retainedBytes
-        }
+        layouts.removeValue(forKey: rowID)
         preDrawnBands.removeValue(forKey: rowID)
     }
 
