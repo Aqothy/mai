@@ -735,7 +735,7 @@ struct TranscriptControllerScrollTests {
 
     @Test func staleNonReplacingSubmitDoesNotOverwriteNewerGeneration() async throws {
         let delivered = Mutex<[RowLayoutKey]>([])
-        let queue = LayoutQueue(concurrency: 1) { result in
+        let queue = LayoutQueue(concurrency: 1) { result, _ in
             if case .layout(let layout, _) = result {
                 delivered.withLock { $0.append(layout.key) }
             }

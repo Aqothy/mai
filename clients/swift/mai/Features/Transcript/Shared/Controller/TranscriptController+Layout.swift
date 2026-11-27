@@ -201,6 +201,33 @@ extension TranscriptController {
         scheduleWork()
     }
 
+    /// Backfill pauses while scrolling/resizing (to avoid main-thread contention)
+    /// and while a selection is active (so off-screen height changes above the
+    /// viewport do not shift document `y`, flicker UIKit's selection overlay, or
+    /// dismiss the edit menu).
+    var shouldPauseBackfill: Bool {
+        isBackfillTemporarilyPaused || selection != nil
+    }
+
+    func syncBackfillPause() {
+        guard configuration.laysOutRows, !isAwaitingInitialEnd else { return }
+        let paused = shouldPauseBackfill
+        queue.markBackfillPaused(paused)
+        if paused {
+            Task { await queue.setBackfillPaused(true) }
+            return
+        }
+        if needsBackfillRebuild {
+            needsBackfillRebuild = false
+            scheduleBackfill()
+        } else {
+            Task { await queue.setBackfillPaused(false) }
+        }
+        if !deferredBackfillResults.isEmpty {
+            drainInbox()
+        }
+    }
+
     /// Pauses `.utility` backfill while the reader scrolls or resizes, whose
     /// frames may lay out and draw rows on the main thread, then resumes (or
     /// rebuilds backfill for the new width) once idle for 250 ms. Streaming
@@ -208,18 +235,15 @@ extension TranscriptController {
     /// same with it running (stream 4,000 cps: 118.9 vs 119.0 fps).
     func pauseBackfillBriefly(rebuildAfter: Bool) {
         guard configuration.laysOutRows, !isAwaitingInitialEnd else { return }
+        isBackfillTemporarilyPaused = true
         if rebuildAfter { needsBackfillRebuild = true }
-        Task { await queue.setBackfillPaused(true) }
+        syncBackfillPause()
         backfillResumeTask?.cancel()
         backfillResumeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self, self.host != nil else { return }
-            if self.needsBackfillRebuild {
-                self.needsBackfillRebuild = false
-                self.scheduleBackfill()
-            } else {
-                await self.queue.setBackfillPaused(false)
-            }
+            self.isBackfillTemporarilyPaused = false
+            self.syncBackfillPause()
         }
     }
 
@@ -282,7 +306,9 @@ extension TranscriptController {
             }
         }
         guard !backfillJobs.isEmpty else { return }
-        Task { await queue.setBackfill(backfillJobs) }
+        let paused = shouldPauseBackfill
+        queue.markBackfillPaused(paused)
+        Task { await queue.setBackfill(backfillJobs, paused: paused) }
     }
 
     private var currentDrawing: DrawnBands.Drawing? {
@@ -325,17 +351,41 @@ extension TranscriptController {
 
     private func drainResults() {
         let maxParsedPerDrain = isAwaitingInitialEnd ? Int.max : 4
+        let deferBackfill = selection != nil
+        let resumedBackfill: [(result: LayoutQueue.Result, isBackfill: Bool)]
+        if !deferBackfill, !deferredBackfillResults.isEmpty {
+            resumedBackfill = deferredBackfillResults.map { ($0, true) }
+            deferredBackfillResults.removeAll(keepingCapacity: true)
+        } else {
+            resumedBackfill = []
+        }
+        var newlyDeferred: [LayoutQueue.Result] = []
         let (results, hasMore) = layoutInbox.state.withLock { state -> ([LayoutQueue.Result], Bool) in
+            if !resumedBackfill.isEmpty {
+                state.items.insert(contentsOf: resumedBackfill, at: 0)
+            }
+            if deferBackfill {
+                var urgentItems: [(result: LayoutQueue.Result, isBackfill: Bool)] = []
+                urgentItems.reserveCapacity(state.items.count)
+                for item in state.items {
+                    if item.isBackfill {
+                        newlyDeferred.append(item.result)
+                    } else {
+                        urgentItems.append(item)
+                    }
+                }
+                state.items = urgentItems
+            }
             if state.items.count <= maxParsedPerDrain {
                 state.isDrainScheduled = false
-                let all = state.items
+                let all = state.items.map(\.result)
                 state.items.removeAll(keepingCapacity: true)
                 return (all, false)
             }
             var parsedCount = 0
             var splitIndex = 0
             for item in state.items {
-                if case .parsedAndLaidOut = item {
+                if case .parsedAndLaidOut = item.result {
                     if parsedCount >= maxParsedPerDrain { break }
                     parsedCount += 1
                 }
@@ -343,13 +393,16 @@ extension TranscriptController {
             }
             if splitIndex >= state.items.count {
                 state.isDrainScheduled = false
-                let all = state.items
+                let all = state.items.map(\.result)
                 state.items.removeAll(keepingCapacity: true)
                 return (all, false)
             }
-            let batch = Array(state.items[..<splitIndex])
+            let batch = state.items[..<splitIndex].map(\.result)
             state.items.removeFirst(splitIndex)
             return (batch, true)
+        }
+        if !newlyDeferred.isEmpty {
+            deferredBackfillResults.append(contentsOf: newlyDeferred)
         }
         if hasMore {
             Task { @MainActor [weak self] in self?.drainInbox() }

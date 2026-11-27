@@ -30,9 +30,10 @@ final class TranscriptController {
         // which the next chat's layout work starves while its memory stays).
         // The block must hold the only references, or it may finish first
         // and leave the last release here.
-        let retained = (layouts, parsedMessages)
+        let retained = (layouts, parsedMessages, deferredBackfillResults)
         layouts = [:]
         parsedMessages = [:]
+        deferredBackfillResults = []
         DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(retained) {} }
     }
 
@@ -40,7 +41,7 @@ final class TranscriptController {
     /// layouts coalesce into a single main-actor drain.
     final class LayoutInbox: Sendable {
         struct State {
-            var items: [LayoutQueue.Result] = []
+            var items: [(result: LayoutQueue.Result, isBackfill: Bool)] = []
             var isDrainScheduled = false
         }
 
@@ -99,11 +100,16 @@ final class TranscriptController {
     @ObservationIgnored var isScrollingDown = true
     @ObservationIgnored var openStarted = ContinuousClock.now
     @ObservationIgnored var backfillResumeTask: Task<Void, Never>?
+    @ObservationIgnored var isBackfillTemporarilyPaused = false
     @ObservationIgnored var needsBackfillRebuild = false
+    /// Backfill results that arrived just as a selection started; drained once
+    /// the selection clears so off-screen height shifts never flicker UIKit's
+    /// selection highlight or dismiss its edit menu.
+    @ObservationIgnored var deferredBackfillResults: [LayoutQueue.Result] = []
     @ObservationIgnored lazy var queue = LayoutQueue(concurrency: configuration.concurrency) {
-        [weak self, inbox = layoutInbox] result in
+        [weak self, inbox = layoutInbox] result, isBackfill in
         let shouldSchedule = inbox.state.withLock { state -> Bool in
-            state.items.append(result)
+            state.items.append((result, isBackfill))
             guard !state.isDrainScheduled else { return false }
             state.isDrainScheduled = true
             return true
@@ -199,6 +205,9 @@ final class TranscriptController {
         preDrawnBands.removeAll()
         backfillResumeTask?.cancel()
         backfillResumeTask = nil
+        isBackfillTemporarilyPaused = false
+        deferredBackfillResults.removeAll()
+        queue.markBackfillPaused(false)
         Task { await queue.cancelAll() }
         host.setNeedsFrameUpdates(false)
         self.host = nil

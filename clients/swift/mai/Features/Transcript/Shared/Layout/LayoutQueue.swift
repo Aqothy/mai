@@ -54,6 +54,9 @@ actor LayoutQueue {
     /// nearest row in O(1) without O(N) dictionary scans.
     private var backfillStack: [Job] = []
     private var backfillPaused = false
+    /// Synchronous pause flag so `MainActor` selection/scroll changes suppress
+    /// backfill starts and in-flight deliveries without waiting for an actor hop.
+    private let backfillPausedBox = Mutex<Bool>(false)
     private var latestUrgentGeneration = 0
     private let generationBox = GenerationBox()
     /// In-flight jobs keyed by `job.id` with the exact work parameters running,
@@ -62,11 +65,15 @@ actor LayoutQueue {
     private var running: [String: WorkKey] = [:]
     private var runningBackfillCount = 0
     private let concurrency: Int
-    private let deliver: @Sendable (Result) -> Void
+    private let deliver: @Sendable (Result, Bool) -> Void
 
-    init(concurrency: Int, deliver: @escaping @Sendable (Result) -> Void) {
+    init(concurrency: Int, deliver: @escaping @Sendable (Result, Bool) -> Void) {
         self.concurrency = concurrency
         self.deliver = deliver
+    }
+
+    nonisolated func markBackfillPaused(_ paused: Bool) {
+        backfillPausedBox.withLock { $0 = paused }
     }
 
     private static func workKey(for work: Work) -> WorkKey {
@@ -99,16 +106,18 @@ actor LayoutQueue {
 
     /// Replaces the low-priority exact-geometry backfill queue (called once
     /// after open and after a settled width change, never per frame).
-    func setBackfill(_ jobs: [Job]) {
+    func setBackfill(_ jobs: [Job], paused: Bool = false) {
         backfillStack = jobs.sorted { $0.priority > $1.priority }
-        backfillPaused = false
+        backfillPaused = paused
+        backfillPausedBox.withLock { $0 = paused }
         pump()
     }
 
     /// Pauses or resumes `.utility` backfill while the reader is actively
-    /// scrolling, flinging, streaming, or resizing.
+    /// scrolling, resizing, or holding a selection.
     func setBackfillPaused(_ paused: Bool) {
         backfillPaused = paused
+        backfillPausedBox.withLock { $0 = paused }
         if !paused { pump() }
     }
 
@@ -130,7 +139,7 @@ actor LayoutQueue {
             let taskPriority: TaskPriority = isBackfill ? .utility : .userInitiated
             Task.detached(priority: taskPriority) { [weak self] in
                 let result = Self.perform(job.work, expectedGen: expectedGen, genBox: genBox)
-                await self?.finish(job.id, isBackfill: isBackfill, result)
+                await self?.finish(job, isBackfill: isBackfill, result)
             }
         }
     }
@@ -143,7 +152,9 @@ actor LayoutQueue {
         }
         // Backfill runs at most 1 `.utility` job at a time and yields completely
         // whenever paused or any urgent work is queued or in flight.
-        guard !backfillPaused, runningBackfillCount == 0, running.isEmpty else { return nil }
+        guard !backfillPaused, !backfillPausedBox.withLock({ $0 }), runningBackfillCount == 0, running.isEmpty else {
+            return nil
+        }
         while let job = backfillStack.popLast() {
             if urgent[job.id] != nil { continue }
             if running[job.id] == Self.workKey(for: job.work) { continue }
@@ -152,10 +163,14 @@ actor LayoutQueue {
         return nil
     }
 
-    private func finish(_ id: String, isBackfill: Bool, _ result: Result) {
-        running[id] = nil
+    private func finish(_ job: Job, isBackfill: Bool, _ result: Result) {
+        running[job.id] = nil
         if isBackfill { runningBackfillCount = max(0, runningBackfillCount - 1) }
-        deliver(result)
+        if isBackfill, backfillPaused || backfillPausedBox.withLock({ $0 }) {
+            backfillStack.append(job)
+        } else {
+            deliver(result, isBackfill)
+        }
         pump()
     }
 

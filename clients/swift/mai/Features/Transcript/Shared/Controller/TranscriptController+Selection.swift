@@ -9,8 +9,12 @@ extension TranscriptController {
     /// Replaces the selection; following is unaffected, as in browsers.
     func setSelection(_ newSelection: TranscriptSelection?) {
         guard newSelection != selection else { return }
+        let hadSelection = selection != nil
         selection = newSelection
         host?.setNeedsSelectionDisplay()
+        if hadSelection != (selection != nil) {
+            syncBackfillPause()
+        }
     }
 
     /// The text position nearest `point` (document coordinates) in a column
