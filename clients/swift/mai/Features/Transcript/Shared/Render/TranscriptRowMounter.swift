@@ -145,6 +145,7 @@ final class TranscriptRowMounter {
         var spanTop = drawn.minY
         var spanBottom = drawn.maxY
         var missingLayouts: [Int] = []
+        let frameDraws = FrameBandDraws()
         #if DEBUG
             var staleVisibleRows = 0
             var visibleWidthLag: CGFloat = 0
@@ -179,9 +180,10 @@ final class TranscriptRowMounter {
                 mount(
                     controller.rows[rowIndex], index: rowIndex, frame: frame, layout: layout, controller: controller,
                     documentWidth: documentWidth, visible: visible, drawn: drawn, palette: palette, scale: scale,
-                    colorSpace: space, showsContent: showsContent)
+                    colorSpace: space, showsContent: showsContent, frameDraws: frameDraws)
             }
         }
+        frameDraws.draw()
         readySpan = spanTop <= spanBottom ? spanTop...spanBottom : nil
         #if DEBUG
             TranscriptDebugCounters.staleVisibleRows = staleVisibleRows
@@ -238,7 +240,7 @@ final class TranscriptRowMounter {
     private func mount(
         _ row: TranscriptRow, index: Int, frame: CGRect, layout: RowLayout, controller: TranscriptController,
         documentWidth: CGFloat, visible: CGRect, drawn: CGRect, palette: TextPalette, scale: CGFloat,
-        colorSpace: CGColorSpace, showsContent: Bool
+        colorSpace: CGColorSpace, showsContent: Bool, frameDraws: FrameBandDraws
     ) {
         let width = layout.key.width
         let x = max(0, ((documentWidth - width) / 2).rounded(.down))
@@ -269,7 +271,7 @@ final class TranscriptRowMounter {
         layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
-        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
+        layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain, frameDraws: frameDraws)
         layer.releaseBands(outside: local.insetBy(dx: 0, dy: -visible.height))
         // Accessories follow the layout and the row's place only: a table's
         // copy text joins all its cells, so it is not made on every pass.
