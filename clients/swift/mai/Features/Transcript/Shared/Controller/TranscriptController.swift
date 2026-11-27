@@ -21,8 +21,20 @@ import Synchronization
 @MainActor
 @Observable
 final class TranscriptController {
-    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
-    nonisolated deinit {}
+    // Nonisolated for back-deployment: avoids the isolated-deinit runtime bug
+    // (swiftlang/swift#88036).
+    nonisolated deinit {
+        // A long chat's layouts and parsed messages took 70–120 ms of the main
+        // thread to free on each chat switch (iPhone 14 trace): free them on a
+        // background queue, as Texture frees its nodes, soon (not `.utility`,
+        // which the next chat's layout work starves while its memory stays).
+        // The block must hold the only references, or it may finish first
+        // and leave the last release here.
+        let retained = (layouts, parsedMessages)
+        layouts = [:]
+        parsedMessages = [:]
+        DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(retained) {} }
+    }
 
     /// Thread-safe handoff from `LayoutQueue` workers so finished viewport
     /// layouts coalesce into a single main-actor drain.
