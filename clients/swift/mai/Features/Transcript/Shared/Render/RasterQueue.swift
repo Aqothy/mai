@@ -66,13 +66,15 @@ final class RasterQueue {
     }
 
     /// The nearest job whose band still wants it, the earliest of equals;
-    /// stale ones are dropped in place without reallocating `waiting`.
+    /// stale ones are dropped in place without reallocating `waiting`. A band
+    /// that became visible before its job ran was drawn on the main thread
+    /// (`RowLayer.drawBands`), so its job is stale too.
     private func takeNearest() -> (Int, Job)? {
         var stale: [Int] = []
         var bestKey: Int?
         var bestJob: Job?
         for (key, job) in waiting {
-            guard let band = job.band, band.generation == job.generation else {
+            guard let band = job.band, band.generation == job.generation, !band.isCurrent else {
                 stale.append(key)
                 continue
             }
