@@ -174,25 +174,16 @@ struct TranscriptSelectionRegressionTests {
             heights[row.id] = layout.height
         }
         controller.setHeights(heights)
+        controller.selectAll()
         let first = try #require(controller.firstTextPosition)
         let last = try #require(controller.lastTextPosition)
 
-        // Normal drag selection across many rows stays ragged-right.
-        controller.setSelection(TranscriptSelection(anchor: first, focus: last))
-        let dragRects = controller.taggedSelectionRects(from: first, to: last, columnX: 16, scrollX: { _ in 0 })
-        #expect(dragRects.first?.isStart == true)
-        #expect(dragRects.last?.isEnd == true)
-        #expect(dragRects.count >= 80)
-        #expect(dragRects.contains { $0.rect.width < 300 })
-
-        // Select All always highlights full column width in 1-3 seamless strips.
-        controller.setSelection(nil)
-        controller.selectAll()
-        let allRects = controller.taggedSelectionRects(from: first, to: last, columnX: 16, scrollX: { _ in 0 })
-        #expect(allRects.first?.isStart == true)
-        #expect(allRects.last?.isEnd == true)
-        #expect(allRects.count <= 3)
-        #expect(allRects.allSatisfy { $0.rect.minX == 16 && $0.rect.width == 320 })
+        let rects = controller.taggedSelectionRects(from: first, to: last, columnX: 16, scrollX: { _ in 0 })
+        #expect(rects.first?.isStart == true)
+        #expect(rects.last?.isEnd == true)
+        #expect(rects.count >= 80)
+        // Short last lines stay ragged-right (narrower than columnWidth).
+        #expect(rects.contains { $0.rect.width < 300 })
 
         // O(log n) offset(from:to:) matches exact sum of row lengths + newlines.
         let expectedLen = controller.text(from: first, to: last).utf16.count

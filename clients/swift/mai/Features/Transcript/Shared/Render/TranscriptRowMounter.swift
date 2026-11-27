@@ -226,12 +226,11 @@ final class TranscriptRowMounter {
     func showSelection(_ controller: TranscriptController) {
         guard drawsSelection, hasSelection || controller.selection != nil else { return }
         hasSelection = controller.selection != nil
-        let fullWidth = controller.selection?.isSelectAll == true
         let geometry = controller.geometry
         for (id, layer) in mounted {
             guard let index = geometry.index(for: id), controller.rows[index].id == id else { continue }
             let range = controller.selectedRange(inRowAt: index)
-            layer.showSelection(range, color: selectionColor, fullWidth: fullWidth)
+            layer.showSelection(range, color: selectionColor)
             if layer.hasWideBlock { delegate?.showWideBlockSelection(rowID: id, range: range, color: selectionColor) }
         }
     }
@@ -267,9 +266,7 @@ final class TranscriptRowMounter {
         layer.show(
             rowID: row.id, layout: layout, palette: palette, drawsWideBody: wideBody == nil, scale: scale,
             colorSpace: colorSpace, drawn: preDrawn)
-        layer.showSelection(
-            hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor,
-            fullWidth: controller.selection?.isSelectAll == true)
+        layer.showSelection(hasSelection ? controller.selectedRange(inRowAt: index) : nil, color: selectionColor)
         let local = drawn.offsetBy(dx: -x, dy: -frame.minY)
         let localVisible = showsContent ? visible.offsetBy(dx: -x, dy: -frame.minY) : .null
         layer.drawBands(in: local, visible: localVisible, offMain: drawsOffMain)
