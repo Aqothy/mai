@@ -91,51 +91,7 @@ nonisolated struct CodeLayout: Sendable {
             lineH == other.body.prepared.options.fixedLineHeight
         else { return 0 }
 
-        func firstDiffByte() -> Int? {
-            var resolved: Int?
-            let usedFast = code.utf8.withContiguousStorageIfAvailable { aBuf -> Bool in
-                other.code.utf8.withContiguousStorageIfAvailable { bBuf -> Bool in
-                    let shared = min(aBuf.count, bBuf.count)
-                    guard let aBase = aBuf.baseAddress, let bBase = bBuf.baseAddress else {
-                        resolved = aBuf.count == bBuf.count ? nil : 0
-                        return true
-                    }
-                    if shared == 0 {
-                        resolved = aBuf.count == bBuf.count ? nil : 0
-                        return true
-                    }
-                    if memcmp(aBase, bBase, shared) == 0 {
-                        resolved = aBuf.count == bBuf.count ? nil : shared
-                        return true
-                    }
-                    var low = 0
-                    var high = shared
-                    while low < high {
-                        let mid = (low + high) / 2
-                        if memcmp(aBase + low, bBase + low, mid - low + 1) == 0 {
-                            low = mid + 1
-                        } else {
-                            high = mid
-                        }
-                    }
-                    resolved = low
-                    return true
-                } ?? false
-            } ?? false
-            if usedFast { return resolved }
-            var aIdx = code.utf8.startIndex
-            var bIdx = other.code.utf8.startIndex
-            var offset = 0
-            while aIdx < code.utf8.endIndex, bIdx < other.code.utf8.endIndex {
-                if code.utf8[aIdx] != other.code.utf8[bIdx] { return offset }
-                code.utf8.formIndex(after: &aIdx)
-                other.code.utf8.formIndex(after: &bIdx)
-                offset += 1
-            }
-            return aIdx == code.utf8.endIndex && bIdx == other.code.utf8.endIndex ? nil : offset
-        }
-
-        guard let diffByte = firstDiffByte() else { return .infinity }
+        guard let diffByte = RowContentDiff.firstDifferingByte(code, other.code) else { return .infinity }
         let starts = other.code.utf8.count >= code.utf8.count ? bLines : aLines
         guard !starts.isEmpty else { return 0 }
         var low = 0

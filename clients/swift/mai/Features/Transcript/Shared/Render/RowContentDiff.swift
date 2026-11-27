@@ -4,7 +4,7 @@ import Foundation
 /// How much of a row's top a new layout draws identically to the old one, so a
 /// growing streamed block redraws only the bands below that (`REDESIGN.md §8`).
 /// Operates directly on fitted `TextLine` geometry and `PreparedText` metadata
-/// (no glyph-buffer comparison; O(log lines) `memcmp` for code blocks).
+/// (no glyph-buffer comparison; `memcmp` for the text).
 nonisolated enum RowContentDiff {
     static func unchangedHeight(_ old: RowContentLayout, _ new: RowContentLayout) -> CGFloat {
         switch (old, new) {
@@ -41,9 +41,12 @@ nonisolated enum RowContentDiff {
         }
         guard before.prepared.options == after.prepared.options else { return 0 }
 
-        let oldText = before.prepared.text
-        let newText = after.prepared.text
-        let firstDiffUTF16 = firstDifferingUTF16(oldText, newText, oldRuns: before.prepared.runs, newRuns: after.prepared.runs)
+        // The same prepared text at another width (resizing) differs nowhere.
+        let firstDiffUTF16 =
+            before.prepared === after.prepared
+            ? Int.max
+            : firstDifferingUTF16(
+                before.prepared.text, after.prepared.text, oldRuns: before.prepared.runs, newRuns: after.prepared.runs)
         let shared = min(before.lines.count, after.lines.count)
         let margin: CGFloat = 2  // accounts for inline-code background / quote-bar protrusion above line.top
         for index in 0..<shared {
@@ -80,18 +83,15 @@ nonisolated enum RowContentDiff {
         _ a: String, _ b: String, oldRuns: [StyledRun], newRuns: [StyledRun]
     ) -> Int {
         var textDiff = Int.max
-        if a != b {
-            let aUTF16 = a.utf16
-            let bUTF16 = b.utf16
-            var aIdx = aUTF16.startIndex
-            var bIdx = bUTF16.startIndex
-            var off = 0
-            while aIdx < aUTF16.endIndex, bIdx < bUTF16.endIndex, aUTF16[aIdx] == bUTF16[bIdx] {
-                aUTF16.formIndex(after: &aIdx)
-                bUTF16.formIndex(after: &bIdx)
-                off += 1
+        if let byte = firstDifferingByte(a, b) {
+            // From the start of the scalar the bytes differ in.
+            var a = a
+            let scalarStart = a.withUTF8 { bytes in
+                var start = byte
+                while start > 0, start < bytes.count, bytes[start] & 0xC0 == 0x80 { start -= 1 }
+                return start
             }
-            textDiff = off
+            textDiff = a.utf16.distance(from: a.startIndex, to: a.utf8.index(a.startIndex, offsetBy: scalarStart))
         }
         var runDiff = Int.max
         let sharedRuns = min(oldRuns.count, newRuns.count)
@@ -114,6 +114,35 @@ nonisolated enum RowContentDiff {
             runDiff = extra.range.lowerBound
         }
         return min(textDiff, runDiff)
+    }
+
+    /// The UTF-8 offset where `a` and `b` first differ, nil when they are
+    /// the same: `memcmp` with a binary search, so a streamed block's diff
+    /// costs microseconds rather than a walk of its whole text.
+    static func firstDifferingByte(_ a: String, _ b: String) -> Int? {
+        var a = a
+        var b = b
+        return a.withUTF8 { x in
+            b.withUTF8 { y in
+                let shared = min(x.count, y.count)
+                guard shared > 0, let xBase = x.baseAddress, let yBase = y.baseAddress else {
+                    return x.count == y.count ? nil : 0
+                }
+                if memcmp(xBase, yBase, shared) == 0 { return x.count == y.count ? nil : shared }
+                // The first difference lies in `low..<high`.
+                var low = 0
+                var high = shared
+                while low < high {
+                    let mid = (low + high) / 2
+                    if memcmp(xBase + low, yBase + low, mid - low + 1) == 0 {
+                        low = mid + 1
+                    } else {
+                        high = mid
+                    }
+                }
+                return low
+            }
+        }
     }
 
     private static func unchangedTableHeight(_ before: TableLayout, _ after: TableLayout) -> CGFloat {
