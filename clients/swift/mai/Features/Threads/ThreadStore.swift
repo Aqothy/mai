@@ -73,8 +73,23 @@ final class ThreadStore {
         sessionsByID[threadID]?.transcriptMeasuredHeights
     }
 
-    func setTranscriptMeasuredHeights(_ heights: TranscriptMeasuredHeights?, for threadID: String) {
-        sessionsByID[threadID]?.transcriptMeasuredHeights = heights
+    func nextMeasuredHeightsGeneration(for threadID: String) -> Int {
+        guard var session = sessionsByID[threadID] else { return 0 }
+        session.transcriptMeasuredHeightsGeneration &+= 1
+        sessionsByID[threadID] = session
+        return session.transcriptMeasuredHeightsGeneration
+    }
+
+    func setTranscriptMeasuredHeights(
+        _ heights: TranscriptMeasuredHeights?, for threadID: String, generation: Int? = nil
+    ) {
+        guard var session = sessionsByID[threadID] else { return }
+        if let generation, generation != session.transcriptMeasuredHeightsGeneration { return }
+        if generation == nil {
+            session.transcriptMeasuredHeightsGeneration &+= 1
+        }
+        session.transcriptMeasuredHeights = heights
+        sessionsByID[threadID] = session
     }
 
     private let rpc: any ThreadRPCClient

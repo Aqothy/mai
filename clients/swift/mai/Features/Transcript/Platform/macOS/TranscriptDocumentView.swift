@@ -108,6 +108,9 @@
                 controller.detach(self)
                 displayLink?.invalidate()
                 displayLink = nil
+                mounter.releaseOffscreen(keeping: .null)
+                wideBlockPool.removeAll()
+                accessoryPool.removeAll()
                 return
             }
             clip.postsBoundsChangedNotifications = true

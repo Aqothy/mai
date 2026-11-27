@@ -973,4 +973,41 @@ struct TranscriptControllerScrollTests {
         #expect(first.measuredRowHeights[parsedRows[0].id] == nil)
         #expect(first.geometry.height(at: 0) != 123)
     }
+
+    /// Detaching computes `TranscriptMeasuredHeights` off the main thread and
+    /// persists it onto `ThreadStore`, while rejecting stale generations so an
+    /// older exit never clobbers a newer one.
+    @Test func detachSavesMeasuredHeightsOffMainWithGenerationOrdering() async throws {
+        let thread = ChatSyntheticBenchmarkThread.thread(turnCount: 4)
+        let store = ThreadStore(previewThreads: [thread.summary], selectedThread: thread)
+
+        let controller = TranscriptController(configuration: .testing)
+        let host = FakeTranscriptHost()
+        host.size = CGSize(width: 600, height: 400)
+        host.controller = controller
+        controller.attach(host)
+        controller.start(store: store, threadID: thread.id)
+        let firstRowID = try #require(controller.rows.first?.id)
+        controller.measuredRowHeights[firstRowID] = 142
+
+        controller.detach(host)
+        for _ in 0..<100 where store.transcriptMeasuredHeights(for: thread.id) == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let persisted = try #require(store.transcriptMeasuredHeights(for: thread.id))
+        #expect(persisted.rowHeights[firstRowID] == 142)
+
+        // A stale generation must not overwrite a newer snapshot.
+        let olderGen = store.nextMeasuredHeightsGeneration(for: thread.id)
+        let newerGen = store.nextMeasuredHeightsGeneration(for: thread.id)
+        let newer = TranscriptMeasuredHeights(
+            width: persisted.width, styleVersion: persisted.styleVersion,
+            rowHeights: [firstRowID: 288], sourceHeights: [:])
+        let stale = TranscriptMeasuredHeights(
+            width: persisted.width, styleVersion: persisted.styleVersion,
+            rowHeights: [firstRowID: 99], sourceHeights: [:])
+        store.setTranscriptMeasuredHeights(newer, for: thread.id, generation: newerGen)
+        store.setTranscriptMeasuredHeights(stale, for: thread.id, generation: olderGen)
+        #expect(store.transcriptMeasuredHeights(for: thread.id)?.rowHeights[firstRowID] == 288)
+    }
 }

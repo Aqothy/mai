@@ -30,10 +30,20 @@ final class TranscriptController {
         // which the next chat's layout work starves while its memory stays).
         // The block must hold the only references, or it may finish first
         // and leave the last release here.
-        let retained = (layouts, parsedMessages, deferredBackfillResults)
+        let retained = (
+            layouts, parsedMessages, deferredBackfillResults, preDrawnBands,
+            rows, geometry, measuredRowHeights, rememberedHeights, turns, turnRevisions
+        )
         layouts = [:]
         parsedMessages = [:]
         deferredBackfillResults = []
+        preDrawnBands = [:]
+        rows = []
+        geometry = TranscriptGeometry()
+        measuredRowHeights = [:]
+        rememberedHeights = nil
+        turns = []
+        turnRevisions = []
         DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(retained) {} }
     }
 
@@ -202,7 +212,11 @@ final class TranscriptController {
         detachedTop = host.viewport != nil ? host.viewportTop : baselineTop
         detachedPlace = geometry.readingPlace(atViewportTop: detachedTop)
         persistSavedPlace()
-        preDrawnBands.removeAll()
+        let stalePreDrawn = preDrawnBands
+        preDrawnBands = [:]
+        if !stalePreDrawn.isEmpty {
+            DispatchQueue.global(qos: .userInitiated).async { withExtendedLifetime(stalePreDrawn) {} }
+        }
         backfillResumeTask?.cancel()
         backfillResumeTask = nil
         isBackfillTemporarilyPaused = false
@@ -635,8 +649,26 @@ final class TranscriptController {
     /// overwrites a saved place while still hidden waiting for initial alignment.
     private func persistSavedPlace() {
         guard let store, let threadID else { return }
-        if let snapshot = snapshotMeasuredHeights() {
-            store.setTranscriptMeasuredHeights(snapshot, for: threadID)
+        if columnWidth > 0, !measuredRowHeights.isEmpty {
+            let width = columnWidth
+            let styleVersion = style.version
+            let rowsSnapshot = rows
+            let turnsSnapshot = turns
+            let streamSourceIDs = Set(streams.keys)
+            let measuredSnapshot = measuredRowHeights
+            let rememberedSnapshot = rememberedHeights
+            let generation = store.nextMeasuredHeightsGeneration(for: threadID)
+            Task.detached(priority: .userInitiated) { [weak store] in
+                guard
+                    let snapshot = Self.buildMeasuredHeightsSnapshot(
+                        width: width, styleVersion: styleVersion, rows: rowsSnapshot, turns: turnsSnapshot,
+                        streamSourceIDs: streamSourceIDs, measuredRowHeights: measuredSnapshot,
+                        rememberedHeights: rememberedSnapshot)
+                else { return }
+                await MainActor.run {
+                    store?.setTranscriptMeasuredHeights(snapshot, for: threadID, generation: generation)
+                }
+            }
         }
         guard !isAwaitingInitialEnd else { return }
         store.setSavedTranscriptPlace(savedPlace(), for: threadID)
@@ -676,12 +708,23 @@ final class TranscriptController {
     /// `ThreadSession`. Running/streaming turns are excluded so mid-stream
     /// heights never become stale if the turn finishes while detached.
     func snapshotMeasuredHeights() -> TranscriptMeasuredHeights? {
-        guard columnWidth > 0 else { return nil }
+        Self.buildMeasuredHeightsSnapshot(
+            width: columnWidth, styleVersion: style.version, rows: rows, turns: turns,
+            streamSourceIDs: Set(streams.keys), measuredRowHeights: measuredRowHeights,
+            rememberedHeights: rememberedHeights)
+    }
+
+    nonisolated private static func buildMeasuredHeightsSnapshot(
+        width: CGFloat, styleVersion: Int, rows: [TranscriptRow], turns: [TranscriptTurn],
+        streamSourceIDs: Set<String>, measuredRowHeights: [String: CGFloat],
+        rememberedHeights: TranscriptMeasuredHeights?
+    ) -> TranscriptMeasuredHeights? {
+        guard width > 0 else { return nil }
         let runningTurnIDs = Set(turns.lazy.filter(\.isRunning).map(\.id))
         var volatileRowIDs: Set<String> = []
-        var volatileSourceIDs = Set(streams.keys)
+        var volatileSourceIDs = streamSourceIDs
         for row in rows {
-            if streams[row.sourceID] != nil || row.turnID.map({ runningTurnIDs.contains($0) }) == true {
+            if streamSourceIDs.contains(row.sourceID) || row.turnID.map({ runningTurnIDs.contains($0) }) == true {
                 volatileRowIDs.insert(row.id)
                 volatileSourceIDs.insert(row.sourceID)
             }
@@ -689,7 +732,7 @@ final class TranscriptController {
         var rowHeights: [String: CGFloat] = [:]
         var sourceHeights: [String: CGFloat] = [:]
         if let remembered = rememberedHeights,
-            remembered.width == columnWidth, remembered.styleVersion == style.version
+            remembered.width == width, remembered.styleVersion == styleVersion
         {
             rowHeights = remembered.rowHeights
             sourceHeights = remembered.sourceHeights
@@ -717,7 +760,7 @@ final class TranscriptController {
             sourceHeights[sourceID] = entry.sum
         }
         return TranscriptMeasuredHeights(
-            width: columnWidth, styleVersion: style.version, rowHeights: rowHeights, sourceHeights: sourceHeights)
+            width: width, styleVersion: styleVersion, rowHeights: rowHeights, sourceHeights: sourceHeights)
     }
 
     /// Where initial alignment wants the viewport: the restored saved place if

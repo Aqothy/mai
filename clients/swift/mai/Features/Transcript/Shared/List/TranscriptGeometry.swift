@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Heights are whole points (rows are laid out to whole points), so sums are
 /// exact and two ways of computing an offset never disagree.
-nonisolated struct TranscriptGeometry {
+nonisolated struct TranscriptGeometry: Sendable {
     private(set) var ids: [String] = []
     /// The content each row shows. The rows one piece of content is split
     /// into share it: a reply's blocks all show the same message.

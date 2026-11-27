@@ -121,6 +121,9 @@
                 updateLink?.isEnabled = false
                 updateLink = nil
                 controller.detach(self)
+                // Release mounted IOSurfaces through RowBandLayer's off-main
+                // teardown path so popping a large chat doesn't stall Main.
+                releaseSurfaces(keeping: .null)
                 return
             }
             updatePalette()
@@ -129,10 +132,13 @@
         }
 
         @objc private func releaseOffscreenMemory() {
-            let visible = visibleRect
+            releaseSurfaces(keeping: visibleRect)
+        }
+
+        private func releaseSurfaces(keeping visible: CGRect) {
             mounter.releaseOffscreen(keeping: visible)
             for scroller in wideBlocks.values {
-                let localVisible = visible.offsetBy(dx: -scroller.frame.minX, dy: -scroller.frame.minY)
+                let localVisible = visible.isNull ? .null : visible.offsetBy(dx: -scroller.frame.minX, dy: -scroller.frame.minY)
                 scroller.releaseOffscreenBands(keeping: localVisible)
             }
             for scroller in wideBlockPool { discard(scroller) }
