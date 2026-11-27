@@ -384,7 +384,6 @@ extension TranscriptController {
                 heightDeltaSum += abs(layout.height - geometry.height(at: index))
                 storeLayout(layout)
                 if let drawn, host != nil {
-                    if preDrawnBands.count > 48 { preDrawnBands.removeAll(keepingCapacity: true) }
                     preDrawnBands[layout.rowID] = (layout, drawn)
                 }
             }
@@ -464,7 +463,6 @@ extension TranscriptController {
                         measuredRowHeights[blockRow.id] = layout.height
                         storeLayout(layout)
                         if offset < replacement.drawn.count, let drawn = replacement.drawn[offset], host != nil {
-                            if preDrawnBands.count > 48 { preDrawnBands.removeAll(keepingCapacity: true) }
                             preDrawnBands[blockRow.id] = (layout, drawn)
                         }
                     }

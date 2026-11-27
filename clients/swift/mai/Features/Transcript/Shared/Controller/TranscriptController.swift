@@ -73,7 +73,8 @@ final class TranscriptController {
     /// far from the end the viewport was.
     @ObservationIgnored private(set) var endJump: (start: ContinuousClock.Instant, distance: CGFloat)?
     /// Bands pre-drawn off the main thread with a streamed or cold layout, for
-    /// the row's next placement; cleared by it.
+    /// the row's next placement. Every placement clears them, so they hold at
+    /// most one drain's worth (never past 24 rows in the suite or 20 MB runs).
     @ObservationIgnored var preDrawnBands: [String: (layout: RowLayout, drawn: DrawnBands)] = [:]
     #if DEBUG
         @ObservationIgnored var debugReaderMoves: [ScrollFollowPolicy.ReaderScroll] = []
