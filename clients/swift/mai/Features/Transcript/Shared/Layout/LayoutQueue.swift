@@ -23,7 +23,7 @@ actor LayoutQueue {
         case layout(RowLayout, drawn: DrawnBands?)
         case parsedAndLaidOut(
             message: TranscriptMessage, source: String, blocks: [MarkdownBlock], metrics: [TextMetrics],
-            layouts: [RowLayout], drawn: [DrawnBands?])
+            rows: [TranscriptRow], layouts: [RowLayout], drawn: [DrawnBands?])
     }
 
     struct Job: Sendable {
@@ -192,7 +192,8 @@ actor LayoutQueue {
                 }
             }
             return .parsedAndLaidOut(
-                message: message, source: source, blocks: blocks, metrics: metrics, layouts: layouts, drawn: preDrawn)
+                message: message, source: source, blocks: blocks, metrics: metrics, rows: rows, layouts: layouts,
+                drawn: preDrawn)
         }
     }
 }

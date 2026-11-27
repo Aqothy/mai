@@ -87,10 +87,7 @@ extension TranscriptController {
             let builtRows = message.rows(from: blocks)
             let metrics = builtRows.map(\.metrics)
             cacheParsedMessage(id: message.id, source: source, blocks: blocks, metrics: metrics)
-            parsedBatch.append(
-                ParsedBatchItem(
-                    message: message, source: source, blocks: blocks, metrics: metrics,
-                    layouts: nil, drawn: []))
+            parsedBatch.append(ParsedBatchItem(message: message, source: source, rows: builtRows, layouts: nil, drawn: []))
         }
         if !parsedBatch.isEmpty {
             applyParsedMessages(parsedBatch, shouldSchedule: false)
@@ -326,8 +323,9 @@ extension TranscriptController {
     private struct ParsedBatchItem {
         let message: TranscriptMessage
         let source: String
-        let blocks: [MarkdownBlock]
-        let metrics: [TextMetrics]
+        /// Built by the worker that parsed the message, so the main thread
+        /// does not build them again (233 ms of an iPhone 14 trace).
+        let rows: [TranscriptRow]
         let layouts: [RowLayout]?
         let drawn: [DrawnBands?]
     }
@@ -369,7 +367,8 @@ extension TranscriptController {
         var heightDeltaSum: CGFloat = 0
         for result in results {
             switch result {
-            case .parsedAndLaidOut(let message, let source, let blocks, let metrics, let blockLayouts, let blockDrawn):
+            case .parsedAndLaidOut(
+                let message, let source, let blocks, let metrics, let blockRows, let blockLayouts, let blockDrawn):
                 guard isCurrentParseSource(source, for: message), parsedMessages[message.id]?.source != source else {
                     continue
                 }
@@ -380,7 +379,7 @@ extension TranscriptController {
                         == true
                 newlyParsed.append(
                     ParsedBatchItem(
-                        message: message, source: source, blocks: blocks, metrics: metrics,
+                        message: message, source: source, rows: blockRows,
                         layouts: matchingLayouts ? blockLayouts : nil,
                         drawn: matchingLayouts ? blockDrawn : []))
             case .layout(let layout, let drawn):
@@ -441,7 +440,7 @@ extension TranscriptController {
             else {
                 continue
             }
-            byIndex[index] = (item.message.rows(from: item.blocks, metrics: item.metrics), item.layouts, item.drawn)
+            byIndex[index] = (item.rows, item.layouts, item.drawn)
         }
         guard !byIndex.isEmpty else { return }
         let sortedIndices = byIndex.keys.sorted()
